@@ -36,9 +36,14 @@ struct RecordRow: View {
                     .lineLimit(1)
                 HStack(spacing: 4) {
                     Text(record.categoryName)
-                    if !record.account.isEmpty {
+                    if record.kind == .transfer {
+                        if record.fee > 0 {
+                            Text("·")
+                            Text("手续费 \(Money.format(record.fee))")
+                        }
+                    } else if !record.accountName.isEmpty {
                         Text("·")
-                        Text(record.account)
+                        Text(record.accountName)
                     }
                     if record.source == "ocr" {
                         Image(systemName: "text.viewfinder")
@@ -52,9 +57,9 @@ struct RecordRow: View {
             }
             Spacer(minLength: 8)
             VStack(alignment: .trailing, spacing: 3) {
-                Text(record.kind.sign + Money.format(record.amount))
+                Text(record.amountText)
                     .font(.system(.body, design: .rounded).weight(.semibold))
-                    .foregroundStyle(record.kind == .income ? Color.green : Color.primary)
+                    .foregroundStyle(amountColor)
                 Text(showDate ? DateText.monthDayTime.string(from: record.date) : DateText.time.string(from: record.date))
                     .font(.caption2)
                     .foregroundStyle(.secondary)
@@ -62,6 +67,14 @@ struct RecordRow: View {
         }
         .padding(.vertical, 2)
         .contentShape(Rectangle())
+    }
+
+    private var amountColor: Color {
+        switch record.kind {
+        case .income: return .green
+        case .expense: return .primary
+        case .transfer, .adjustment: return .secondary
+        }
     }
 }
 

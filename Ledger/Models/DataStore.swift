@@ -10,7 +10,7 @@ enum DataStore {
 
     /// 存储文件名保持 "Ledger" 不变（Application Support/Ledger.store），本地 / iCloud 模式共用同一个文件，切换不丢数据
     private static func makeContainer() -> (container: ModelContainer, status: SyncStatus) {
-        let schema = Schema([LedgerRecord.self, LedgerCategory.self])
+        let schema = Schema([LedgerRecord.self, LedgerCategory.self, LedgerAccount.self])
         var status: SyncStatus = .local
 
         if !ScreenshotDemo.isActive && UserDefaults.standard.bool(forKey: SettingsKey.iCloudSyncEnabled) {
@@ -24,6 +24,7 @@ enum DataStore {
                 do {
                     let container = try ModelContainer(for: schema, configurations: [cloudConfig])
                     seedIfNeeded(container: container)
+                    migrateAccountsIfNeeded(container: container)
                     return (container, .cloud)
                 } catch {
                     status = .failed(error.localizedDescription)
@@ -37,6 +38,7 @@ enum DataStore {
         do {
             let container = try ModelContainer(for: schema, configurations: [localConfig])
             seedIfNeeded(container: container)
+            migrateAccountsIfNeeded(container: container)
             ScreenshotDemo.seed(container: container)   // 仅截图模式下生效
             return (container, status)
         } catch {
@@ -60,7 +62,97 @@ enum DataStore {
                 keep[key] = c
             }
         }
+        // 账户同理：按名称合并
+        let accounts = (try? context.fetch(FetchDescriptor<LedgerAccount>(sortBy: [SortDescriptor(\LedgerAccount.createdAt)]))) ?? []
+        var keepAccounts: [String: LedgerAccount] = [:]
+        for a in accounts {
+            if let primary = keepAccounts[a.name] {
+                for r in a.records ?? [] { r.accountRef = primary }
+                for r in a.incomingTransfers ?? [] { r.toAccount = primary }
+                context.delete(a)
+                changed = true
+            } else {
+                keepAccounts[a.name] = a
+            }
+        }
         if changed { try? context.save() }
+    }
+
+    // MARK: - 账户
+
+    private static let accountMigrationKey = "migration.accounts.v1"
+
+    /// 首次启动新版本时：为旧记录里出现过的每个账户文字创建账户并关联
+    static func migrateAccountsIfNeeded(container: ModelContainer) {
+        guard !UserDefaults.standard.bool(forKey: accountMigrationKey) else { return }
+        let context = ModelContext(container)
+        linkLegacyAccounts(in: context)
+        UserDefaults.standard.set(true, forKey: accountMigrationKey)
+    }
+
+    /// 把 accountRef 为空、但旧文本字段有值的记录关联到同名账户（没有则创建）。导入旧版备份后也会调用。
+    @discardableResult
+    static func linkLegacyAccounts(in context: ModelContext) -> Int {
+        let records = (try? context.fetch(FetchDescriptor<LedgerRecord>())) ?? []
+        var accounts = (try? context.fetch(FetchDescriptor<LedgerAccount>())) ?? []
+        var byName: [String: LedgerAccount] = [:]
+        for a in accounts { byName[a.name] = a }
+        var nextOrder = (accounts.map(\.sortOrder).max() ?? -1) + 1
+        var linked = 0
+        for r in records where r.accountRef == nil {
+            let name = r.account.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !name.isEmpty else { continue }
+            let account: LedgerAccount
+            if let existing = byName[name] {
+                account = existing
+            } else {
+                account = LedgerAccount(name: name, type: AccountType.guess(from: name), sortOrder: nextOrder)
+                nextOrder += 1
+                context.insert(account)
+                accounts.append(account)
+                byName[name] = account
+            }
+            r.accountRef = account
+            linked += 1
+        }
+        if linked > 0 { try? context.save() }
+        return linked
+    }
+
+    static func accounts(in context: ModelContext, includeArchived: Bool = false) -> [LedgerAccount] {
+        let all = (try? context.fetch(FetchDescriptor<LedgerAccount>(sortBy: [SortDescriptor(\LedgerAccount.sortOrder)]))) ?? []
+        return includeArchived ? all : all.filter { !$0.isArchived }
+    }
+
+    static func account(id: UUID, in context: ModelContext) -> LedgerAccount? {
+        let target = id
+        var descriptor = FetchDescriptor<LedgerAccount>(predicate: #Predicate<LedgerAccount> { $0.id == target })
+        descriptor.fetchLimit = 1
+        return (try? context.fetch(descriptor))?.first
+    }
+
+    static func account(named name: String, in context: ModelContext) -> LedgerAccount? {
+        guard !name.isEmpty else { return nil }
+        return accounts(in: context, includeArchived: true).first { $0.name == name }
+    }
+
+    /// 根据 OCR 得到的付款方式线索匹配已有账户
+    static func account(matching hint: AccountHint?, in context: ModelContext) -> LedgerAccount? {
+        guard let hint else { return nil }
+        let list = accounts(in: context)
+        var candidates = list
+        if let typeRaw = hint.type, let type = AccountType(rawValue: typeRaw) {
+            candidates = list.filter { $0.type == type }
+        }
+        if let tail = hint.cardTail,
+           let hit = (candidates.isEmpty ? list : candidates).first(where: { $0.name.contains(tail) || $0.note.contains(tail) }) {
+            return hit
+        }
+        if let bank = hint.bankName {
+            let aliases = AccountHint.aliases(forBank: bank)
+            if let hit = candidates.first(where: { a in aliases.contains(where: { a.name.contains($0) }) }) { return hit }
+        }
+        return hint.type == nil ? nil : candidates.first
     }
 
     /// 首次启动写入默认分类（使用独立的 ModelContext，不依赖主线程）

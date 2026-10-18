@@ -6,6 +6,7 @@ struct SettingsView: View {
     @EnvironmentObject private var lock: AppLockManager
     @Environment(\.modelContext) private var context
     @Query(sort: \LedgerRecord.date, order: .reverse) private var records: [LedgerRecord]
+    @Query(sort: \LedgerAccount.sortOrder) private var accounts: [LedgerAccount]
 
     @AppStorage(SettingsKey.monthlyBudget) private var budget: Double = 0
     @AppStorage(SettingsKey.currencySymbol) private var currencySymbol = "¥"
@@ -155,8 +156,8 @@ struct SettingsView: View {
                 Spacer()
                 Menu {
                     Button("不设置") { defaultAccount = "" }
-                    ForEach(RecordEditorView.accountOptions, id: \.self) { option in
-                        Button(option) { defaultAccount = option }
+                    ForEach(accounts.filter { !$0.isArchived }) { a in
+                        Button(a.name) { defaultAccount = a.name }
                     }
                 } label: {
                     Text(defaultAccount.isEmpty ? "不设置" : defaultAccount)

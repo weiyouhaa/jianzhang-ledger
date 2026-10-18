@@ -9,6 +9,8 @@ struct RecordSnapshot: Sendable {
     let category: String
     let amount: Double
     let account: String
+    let toAccount: String
+    let fee: Double
     let merchant: String
     let note: String
     let source: String
@@ -18,7 +20,9 @@ struct RecordSnapshot: Sendable {
         kind = r.kind.title
         category = r.categoryName
         amount = r.amount
-        account = r.account
+        account = r.accountName
+        toAccount = r.toAccount?.name ?? ""
+        fee = r.fee
         merchant = r.merchant
         note = r.note
         source = r.source
@@ -37,7 +41,7 @@ enum CSVBuilder {
         let f = DateFormatter()
         f.locale = Locale(identifier: "zh_CN")
         f.dateFormat = "yyyy-MM-dd HH:mm"
-        var lines = ["日期,类型,分类,金额,账户,商户,备注,来源"]
+        var lines = ["日期,类型,分类,金额,账户,转入账户,手续费,商户,备注,来源"]
         for r in rows {
             let source: String
             switch r.source {
@@ -47,7 +51,7 @@ enum CSVBuilder {
             }
             lines.append([
                 f.string(from: r.date), r.kind, r.category, String(format: "%.2f", r.amount),
-                r.account, r.merchant, r.note, source,
+                r.account, r.toAccount, r.fee > 0 ? String(format: "%.2f", r.fee) : "", r.merchant, r.note, source,
             ].map(escape).joined(separator: ","))
         }
         // 加 UTF-8 BOM，Excel 打开中文不乱码

@@ -29,7 +29,7 @@ struct CategoryManagerView: View {
         List {
             Section {
                 Picker("类型", selection: $kind) {
-                    ForEach(RecordKind.allCases) { k in Text(k.title).tag(k) }
+                    ForEach(RecordKind.categoryKinds) { k in Text(k.title).tag(k) }
                 }
                 .pickerStyle(.segmented)
             }

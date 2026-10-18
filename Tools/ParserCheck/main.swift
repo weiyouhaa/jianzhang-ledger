@@ -44,5 +44,25 @@ check("千分位", ["订单金额 ¥1,299.00", "京东商城", "共1件商品"],
 check("全角", ["实付款：￥１８．５０", "瑞幸咖啡"], amount: 18.5, merchant: "瑞幸咖啡", category: "餐饮")
 check("无金额", ["你好", "欢迎光临"], amount: nil)
 
+func checkHint(_ name: String, _ lines: [String], type: String?, tail: String? = nil, bank: String? = nil) {
+    let h = ReceiptParser.parse(lines: lines, now: now, calendar: cal).accountHint
+    if h?.type == type && h?.cardTail == tail && h?.bankName == bank {
+        print("✅ 账户 \(name): \(type ?? "nil") \(tail ?? "-") \(bank ?? "-")")
+    } else {
+        failures += 1
+        print("❌ 账户 \(name): got \(String(describing: h))")
+    }
+}
+checkHint("支付宝信用卡", ["账单详情", "滴滴出行", "-23.50", "付款方式 招商银行信用卡(1234)"], type: "credit", tail: "1234", bank: "招商银行")
+checkHint("微信零钱", ["支付成功", "星巴克", "¥35.00", "支付方式 零钱"], type: "wechat")
+checkHint("花呗", ["交易成功", "-99.00", "付款方式 花呗"], type: "consumerCredit")
+checkHint("银行短信", ["【招商银行】您账户1234于10月12日12:30在美团支付交易人民币45.60元"], type: "debit", tail: "1234", bank: "招商银行")
+checkHint("余额宝", ["-18.00", "付款方式 余额宝"], type: "alipay")
+checkHint("无线索", ["合计 18.00"], type: nil)
+let aliases = AccountHint.aliases(forBank: "招商银行")
+if aliases == ["招商银行", "招商", "招行"] { print("✅ 银行别名 \(aliases)") } else { failures += 1; print("❌ 银行别名 \(aliases)") }
+let icbc = AccountHint.aliases(forBank: "中国工商银行")
+if icbc.contains("工行") { print("✅ 银行别名 \(icbc)") } else { failures += 1; print("❌ 银行别名 \(icbc)") }
+
 print(failures == 0 ? "ALL PASSED" : "\(failures) FAILED")
 exit(failures == 0 ? 0 : 1)

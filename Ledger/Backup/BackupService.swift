@@ -8,7 +8,8 @@ import UIKit
 
 struct LedgerBackup: Codable {
     static let formatID = "jianzhang-backup"
-    static let currentVersion = 1
+    /// v2：新增账户、转账（转入账户、手续费）。v1 备份仍可导入。
+    static let currentVersion = 2
 
     var format: String = LedgerBackup.formatID
     var version: Int = LedgerBackup.currentVersion
@@ -17,6 +18,7 @@ struct LedgerBackup: Codable {
     var device: String
     var categories: [CategoryDTO]
     var records: [RecordDTO]
+    var accounts: [AccountDTO]? = nil
     /// 不包含密码、面容 ID 等安全设置
     var settings: SettingsDTO
 
@@ -41,6 +43,26 @@ struct LedgerBackup: Codable {
         var source: String
         var createdAt: Date
         var categoryID: UUID?
+        var accountID: UUID? = nil
+        var toAccountID: UUID? = nil
+        var fee: Double? = nil
+    }
+
+    struct AccountDTO: Codable {
+        var id: UUID
+        var name: String
+        var type: String
+        var initialBalance: Double
+        var creditLimit: Double
+        var billingDay: Int
+        var repaymentDay: Int
+        var icon: String
+        var colorHex: String
+        var note: String
+        var includeInNetWorth: Bool
+        var isArchived: Bool
+        var sortOrder: Int
+        var createdAt: Date
     }
 
     struct SettingsDTO: Codable {
@@ -80,11 +102,13 @@ struct RestoreResult {
     var insertedRecords = 0
     var skippedRecords = 0
     var insertedCategories = 0
+    var insertedAccounts = 0
 
     var summary: String {
         var s = "导入 \(insertedRecords) 笔记录"
         if skippedRecords > 0 { s += "，跳过 \(skippedRecords) 笔已存在的记录" }
         if insertedCategories > 0 { s += "，新增 \(insertedCategories) 个分类" }
+        if insertedAccounts > 0 { s += "，新增 \(insertedAccounts) 个账户" }
         return s + "。"
     }
 }
@@ -105,6 +129,7 @@ enum BackupService {
     static func makeBackup(context: ModelContext) -> LedgerBackup {
         let categories = (try? context.fetch(FetchDescriptor<LedgerCategory>(sortBy: [SortDescriptor(\LedgerCategory.sortOrder)]))) ?? []
         let records = (try? context.fetch(FetchDescriptor<LedgerRecord>(sortBy: [SortDescriptor(\LedgerRecord.date)]))) ?? []
+        let accounts = (try? context.fetch(FetchDescriptor<LedgerAccount>(sortBy: [SortDescriptor(\LedgerAccount.sortOrder)]))) ?? []
         let d = UserDefaults.standard
         let settings = LedgerBackup.SettingsDTO(
             monthlyBudget: d.double(forKey: SettingsKey.monthlyBudget),
@@ -123,8 +148,16 @@ enum BackupService {
             },
             records: records.map {
                 LedgerBackup.RecordDTO(id: $0.id, amount: $0.amount, kind: $0.kindRaw, note: $0.note, merchant: $0.merchant,
-                      account: $0.account, date: $0.date, source: $0.source, createdAt: $0.createdAt,
-                      categoryID: $0.category?.id)
+                      account: $0.accountName, date: $0.date, source: $0.source, createdAt: $0.createdAt,
+                      categoryID: $0.category?.id, accountID: $0.accountRef?.id, toAccountID: $0.toAccount?.id,
+                      fee: $0.fee > 0 ? $0.fee : nil)
+            },
+            accounts: accounts.map {
+                LedgerBackup.AccountDTO(id: $0.id, name: $0.name, type: $0.typeRaw, initialBalance: $0.initialBalance,
+                                        creditLimit: $0.creditLimit, billingDay: $0.billingDay, repaymentDay: $0.repaymentDay,
+                                        icon: $0.icon, colorHex: $0.colorHex, note: $0.note,
+                                        includeInNetWorth: $0.includeInNetWorth, isArchived: $0.isArchived,
+                                        sortOrder: $0.sortOrder, createdAt: $0.createdAt)
             },
             settings: settings
         )
@@ -173,6 +206,10 @@ enum BackupService {
         var result = RestoreResult()
         let existingCategories = (try? context.fetch(FetchDescriptor<LedgerCategory>())) ?? []
         let existingRecords = (try? context.fetch(FetchDescriptor<LedgerRecord>())) ?? []
+        let existingAccounts = (try? context.fetch(FetchDescriptor<LedgerAccount>())) ?? []
+        var accountMap: [UUID: LedgerAccount] = [:]
+        var accountByID: [UUID: LedgerAccount] = [:]
+        var accountByName: [String: LedgerAccount] = [:]
 
         var categoryMap: [UUID: LedgerCategory] = [:]
         var byID: [UUID: LedgerCategory] = [:]
@@ -183,12 +220,40 @@ enum BackupService {
         case .replace:
             for r in existingRecords { context.delete(r) }
             for c in existingCategories { context.delete(c) }
+            for a in existingAccounts { context.delete(a) }
         case .merge:
             for c in existingCategories {
                 byID[c.id] = c
                 byName[c.kindRaw + "|" + c.name] = c
             }
             existingRecordIDs = Set(existingRecords.map(\.id))
+            for a in existingAccounts {
+                accountByID[a.id] = a
+                accountByName[a.name] = a
+            }
+        }
+
+        for dto in backup.accounts ?? [] {
+            if let a = accountByID[dto.id] ?? accountByName[dto.name] {
+                accountMap[dto.id] = a
+                continue
+            }
+            let a = LedgerAccount(name: dto.name, type: AccountType(rawValue: dto.type) ?? .otherAsset,
+                                  initialBalance: dto.initialBalance, sortOrder: dto.sortOrder)
+            a.id = dto.id
+            a.creditLimit = dto.creditLimit
+            a.billingDay = dto.billingDay
+            a.repaymentDay = dto.repaymentDay
+            a.icon = dto.icon
+            a.colorHex = dto.colorHex
+            a.note = dto.note
+            a.includeInNetWorth = dto.includeInNetWorth
+            a.isArchived = dto.isArchived
+            a.createdAt = dto.createdAt
+            context.insert(a)
+            accountMap[dto.id] = a
+            accountByName[dto.name] = a
+            result.insertedAccounts += 1
         }
 
         for dto in backup.categories {
@@ -216,6 +281,9 @@ enum BackupService {
                                  merchant: dto.merchant, account: dto.account, date: dto.date, source: dto.source)
             r.id = dto.id
             r.createdAt = dto.createdAt
+            r.accountRef = dto.accountID.flatMap { accountMap[$0] }
+            r.toAccount = dto.toAccountID.flatMap { accountMap[$0] }
+            r.fee = dto.fee ?? 0
             context.insert(r)
             existingRecordIDs.insert(dto.id)
             result.insertedRecords += 1
@@ -225,6 +293,10 @@ enum BackupService {
             applySettings(backup.settings)
         }
         try context.save()
+        // 旧版（v1）备份只有账户文字：自动创建 / 关联账户
+        let before = DataStore.accounts(in: context, includeArchived: true).count
+        DataStore.linkLegacyAccounts(in: context)
+        result.insertedAccounts += max(0, DataStore.accounts(in: context, includeArchived: true).count - before)
         return result
     }
 

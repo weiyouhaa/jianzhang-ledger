@@ -26,6 +26,9 @@ struct RecognizeReceiptIntent: AppIntent {
     @Parameter(title: "收支类型", description: "留空则自动判断（默认支出）")
     var kind: RecordKindAppEnum?
 
+    @Parameter(title: "账户", description: "留空则根据截图中的付款方式（支付宝 / 微信 / 银行卡尾号 / 信用卡 / 花呗）匹配")
+    var account: AccountEntity?
+
     @Parameter(title: "备注")
     var note: String?
 
@@ -34,6 +37,7 @@ struct RecognizeReceiptIntent: AppIntent {
             \.$confirmBeforeSaving
             \.$category
             \.$kind
+            \.$account
             \.$note
         }
     }
@@ -88,7 +92,9 @@ struct RecognizeReceiptIntent: AppIntent {
             note: note ?? "",
             merchant: merchant,
             date: date,
-            source: "ocr"
+            source: "ocr",
+            accountID: account?.id,
+            accountHint: parsed.accountHint
         )
         let summary = "已记账：" + IntentRecorder.summary(of: record)
         return .result(value: record.amount, dialog: IntentDialog("\(summary)"))

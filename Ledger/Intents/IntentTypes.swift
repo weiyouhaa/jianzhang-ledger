@@ -74,6 +74,58 @@ struct CategoryQuery: EntityStringQuery {
     }
 }
 
+/// 快捷指令中的「账户」
+struct AccountEntity: AppEntity {
+    static var typeDisplayRepresentation: TypeDisplayRepresentation = "账户"
+    static var defaultQuery = AccountQuery()
+
+    let id: UUID
+    let name: String
+    let icon: String
+    let typeTitle: String
+
+    var displayRepresentation: DisplayRepresentation {
+        DisplayRepresentation(
+            title: "\(name)",
+            subtitle: "\(typeTitle)",
+            image: DisplayRepresentation.Image(systemName: icon)
+        )
+    }
+
+    init(id: UUID, name: String, icon: String, typeTitle: String) {
+        self.id = id
+        self.name = name
+        self.icon = icon
+        self.typeTitle = typeTitle
+    }
+
+    init(_ account: LedgerAccount) {
+        self.init(id: account.id, name: account.name, icon: account.iconName, typeTitle: account.type.title)
+    }
+}
+
+struct AccountQuery: EntityStringQuery {
+    private func allAccounts() -> [AccountEntity] {
+        let context = ModelContext(DataStore.shared)
+        let descriptor = FetchDescriptor<LedgerAccount>(sortBy: [SortDescriptor(\LedgerAccount.sortOrder)])
+        let list = (try? context.fetch(descriptor)) ?? []
+        return list.filter { !$0.isArchived }.map { AccountEntity($0) }
+    }
+
+    func entities(for identifiers: [UUID]) async throws -> [AccountEntity] {
+        allAccounts().filter { identifiers.contains($0.id) }
+    }
+
+    func entities(matching string: String) async throws -> [AccountEntity] {
+        let q = string.trimmingCharacters(in: .whitespaces)
+        return allAccounts().filter { $0.name.contains(q) || q.contains($0.name) }
+    }
+
+    func suggestedEntities() async throws -> [AccountEntity] {
+        allAccounts()
+    }
+}
+
 enum LedgerIntentError: Error, CustomLocalizedStringResourceConvertible {
     case unreadableImage
     case noAmount(String)
@@ -98,13 +150,19 @@ enum LedgerIntentError: Error, CustomLocalizedStringResourceConvertible {
 enum IntentRecorder {
     @MainActor
     static func save(amount: Double, kind: RecordKind, categoryID: UUID?, categoryName: String?,
-                     note: String, merchant: String, date: Date, source: String) throws -> LedgerRecord {
+                     note: String, merchant: String, date: Date, source: String,
+                     accountID: UUID? = nil, accountHint: AccountHint? = nil) throws -> LedgerRecord {
         let context = DataStore.shared.mainContext
         let category = categoryID.flatMap { DataStore.category(id: $0, in: context) }
             ?? DataStore.category(named: categoryName, kind: kind, in: context)
-        let account = UserDefaults.standard.string(forKey: SettingsKey.defaultAccount) ?? ""
+        // 账户：指定 > 识图线索匹配 > 默认账户
+        let defaultName = UserDefaults.standard.string(forKey: SettingsKey.defaultAccount) ?? ""
+        let account: LedgerAccount? = accountID.flatMap { DataStore.account(id: $0, in: context) }
+            ?? DataStore.account(matching: accountHint, in: context)
+            ?? DataStore.account(named: defaultName, in: context)
         let record = LedgerRecord(amount: (amount * 100).rounded() / 100, kind: kind, category: category,
-                                  note: note, merchant: merchant, account: account, date: date, source: source)
+                                  note: note, merchant: merchant, account: account?.name ?? "", date: date, source: source)
+        record.accountRef = account
         context.insert(record)
         do {
             try context.save()
@@ -118,6 +176,7 @@ enum IntentRecorder {
         var parts = ["\(record.kind.title) \(Money.format(record.amount))", record.categoryName]
         if !record.merchant.isEmpty { parts.append(record.merchant) }
         if !record.note.isEmpty { parts.append(record.note) }
+        if let a = record.accountRef { parts.append(a.name) }
         parts.append(DateText.monthDayTime.string(from: record.date))
         return parts.joined(separator: " · ")
     }

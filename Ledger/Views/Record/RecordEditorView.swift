@@ -2,14 +2,17 @@ import SwiftUI
 import SwiftData
 import PhotosUI
 
-/// 新建 / 编辑记录
+/// 新建 / 编辑记录（支出、收入、转账；余额校准记录也可在此修改）
 struct RecordEditorView: View {
     let record: LedgerRecord?
     var initialDate: Date = Date()
+    var initialKind: RecordKind = .expense
+    var presetAccountID: UUID? = nil
 
     @Environment(\.modelContext) private var context
     @Environment(\.dismiss) private var dismiss
     @Query(sort: \LedgerCategory.sortOrder) private var allCategories: [LedgerCategory]
+    @Query(sort: \LedgerAccount.sortOrder) private var allAccounts: [LedgerAccount]
     @AppStorage(SettingsKey.defaultAccount) private var defaultAccount = ""
 
     @State private var kind: RecordKind = .expense
@@ -17,7 +20,9 @@ struct RecordEditorView: View {
     @State private var selectedCategoryID: UUID?
     @State private var note = ""
     @State private var merchant = ""
-    @State private var account = ""
+    @State private var accountID: UUID?
+    @State private var toAccountID: UUID?
+    @State private var feeText = ""
     @State private var date = Date()
     @State private var source = "manual"
     @State private var didLoad = false
@@ -28,99 +33,95 @@ struct RecordEditorView: View {
     @State private var showDeleteConfirm = false
     @FocusState private var amountFocused: Bool
 
-    static let accountOptions = ["现金", "支付宝", "微信", "银行卡", "信用卡", "花呗"]
-
     private var categories: [LedgerCategory] {
         allCategories.filter { $0.kind == kind }
     }
 
+    /// 可选账户：未归档的，以及当前记录已关联的
+    private var selectableAccounts: [LedgerAccount] {
+        allAccounts.filter { !$0.isArchived || $0.id == accountID || $0.id == toAccountID }
+    }
+
     private var parsedAmount: Double? { Money.parse(amountText) }
+
+    private var amountValid: Bool {
+        guard let a = parsedAmount else { return false }
+        return kind == .adjustment ? a != 0 : a > 0
+    }
+
+    private var canSave: Bool {
+        guard amountValid else { return false }
+        if kind == .transfer {
+            return accountID != nil && toAccountID != nil && accountID != toAccountID
+        }
+        return true
+    }
 
     var body: some View {
         NavigationStack {
             Form {
                 Section {
-                    Picker("类型", selection: $kind) {
-                        ForEach(RecordKind.allCases) { k in
-                            Text(k.title).tag(k)
+                    if kind == .adjustment {
+                        Label("余额校准（不计入收支统计）", systemImage: "slider.horizontal.3")
+                            .foregroundStyle(.secondary)
+                            .listRowSeparator(.hidden)
+                    } else {
+                        Picker("类型", selection: $kind) {
+                            ForEach(RecordKind.editorKinds) { k in
+                                Text(k.title).tag(k)
+                            }
                         }
+                        .pickerStyle(.segmented)
+                        .listRowSeparator(.hidden)
                     }
-                    .pickerStyle(.segmented)
-                    .listRowSeparator(.hidden)
 
                     HStack(alignment: .firstTextBaseline, spacing: 6) {
                         Text(Money.symbol)
                             .font(.system(size: 28, weight: .semibold, design: .rounded))
                             .foregroundStyle(.secondary)
                         TextField("0.00", text: $amountText)
-                            .keyboardType(.decimalPad)
+                            .keyboardType(kind == .adjustment ? .numbersAndPunctuation : .decimalPad)
                             .font(.system(size: 40, weight: .bold, design: .rounded))
-                            .foregroundStyle(kind == .income ? Color.green : Color.primary)
+                            .foregroundStyle(amountColor)
                             .focused($amountFocused)
                     }
                     .padding(.vertical, 4)
                 }
 
-                Section {
-                    LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 5), spacing: 14) {
-                        ForEach(categories) { c in
-                            VStack(spacing: 6) {
-                                CategoryIcon(icon: c.icon, color: c.color, size: 44, selected: c.id == selectedCategoryID)
-                                Text(c.name)
-                                    .font(.caption2)
-                                    .lineLimit(1)
-                                    .foregroundStyle(c.id == selectedCategoryID ? Color.primary : Color.secondary)
-                            }
-                            .frame(maxWidth: .infinity)
-                            .contentShape(Rectangle())
-                            .onTapGesture {
-                                UISelectionFeedbackGenerator().selectionChanged()
-                                selectedCategoryID = c.id
-                            }
-                        }
+                if kind == .transfer {
+                    transferSection
+                } else if kind == .adjustment {
+                    Section {
+                        accountPicker(title: "账户", selection: $accountID, allowNone: false)
+                    } footer: {
+                        Text("正数表示调增余额，负数表示调减。")
                     }
-                    .padding(.vertical, 6)
-                } header: {
-                    HStack {
-                        Text("分类")
-                        Spacer()
-                        NavigationLink("管理") { CategoryManagerView(initialKind: kind) }
-                            .font(.caption)
-                            .textCase(nil)
-                    }
+                } else {
+                    categorySection
                 }
 
                 Section {
                     DatePicker("时间", selection: $date)
                     TextField("备注", text: $note)
-                    TextField("商户（可选）", text: $merchant)
-                    HStack {
-                        TextField("账户（可选）", text: $account)
-                        Menu {
-                            ForEach(Self.accountOptions, id: \.self) { option in
-                                Button(option) { account = option }
-                            }
-                            if !account.isEmpty {
-                                Button("清空", role: .destructive) { account = "" }
-                            }
-                        } label: {
-                            Image(systemName: "chevron.down.circle")
-                                .foregroundStyle(.secondary)
-                        }
+                    if kind.countsInStats {
+                        TextField("商户（可选）", text: $merchant)
+                        accountPicker(title: "账户", selection: $accountID, allowNone: true)
                     }
                 }
 
-                Section {
-                    PhotosPicker(selection: $photoItem, matching: .images) {
-                        HStack {
-                            Label("从支付截图识别填写", systemImage: "text.viewfinder")
-                            Spacer()
-                            if isRecognizing { ProgressView() }
+                if kind.countsInStats {
+                    Section {
+                        PhotosPicker(selection: $photoItem, matching: .images) {
+                            HStack {
+                                Label("从支付截图识别填写", systemImage: "text.viewfinder")
+                                Spacer()
+                                if isRecognizing { ProgressView() }
+                            }
                         }
+                        .disabled(isRecognizing)
+                    } footer: {
+                        Text("在本机识别金额、商户、时间与付款账户，图片不会上传。")
                     }
-                    .disabled(isRecognizing)
-                } footer: {
-                    Text("在本机识别金额、商户与时间，图片不会上传。")
                 }
 
                 if record != nil {
@@ -130,7 +131,7 @@ struct RecordEditorView: View {
                     }
                 }
             }
-            .navigationTitle(record == nil ? "记一笔" : "编辑记录")
+            .navigationTitle(navTitle)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -139,7 +140,7 @@ struct RecordEditorView: View {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("保存") { save() }
                         .fontWeight(.semibold)
-                        .disabled((parsedAmount ?? 0) <= 0)
+                        .disabled(!canSave)
                 }
                 ToolbarItemGroup(placement: .keyboard) {
                     Spacer()
@@ -147,8 +148,8 @@ struct RecordEditorView: View {
                 }
             }
             .onAppear(perform: load)
-            .onChange(of: kind) { _, _ in
-                if !categories.contains(where: { $0.id == selectedCategoryID }) {
+            .onChange(of: kind) { _, newKind in
+                if newKind.countsInStats && !categories.contains(where: { $0.id == selectedCategoryID }) {
                     selectedCategoryID = categories.first?.id
                 }
             }
@@ -163,6 +164,88 @@ struct RecordEditorView: View {
             }
             .confirmationDialog("确定删除这条记录？", isPresented: $showDeleteConfirm, titleVisibility: .visible) {
                 Button("删除", role: .destructive) { deleteRecord() }
+            }
+        }
+    }
+
+    // MARK: - Sections
+
+    private var navTitle: String {
+        if record == nil { return kind == .transfer ? "转账" : "记一笔" }
+        return kind == .adjustment ? "余额校准" : "编辑记录"
+    }
+
+    private var amountColor: Color {
+        switch kind {
+        case .income: return .green
+        case .expense: return .primary
+        case .transfer, .adjustment: return Color(hex: "#30B0C7")
+        }
+    }
+
+    private var categorySection: some View {
+        Section {
+            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 5), spacing: 14) {
+                ForEach(categories) { c in
+                    VStack(spacing: 6) {
+                        CategoryIcon(icon: c.icon, color: c.color, size: 44, selected: c.id == selectedCategoryID)
+                        Text(c.name)
+                            .font(.caption2)
+                            .lineLimit(1)
+                            .foregroundStyle(c.id == selectedCategoryID ? Color.primary : Color.secondary)
+                    }
+                    .frame(maxWidth: .infinity)
+                    .contentShape(Rectangle())
+                    .onTapGesture {
+                        UISelectionFeedbackGenerator().selectionChanged()
+                        selectedCategoryID = c.id
+                    }
+                }
+            }
+            .padding(.vertical, 6)
+        } header: {
+            HStack {
+                Text("分类")
+                Spacer()
+                NavigationLink("管理") { CategoryManagerView(initialKind: kind) }
+                    .font(.caption)
+                    .textCase(nil)
+            }
+        }
+    }
+
+    private var transferSection: some View {
+        Section {
+            accountPicker(title: "转出账户", selection: $accountID, allowNone: false)
+            accountPicker(title: "转入账户", selection: $toAccountID, allowNone: false)
+            HStack {
+                Text("手续费")
+                Spacer()
+                TextField("0.00", text: $feeText)
+                    .keyboardType(.decimalPad)
+                    .multilineTextAlignment(.trailing)
+                    .frame(maxWidth: 140)
+            }
+        } header: {
+            Text("转账 / 还款")
+        } footer: {
+            if accountID != nil && accountID == toAccountID {
+                Text("转出和转入账户不能相同。").foregroundStyle(.red)
+            } else if allAccounts.isEmpty {
+                Text("还没有账户，请先在「资产」页添加。")
+            } else {
+                Text("转入信用卡 / 花呗即为还款。转账不计入收支统计和预算，手续费从转出账户扣除。")
+            }
+        }
+    }
+
+    private func accountPicker(title: String, selection: Binding<UUID?>, allowNone: Bool) -> some View {
+        Picker(title, selection: selection) {
+            if allowNone || selection.wrappedValue == nil {
+                Text(allowNone ? "不选择" : "请选择").tag(UUID?.none)
+            }
+            ForEach(selectableAccounts) { a in
+                Label(a.name, systemImage: a.iconName).tag(UUID?.some(a.id))
             }
         }
     }
@@ -182,40 +265,57 @@ struct RecordEditorView: View {
             selectedCategoryID = record.category?.id
             note = record.note
             merchant = record.merchant
-            account = record.account
+            accountID = record.accountRef?.id ?? allAccounts.first(where: { $0.name == record.account })?.id
+            toAccountID = record.toAccount?.id
+            feeText = record.fee > 0 ? String(format: "%.2f", record.fee) : ""
             date = record.date
             source = record.source
         } else {
+            kind = initialKind
             date = initialDate
-            account = defaultAccount
-            selectedCategoryID = allCategories.first(where: { $0.kind == .expense })?.id
+            accountID = presetAccountID ?? allAccounts.first(where: { $0.name == defaultAccount && !$0.isArchived })?.id
+            selectedCategoryID = allCategories.first(where: { $0.kind == (initialKind.countsInStats ? initialKind : .expense) })?.id
             amountFocused = true
         }
     }
 
     private func save() {
-        guard let amount = parsedAmount, amount > 0 else {
+        guard let amount = parsedAmount, amountValid else {
             alertMessage = "请输入有效的金额"
             return
         }
-        let category = allCategories.first { $0.id == selectedCategoryID }
-        let trimmedNote = note.trimmingCharacters(in: .whitespacesAndNewlines)
-        let trimmedMerchant = merchant.trimmingCharacters(in: .whitespacesAndNewlines)
-        let trimmedAccount = account.trimmingCharacters(in: .whitespacesAndNewlines)
-
-        if let record {
-            record.amount = amount
-            record.kind = kind
-            record.category = category
-            record.note = trimmedNote
-            record.merchant = trimmedMerchant
-            record.account = trimmedAccount
-            record.date = date
-        } else {
-            let newRecord = LedgerRecord(amount: amount, kind: kind, category: category, note: trimmedNote,
-                                         merchant: trimmedMerchant, account: trimmedAccount, date: date, source: source)
-            context.insert(newRecord)
+        if kind == .transfer {
+            guard accountID != nil, toAccountID != nil, accountID != toAccountID else {
+                alertMessage = "请选择不同的转出和转入账户"
+                return
+            }
         }
+        let category: LedgerCategory? = kind.countsInStats ? allCategories.first(where: { $0.id == selectedCategoryID }) : nil
+        let fromAccount = allAccounts.first(where: { $0.id == accountID })
+        let toAccount: LedgerAccount? = kind == .transfer ? allAccounts.first(where: { $0.id == toAccountID }) : nil
+        let fee = kind == .transfer ? max(0, Money.parse(feeText) ?? 0) : 0
+        let trimmedNote = note.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedMerchant = kind.countsInStats ? merchant.trimmingCharacters(in: .whitespacesAndNewlines) : ""
+
+        let target: LedgerRecord
+        if let record {
+            target = record
+            target.amount = amount
+            target.kind = kind
+            target.note = trimmedNote
+            target.merchant = trimmedMerchant
+            target.date = date
+        } else {
+            target = LedgerRecord(amount: amount, kind: kind, category: nil, note: trimmedNote,
+                                  merchant: trimmedMerchant, date: date, source: source)
+            context.insert(target)
+        }
+        target.category = category
+        target.accountRef = fromAccount
+        target.toAccount = toAccount
+        target.fee = fee
+        target.account = fromAccount?.name ?? ""   // 兼容旧版文本字段
+
         do {
             try context.save()
             UINotificationFeedbackGenerator().notificationOccurred(.success)
@@ -253,6 +353,7 @@ struct RecordEditorView: View {
         }
     }
 
+    @MainActor
     private func apply(_ parsed: ParsedReceipt) {
         guard let amount = parsed.amount else {
             alertMessage = "没有识别到金额，请手动填写"
@@ -267,6 +368,9 @@ struct RecordEditorView: View {
             selectedCategoryID = c.id
         } else if !list.contains(where: { $0.id == selectedCategoryID }) {
             selectedCategoryID = list.first?.id
+        }
+        if let a = DataStore.account(matching: parsed.accountHint, in: context) {
+            accountID = a.id
         }
         source = "ocr"
     }

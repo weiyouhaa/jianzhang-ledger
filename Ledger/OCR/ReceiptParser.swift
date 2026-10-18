@@ -7,7 +7,73 @@ struct ParsedReceipt: Equatable {
     var merchant: String?
     var date: Date?
     var categoryName: String?
+    /// 付款方式线索（支付宝 / 微信 / 银行卡尾号 / 信用卡 / 花呗）
+    var accountHint: AccountHint?
     var rawText: String = ""
+}
+
+/// 从 OCR 文本中提取的付款账户线索
+struct AccountHint: Equatable {
+    /// AccountType 的 rawValue：cash / debit / alipay / wechat / credit / consumerCredit …
+    var type: String?
+    var cardTail: String?
+    var bankName: String?
+
+    /// 「招商银行」→ ["招商银行", "招商", "招行"]
+    static func aliases(forBank bank: String) -> [String] {
+        var list = [bank]
+        var core = bank
+        if core.hasPrefix("中国") && core.count > 4 { core = String(core.dropFirst(2)) }
+        if core.hasSuffix("银行") { core = String(core.dropLast(2)) }
+        if core.count >= 2 {
+            list.append(core)
+            list.append(String(core.prefix(1)) + "行")
+        }
+        if bank == "中国银行" { list.append("中行") }
+        return list
+    }
+}
+
+enum AccountHintParser {
+    private static let bankPattern = try! NSRegularExpression(pattern: #"([\p{Han}]{2,8}?银行)"#)
+    private static let tailPatterns: [NSRegularExpression] = [
+        #"(?:尾号|末四位|末4位|账户|账号)\s*[*＊]*\s*(\d{4})(?!\d)"#,
+        #"\(\s*[*＊]*\s*(\d{4})\s*\)"#,
+    ].map { try! NSRegularExpression(pattern: $0) }
+
+    static func parse(text: String) -> AccountHint? {
+        var hint = AccountHint()
+        let ns = text as NSString
+        let range = NSRange(location: 0, length: ns.length)
+        if let m = bankPattern.firstMatch(in: text, range: range) {
+            hint.bankName = ns.substring(with: m.range(at: 1))
+        }
+        for re in tailPatterns {
+            if let m = re.firstMatch(in: text, range: range) {
+                hint.cardTail = ns.substring(with: m.range(at: 1))
+                break
+            }
+        }
+        if text.contains("信用卡") {
+            hint.type = "credit"
+        } else if ["花呗", "白条", "月付"].contains(where: { text.contains($0) }) {
+            hint.type = "consumerCredit"
+        } else if text.contains("储蓄卡") || text.contains("借记卡") || (hint.bankName != nil && hint.cardTail != nil) {
+            hint.type = "debit"
+        } else if text.contains("零钱") {
+            hint.type = "wechat"
+        } else if text.contains("余额宝") || text.contains("账户余额") {
+            hint.type = "alipay"
+        } else if text.contains("微信支付") {
+            hint.type = "wechat"
+        } else if text.contains("支付宝") {
+            hint.type = "alipay"
+        } else if hint.bankName != nil {
+            hint.type = "debit"
+        }
+        if hint.type == nil && hint.cardTail == nil && hint.bankName == nil { return nil }
+        return hint
+    }
 }
 
 /// 从支付截图 / 小票 / 银行短信的 OCR 文本中提取金额、商户、时间并猜测分类。
@@ -45,6 +111,7 @@ enum ReceiptParser {
         }
 
         result.merchant = merchant(lines: lines, amountLineIndex: best?.lineIndex)
+        result.accountHint = AccountHintParser.parse(text: fullText)
         result.date = date(lines: lines, now: now, calendar: calendar)
 
         if let m = result.merchant, let c = CategoryGuesser.guess(text: m, isIncome: result.isIncome) {

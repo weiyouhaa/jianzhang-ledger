@@ -30,6 +30,11 @@ enum Money {
         return String(format: "%.0f", value)
     }
 
+    /// 资产页隐藏金额
+    static func masked(_ value: Double, hidden: Bool) -> String {
+        hidden ? symbol + "****" : format(value)
+    }
+
     /// 解析用户输入的金额字符串
     static func parse(_ text: String) -> Double? {
         let cleaned = text.replacingOccurrences(of: ",", with: "")
@@ -88,6 +93,7 @@ enum SettingsKey {
     static let appearance = "appearance"          // 0 跟随系统 1 浅色 2 深色
     static let defaultAccount = "defaultAccount"
     static let hideInAppSwitcher = "hideInAppSwitcher"
+    static let hideAmounts = "assets.hideAmounts"
     // iCloud 与备份
     static let iCloudSyncEnabled = "icloud.syncEnabled"
     static let iCloudContainerOK = "icloud.containerAvailable"

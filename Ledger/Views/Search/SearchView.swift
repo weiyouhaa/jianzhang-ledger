@@ -27,6 +27,7 @@ struct SearchView: View {
         return records.filter { r in
             if kindFilter == 1 && r.kind != .expense { return false }
             if kindFilter == 2 && r.kind != .income { return false }
+            if kindFilter == 3 && r.kind.countsInStats { return false }
             if let categoryID, r.category?.id != categoryID { return false }
             if useDateRange && (r.date < start || r.date >= end) { return false }
             if let minAmount, r.amount < minAmount { return false }
@@ -36,7 +37,8 @@ struct SearchView: View {
                 let hit = r.note.localizedCaseInsensitiveContains(q)
                     || r.merchant.localizedCaseInsensitiveContains(q)
                     || r.categoryName.localizedCaseInsensitiveContains(q)
-                    || r.account.localizedCaseInsensitiveContains(q)
+                    || r.accountName.localizedCaseInsensitiveContains(q)
+                    || (r.toAccount?.name.localizedCaseInsensitiveContains(q) ?? false)
                     || amountString.contains(q)
                 if !hit { return false }
             }
@@ -48,6 +50,7 @@ struct SearchView: View {
         switch kindFilter {
         case 1: return categories.filter { $0.kind == .expense }
         case 2: return categories.filter { $0.kind == .income }
+        case 3: return []
         default: return categories
         }
     }
@@ -63,6 +66,7 @@ struct SearchView: View {
                     Text("全部").tag(0)
                     Text("支出").tag(1)
                     Text("收入").tag(2)
+                    Text("转账").tag(3)
                 }
                 .pickerStyle(.segmented)
 

@@ -90,6 +90,9 @@ jobs:
           shoot lock     light 05-lock
           shoot search   light 06-search
           shoot backup   light 09-backup-settings
+          shoot assets   light 10-assets
+          shoot account  light 11-account-detail
+          shoot assets   dark  12-assets-dark
           shoot home     dark  07-home-dark
           shoot stats    dark  08-stats-dark
           ls -l screenshots

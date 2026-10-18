@@ -53,7 +53,8 @@ struct StatsView: View {
 
     var body: some View {
         let r = range
-        let periodRecords = allRecords.filter { $0.date >= r.start && $0.date < r.end }
+        // 转账与余额校准不计入统计
+        let periodRecords = allRecords.filter { $0.date >= r.start && $0.date < r.end && $0.kind.countsInStats }
         let kindRecords = periodRecords.filter { $0.kind == kind }
         let total = kindRecords.reduce(0) { $0 + $1.amount }
         let totals = categoryTotals(kindRecords)
@@ -83,7 +84,7 @@ struct StatsView: View {
                     }
 
                     Picker("类型", selection: $kind) {
-                        ForEach(RecordKind.allCases) { k in Text(k.title).tag(k) }
+                        ForEach(RecordKind.categoryKinds) { k in Text(k.title).tag(k) }
                     }
                     .pickerStyle(.segmented)
 

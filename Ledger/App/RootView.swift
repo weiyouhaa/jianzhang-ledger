@@ -84,9 +84,12 @@ struct MainTabView: View {
             StatsView()
                 .tabItem { Label("统计", systemImage: "chart.pie.fill") }
                 .tag(1)
+            AssetsView()
+                .tabItem { Label("资产", systemImage: "wallet.pass.fill") }
+                .tag(2)
             SettingsView()
                 .tabItem { Label("设置", systemImage: "gearshape.fill") }
-                .tag(2)
+                .tag(3)
         }
     }
 }
