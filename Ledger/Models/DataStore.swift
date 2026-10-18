@@ -5,10 +5,11 @@ import SwiftData
 enum DataStore {
     static let shared: ModelContainer = {
         let schema = Schema([LedgerRecord.self, LedgerCategory.self])
-        let config = ModelConfiguration("Ledger", schema: schema, isStoredInMemoryOnly: false, allowsSave: true)
+        let config = ModelConfiguration("Ledger", schema: schema, isStoredInMemoryOnly: ScreenshotDemo.isActive, allowsSave: true)
         do {
             let container = try ModelContainer(for: schema, configurations: [config])
             seedIfNeeded(container: container)
+            ScreenshotDemo.seed(container: container)   // 仅截图模式下生效
             return container
         } catch {
             fatalError("无法创建数据存储：\(error)")

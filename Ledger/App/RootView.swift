@@ -62,7 +62,7 @@ struct RootView: View {
 }
 
 struct MainTabView: View {
-    @State private var tab = 0
+    @State private var tab = ScreenshotDemo.initialTab
 
     var body: some View {
         TabView(selection: $tab) {

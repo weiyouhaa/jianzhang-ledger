@@ -37,7 +37,12 @@ final class AppLockManager: ObservableObject {
     }
 
     init() {
-        let enabled = PasscodeStore.isSet
+        let enabled: Bool
+        if let demo = ScreenshotDemo.screen {
+            enabled = (demo == "lock")   // 截图模式：只有 lock 页面显示锁屏
+        } else {
+            enabled = PasscodeStore.isSet
+        }
         passcodeEnabled = enabled
         isLocked = enabled
         biometricsEnabled = UserDefaults.standard.bool(forKey: Keys.biometrics)

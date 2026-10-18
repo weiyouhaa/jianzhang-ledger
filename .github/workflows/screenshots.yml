@@ -1,0 +1,109 @@
+name: UI screenshots (Simulator)
+
+# 手动触发：在 iOS 模拟器上以截图模式启动 App，依次截取主要页面
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  screenshots:
+    runs-on: macos-15
+    timeout-minutes: 40
+    env:
+      BUNDLE_ID: com.fve.ledger
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Select latest stable Xcode
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest-stable
+
+      - name: Install XcodeGen & generate project
+        run: |
+          brew install xcodegen
+          xcodegen generate
+
+      - name: Pick simulator
+        run: |
+          UDID=$(xcrun simctl list devices available -j | python3 -c '
+          import json, sys
+          data = json.load(sys.stdin)["devices"]
+          iphones = []
+          for runtime, devs in data.items():
+              if "iOS" not in runtime:
+                  continue
+              ver = tuple(int(x) for x in runtime.split("iOS-")[-1].split("-") if x.isdigit())
+              for d in devs:
+                  if d["name"].startswith("iPhone"):
+                      iphones.append((ver, d["name"], d["udid"]))
+          prefs = ["iPhone 16 Pro", "iPhone 17 Pro", "iPhone 16", "iPhone 17"]
+          iphones.sort(reverse=True)
+          for p in prefs:
+              for v, n, u in iphones:
+                  if n == p:
+                      print(u); sys.exit()
+          print(iphones[0][2])
+          ')
+          echo "UDID=$UDID" >> "$GITHUB_ENV"
+          xcrun simctl list devices | grep "$UDID"
+
+      - name: Build for simulator (Debug)
+        run: |
+          set -o pipefail
+          xcodebuild build \
+            -project Ledger.xcodeproj -scheme Ledger -configuration Debug \
+            -destination "id=$UDID" -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO \
+            | tee "$RUNNER_TEMP/sim-build.log" | grep -E "error:|BUILD" || true
+          APP=$(find build/Build/Products/Debug-iphonesimulator -maxdepth 1 -name "*.app" | head -1)
+          test -n "$APP" || { tail -n 200 "$RUNNER_TEMP/sim-build.log"; exit 1; }
+          echo "APP=$APP" >> "$GITHUB_ENV"
+
+      - name: Boot simulator & install
+        run: |
+          xcrun simctl boot "$UDID" || true
+          xcrun simctl bootstatus "$UDID" -b
+          xcrun simctl status_bar "$UDID" override --time "9:41" --batteryState charged --batteryLevel 100 \
+            --cellularMode active --cellularBars 4 --wifiBars 3 || true
+          xcrun simctl install "$UDID" "$APP"
+
+      - name: Capture screenshots
+        run: |
+          mkdir -p screenshots
+          shoot() {
+            local screen=$1 appearance=$2 name=$3
+            xcrun simctl ui "$UDID" appearance "$appearance"
+            xcrun simctl terminate "$UDID" "$BUNDLE_ID" 2>/dev/null || true
+            xcrun simctl launch "$UDID" "$BUNDLE_ID" -UIScreenshotDemo "$screen" \
+              -AppleLanguages "(zh-Hans)" -AppleLocale zh_CN
+            sleep 6
+            xcrun simctl io "$UDID" screenshot "screenshots/$name.png"
+            echo "captured $name"
+          }
+          shoot home     light 01-home
+          shoot add      light 02-add-record
+          shoot stats    light 03-stats
+          shoot settings light 04-settings
+          shoot lock     light 05-lock
+          shoot search   light 06-search
+          shoot home     dark  07-home-dark
+          shoot stats    dark  08-stats-dark
+          ls -l screenshots
+
+      - name: Upload screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: screenshots
+          path: screenshots/*.png
+          if-no-files-found: warn
+
+      - name: Upload build log
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sim-build-log
+          path: ${{ runner.temp }}/sim-build.log

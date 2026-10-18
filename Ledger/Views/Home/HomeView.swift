@@ -9,6 +9,7 @@ struct HomeView: View {
     @State private var month: Date = DateText.calendar.startOfMonth(for: Date())
     @State private var editorTarget: EditorTarget?
     @State private var pendingDelete: LedgerRecord?
+    @State private var showDemoSearch = false
 
     enum EditorTarget: Identifiable {
         case new
@@ -146,6 +147,12 @@ struct HomeView: View {
                 .padding(.bottom, 20)
                 .accessibilityLabel("记一笔")
             }
+            .task {
+                // 截图模式：直接打开记一笔 / 搜索
+                if ScreenshotDemo.screen == "add" && editorTarget == nil { editorTarget = .new }
+                if ScreenshotDemo.screen == "search" && !showDemoSearch { showDemoSearch = true }
+            }
+            .navigationDestination(isPresented: $showDemoSearch) { SearchView() }
             .sheet(item: $editorTarget) { target in
                 switch target {
                 case .new:
