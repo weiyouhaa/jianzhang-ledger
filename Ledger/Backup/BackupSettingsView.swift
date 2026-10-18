@@ -331,6 +331,12 @@ struct BackupPreviewView: View {
                     } label: {
                         Label("替换全部数据", systemImage: "arrow.counterclockwise")
                     }
+                    .confirmationDialog("替换全部数据？", isPresented: $showReplaceConfirm, titleVisibility: .visible) {
+                        Button("删除现有数据并导入", role: .destructive) { start(.replace) }
+                        Button("取消", role: .cancel) {}
+                    } message: {
+                        Text("当前所有记录、分类和账户将被删除，且无法撤销。")
+                    }
                 } footer: {
                     Text("合并：按记录 ID 去重，已存在的记录跳过，同名分类自动对应。替换：删除当前所有记录和分类后导入，并恢复预算等设置。")
                 }
@@ -339,11 +345,6 @@ struct BackupPreviewView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("取消") { dismiss() } }
-            }
-            .confirmationDialog("替换全部数据？", isPresented: $showReplaceConfirm, titleVisibility: .visible) {
-                Button("删除现有数据并导入", role: .destructive) { start(.replace) }
-            } message: {
-                Text("当前所有记录和分类将被删除，且无法撤销。")
             }
             .sheet(item: verifyBinding) { wrapper in
                 PasscodeVerifyView(reason: wrapper.mode == .replace ? "替换数据前请验证 App 密码" : "恢复数据前请验证 App 密码") {

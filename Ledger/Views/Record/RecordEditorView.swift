@@ -121,6 +121,15 @@ struct RecordEditorView: View {
                             }
                         }
                         .disabled(isRecognizing)
+                        .confirmationDialog("识别到 \(detectedReceipts.count) 笔交易，选择要填写的一笔", isPresented: $showReceiptPicker,
+                                            titleVisibility: .visible) {
+                            ForEach(Array(detectedReceipts.enumerated()), id: \.offset) { _, r in
+                                Button(Self.receiptTitle(r)) { apply(r) }
+                            }
+                            Button("取消", role: .cancel) {}
+                        } message: {
+                            Text("其余几笔可再次识别后选择，或用快捷指令「识图记账」一次全部记入。")
+                        }
                     } footer: {
                         Text("在本机识别金额、商户、时间与付款账户，图片不会上传。")
                     }
@@ -130,6 +139,13 @@ struct RecordEditorView: View {
                     Section {
                         Button("删除这条记录", role: .destructive) { showDeleteConfirm = true }
                             .frame(maxWidth: .infinity)
+                            // 挂在按钮上：iOS 26 的气泡指向这个按钮，iOS 17/18 仍是底部操作表
+                            .confirmationDialog("删除这条记录？", isPresented: $showDeleteConfirm, titleVisibility: .visible) {
+                                Button("删除", role: .destructive) { deleteRecord() }
+                                Button("取消", role: .cancel) {}
+                            } message: {
+                                Text("\(record?.deleteSummary ?? "")\n删除后无法恢复。")
+                            }
                     }
                 }
             }
@@ -164,18 +180,7 @@ struct RecordEditorView: View {
             } message: {
                 Text(alertMessage ?? "")
             }
-            .confirmationDialog("识别到 \(detectedReceipts.count) 笔交易，选择要填写的一笔", isPresented: $showReceiptPicker,
-                                titleVisibility: .visible) {
-                ForEach(Array(detectedReceipts.enumerated()), id: \.offset) { _, r in
-                    Button(Self.receiptTitle(r)) { apply(r) }
-                }
-                Button("取消", role: .cancel) {}
-            } message: {
-                Text("其余几笔可再次识别后选择，或用快捷指令「识图记账」一次全部记入。")
-            }
-            .confirmationDialog("确定删除这条记录？", isPresented: $showDeleteConfirm, titleVisibility: .visible) {
-                Button("删除", role: .destructive) { deleteRecord() }
-            }
+
         }
     }
 

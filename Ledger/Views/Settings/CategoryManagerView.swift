@@ -76,16 +76,17 @@ struct CategoryManagerView: View {
                 CategoryEditorView(category: c, kind: c.kind, nextSortOrder: c.sortOrder)
             }
         }
-        .confirmationDialog("删除分类「\(pendingDelete?.name ?? "")」？", isPresented: deleteBinding, titleVisibility: .visible) {
+        .alert("删除分类「\(pendingDelete?.name ?? "")」？", isPresented: deleteBinding, presenting: pendingDelete) { c in
             Button("删除", role: .destructive) {
-                if let c = pendingDelete {
+                pendingDelete = nil
+                withAnimation {
                     context.delete(c)
                     try? context.save()
                 }
-                pendingDelete = nil
             }
-        } message: {
-            Text("该分类下的 \(pendingDelete?.records?.count ?? 0) 笔记录将变为「未分类」。")
+            Button("取消", role: .cancel) { pendingDelete = nil }
+        } message: { c in
+            Text("该分类下的 \(c.records?.count ?? 0) 笔记录将变为「未分类」。")
         }
     }
 

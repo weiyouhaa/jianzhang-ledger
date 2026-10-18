@@ -151,6 +151,10 @@ struct HomeView: View {
                 // 截图模式：直接打开记一笔 / 搜索
                 if ScreenshotDemo.screen == "add" && editorTarget == nil { editorTarget = .new }
                 if ScreenshotDemo.screen == "search" && !showDemoSearch { showDemoSearch = true }
+                if ScreenshotDemo.screen == "delete" && pendingDelete == nil {
+                    try? await Task.sleep(nanoseconds: 800_000_000)
+                    pendingDelete = dayGroups.first?.records.first
+                }
             }
             .navigationDestination(isPresented: $showDemoSearch) { SearchView() }
             .sheet(item: $editorTarget) { target in
@@ -161,15 +165,18 @@ struct HomeView: View {
                     RecordEditorView(record: record)
                 }
             }
-            .confirmationDialog("删除这条记录？", isPresented: deleteDialogBinding, titleVisibility: .visible) {
+            // 左滑删除用居中的 alert：iOS 26 的 confirmationDialog 会变成指向所挂视图的气泡，离被滑动的行很远
+            .alert("删除这条记录？", isPresented: deleteDialogBinding, presenting: pendingDelete) { r in
                 Button("删除", role: .destructive) {
-                    if let r = pendingDelete {
+                    pendingDelete = nil
+                    withAnimation {
                         context.delete(r)
                         try? context.save()
                     }
-                    pendingDelete = nil
                 }
                 Button("取消", role: .cancel) { pendingDelete = nil }
+            } message: { r in
+                Text("\(r.deleteSummary)\n删除后无法恢复。")
             }
         }
     }

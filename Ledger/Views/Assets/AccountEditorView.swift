@@ -128,6 +128,12 @@ struct AccountEditorView: View {
                 if account != nil {
                     Section {
                         Button("删除账户", role: .destructive) { showDeleteConfirm = true }
+                            .confirmationDialog("删除「\(name)」？", isPresented: $showDeleteConfirm, titleVisibility: .visible) {
+                                Button("删除", role: .destructive) { delete() }
+                                Button("取消", role: .cancel) {}
+                            } message: {
+                                Text("相关的 \(account?.allEntries.count ?? 0) 笔记录会保留，但不再关联此账户。此操作不可撤销。")
+                            }
                     } footer: {
                         Text("删除后，相关记录会保留，但不再关联此账户。只是不想再用时建议「归档」。")
                     }
@@ -141,11 +147,6 @@ struct AccountEditorView: View {
                     Button("保存") { save() }
                         .disabled(name.trimmingCharacters(in: .whitespaces).isEmpty)
                 }
-            }
-            .confirmationDialog("删除「\(name)」？", isPresented: $showDeleteConfirm, titleVisibility: .visible) {
-                Button("删除", role: .destructive) { delete() }
-            } message: {
-                Text("此操作不可撤销")
             }
             .alert("无法保存", isPresented: Binding(get: { errorMessage != nil }, set: { if !$0 { errorMessage = nil } })) {
                 Button("好", role: .cancel) {}

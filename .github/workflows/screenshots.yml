@@ -93,6 +93,7 @@ jobs:
           shoot assets   light 10-assets
           shoot account  light 11-account-detail
           shoot assets   dark  12-assets-dark
+          shoot delete   light 13-delete-confirm
           shoot home     dark  07-home-dark
           shoot stats    dark  08-stats-dark
           ls -l screenshots

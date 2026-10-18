@@ -137,6 +137,13 @@ final class LedgerRecord {
         return categoryName
     }
 
+    /// 删除确认里显示的摘要：「华南畅行高速科技… -¥46.00 · 10月17日 20:12」
+    var deleteSummary: String {
+        var title = displayTitle
+        if title.count > 12 { title = String(title.prefix(12)) + "…" }
+        return "\(title) \(amountText) · \(DateText.monthDayTime.string(from: date))"
+    }
+
     /// 列表中显示的金额文本
     var amountText: String {
         switch kind {

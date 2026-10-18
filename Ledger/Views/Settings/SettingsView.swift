@@ -83,11 +83,6 @@ struct SettingsView: View {
             } message: {
                 Text(biometricError ?? "")
             }
-            .confirmationDialog("删除全部记录？", isPresented: $showDeleteAll, titleVisibility: .visible) {
-                Button("删除全部 \(records.count) 笔记录", role: .destructive) { deleteAll() }
-            } message: {
-                Text("此操作不可恢复，建议先导出 CSV 备份。分类会保留。")
-            }
         }
     }
 
@@ -246,6 +241,12 @@ struct SettingsView: View {
                 Label("删除全部记录", systemImage: "trash")
             }
             .disabled(records.isEmpty)
+            .confirmationDialog("删除全部记录？", isPresented: $showDeleteAll, titleVisibility: .visible) {
+                Button("删除全部 \(records.count) 笔记录", role: .destructive) { deleteAll() }
+                Button("取消", role: .cancel) {}
+            } message: {
+                Text("此操作不可恢复，建议先导出 CSV 或 JSON 备份。分类和账户会保留。")
+            }
         } header: {
             Text("数据")
         } footer: {
