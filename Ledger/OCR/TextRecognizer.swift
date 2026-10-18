@@ -11,6 +11,11 @@ enum TextRecognizer {
 
     /// 识别图片中的文字，按「行」返回（同一水平线上的文本块会合并成一行，从上到下排序）
     static func recognizeLines(in data: Data) async throws -> [String] {
+        try await recognizeOCRLines(in: data).map(\.text)
+    }
+
+    /// 带位置信息的行（midY：0 = 顶部，1 = 底部；height：该行最高文本块的高度），用于多笔拆分与大字金额识别
+    static func recognizeOCRLines(in data: Data) async throws -> [OCRLine] {
         guard let source = CGImageSourceCreateWithData(data as CFData, nil),
               let cgImage = CGImageSourceCreateImageAtIndex(source, 0, nil) else {
             throw RecognizerError.invalidImage
@@ -45,7 +50,7 @@ enum TextRecognizer {
     }
 
     /// Vision 坐标原点在左下角，y 越大越靠上
-    private static func groupIntoLines(_ observations: [VNRecognizedTextObservation]) -> [String] {
+    private static func groupIntoLines(_ observations: [VNRecognizedTextObservation]) -> [OCRLine] {
         let blocks: [Block] = observations.compactMap { obs in
             guard let candidate = obs.topCandidates(1).first else { return nil }
             let box = obs.boundingBox
@@ -63,7 +68,10 @@ enum TextRecognizer {
             }
         }
         return rows.map { row in
-            row.sorted { $0.minX < $1.minX }.map(\.text).joined(separator: " ")
+            let text = row.sorted { $0.minX < $1.minX }.map(\.text).joined(separator: " ")
+            let mid = row.map(\.midY).reduce(0, +) / CGFloat(row.count)
+            let height = row.map(\.height).max() ?? 0
+            return OCRLine(text, midY: Double(1 - mid), height: Double(height))
         }
     }
 
@@ -78,7 +86,17 @@ enum TextRecognizer {
 /// OCR + 解析的组合入口，App 内「从截图识别」和快捷指令共用
 enum ReceiptRecognizer {
     static func recognize(imageData: Data) async throws -> ParsedReceipt {
-        let lines = try await TextRecognizer.recognizeLines(in: imageData)
-        return ReceiptParser.parse(lines: lines)
+        let all = try await recognizeAll(imageData: imageData)
+        return all.first ?? ParsedReceipt(rawText: "")
+    }
+
+    /// 一张截图里的全部交易（从上到下）。没有识别到金额时返回一个 amount 为 nil 的结果，便于给出原文提示。
+    static func recognizeAll(imageData: Data, now: Date = Date()) async throws -> [ParsedReceipt] {
+        let lines = try await TextRecognizer.recognizeOCRLines(in: imageData)
+        let all = ReceiptParser.parseAll(lines: lines, now: now)
+        if all.isEmpty {
+            return [ReceiptParser.parse(lines: lines.map(\.text), now: now)]
+        }
+        return all
     }
 }

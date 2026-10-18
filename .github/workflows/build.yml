@@ -40,6 +40,14 @@ jobs:
           xcodebuild -version
           swift --version
 
+      - name: Parser tests (text samples + Vision on real screenshot)
+        continue-on-error: true
+        run: |
+          swiftc Ledger/OCR/ReceiptParser.swift Tools/ParserCheck/main.swift -o "$RUNNER_TEMP/parsercheck"
+          "$RUNNER_TEMP/parsercheck"
+          swiftc Ledger/OCR/ReceiptParser.swift Ledger/OCR/TextRecognizer.swift Tools/VisionCheck/main.swift -o "$RUNNER_TEMP/visioncheck"
+          for f in Tests/Fixtures/*.png; do echo "### $f"; "$RUNNER_TEMP/visioncheck" "$f"; done
+
       - name: Install XcodeGen
         run: brew install xcodegen
 

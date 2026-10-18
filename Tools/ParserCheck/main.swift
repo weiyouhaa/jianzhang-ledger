@@ -64,5 +64,126 @@ if aliases == ["招商银行", "招商", "招行"] { print("✅ 银行别名 \(a
 let icbc = AccountHint.aliases(forBank: "中国工商银行")
 if icbc.contains("工行") { print("✅ 银行别名 \(icbc)") } else { failures += 1; print("❌ 银行别名 \(icbc)") }
 
+// MARK: - 多笔拆分 / 收支 / 时间（真实截图 OCR 样例）
+
+struct Expect {
+    var amount: Double
+    var income = false
+    var merchant: String? = nil
+    var category: String? = nil
+    var date: String? = nil
+    var accountType: String? = nil
+    var tail: String? = nil
+}
+
+func checkAll(_ name: String, _ lines: [OCRLine], _ expected: [Expect]) {
+    let rs = ReceiptParser.parseAll(lines: lines, now: now, calendar: cal)
+    var errs: [String] = []
+    if rs.count != expected.count { errs.append("count \(rs.count) != \(expected.count)") }
+    for (i, (r, e)) in zip(rs, expected).enumerated() {
+        var p: [String] = []
+        if r.amount != e.amount { p.append("amount \(String(describing: r.amount))") }
+        if r.isIncome != e.income { p.append("income \(r.isIncome)") }
+        if let m = e.merchant, r.merchant != m { p.append("merchant \(r.merchant ?? "nil")") }
+        if let c = e.category, r.categoryName != c { p.append("category \(r.categoryName ?? "nil")") }
+        if let d = e.date, fmt(r.date) != d { p.append("date \(fmt(r.date))") }
+        if let t = e.accountType, r.accountHint?.type != t { p.append("account \(r.accountHint?.type ?? "nil")") }
+        if let t = e.tail, r.accountHint?.cardTail != t { p.append("tail \(r.accountHint?.cardTail ?? "nil")") }
+        if !p.isEmpty { errs.append("#\(i + 1): " + p.joined(separator: ", ")) }
+    }
+    if errs.isEmpty {
+        print("✅ \(name): \(rs.count) 笔")
+        for r in rs {
+            print("    \(r.isIncome ? "收入" : "支出") ¥\(r.amount ?? -1) \(r.merchant ?? "-") \(r.categoryName ?? "-") \(fmt(r.date)) \(r.accountHint?.type ?? "-") \(r.accountHint?.cardTail ?? "")")
+        }
+    } else {
+        failures += 1
+        print("❌ \(name): " + errs.joined(separator: "; "))
+        for r in rs { print("    got: \(r.isIncome ? "收入" : "支出") \(String(describing: r.amount)) \(r.merchant ?? "-") \(r.categoryName ?? "-") \(fmt(r.date))") }
+    }
+}
+
+// 微信支付通知列表：两笔（Vision 行输出，含头像误识别「C」「é」与行高）
+let wechatTwo: [OCRLine] = [
+    OCRLine("8:50", midY: 0.031, height: 0.020),
+    OCRLine("99", midY: 0.031, height: 0.014),
+    OCRLine("微信支付", midY: 0.081, height: 0.018),
+    OCRLine("昨天 下午3:25", midY: 0.136, height: 0.015),
+    OCRLine("C 阿芳", midY: 0.191, height: 0.018),
+    OCRLine("使用零钱支付", midY: 0.280, height: 0.017),
+    OCRLine("¥ 18.00", midY: 0.333, height: 0.040),
+    OCRLine("交易状态 支付成功，对方已收款", midY: 0.410, height: 0.017),
+    OCRLine("查看交易详情", midY: 0.478, height: 0.017),
+    OCRLine("留言 可给对方留言复购、咨询", midY: 0.540, height: 0.017),
+    OCRLine("昨天 晚上8:12", midY: 0.607, height: 0.015),
+    OCRLine("é 华南畅行高速科技有限公司", midY: 0.664, height: 0.018),
+    OCRLine("使用交通银行信用卡（7316）支付", midY: 0.750, height: 0.017),
+    OCRLine("¥46.00", midY: 0.802, height: 0.040),
+    OCRLine("账单详情 >", midY: 0.856, height: 0.016),
+    OCRLine("我的账单 支付服务 优惠", midY: 0.955, height: 0.016),
+]
+let wechatExpect = [
+    Expect(amount: 18, merchant: "阿芳", date: "2026-10-17 15:25", accountType: "wechat"),
+    Expect(amount: 46, merchant: "华南畅行高速科技有限公司", category: "交通", date: "2026-10-17 20:12",
+           accountType: "credit", tail: "7316"),
+]
+checkAll("微信通知两笔（含位置）", wechatTwo, wechatExpect)
+checkAll("微信通知两笔（纯文本）", wechatTwo.map { OCRLine($0.text) }, wechatExpect)
+let wechatHint = ReceiptParser.parseAll(lines: wechatTwo, now: now, calendar: cal).last?.accountHint
+if wechatHint?.bankName == "交通银行" { print("✅ 银行名 交通银行") } else { failures += 1; print("❌ 银行名 \(String(describing: wechatHint))") }
+
+// 头像在单独一行、没有日期标题，只靠两个大字金额拆分
+checkAll("无日期标题两笔", [
+    OCRLine("C", midY: 0.19, height: 0.018), OCRLine("阿芳", midY: 0.192, height: 0.018),
+    OCRLine("使用零钱支付", midY: 0.28, height: 0.017), OCRLine("￥18.00", midY: 0.33, height: 0.04),
+    OCRLine("交易状态 支付成功,对方已收款", midY: 0.41, height: 0.017),
+    OCRLine("华南畅行高速科技有限公司", midY: 0.66, height: 0.018),
+    OCRLine("使用交通银行信用卡 (7316) 支付", midY: 0.75, height: 0.017), OCRLine("￥46.00", midY: 0.80, height: 0.04),
+], [Expect(amount: 18, merchant: "阿芳"), Expect(amount: 46, merchant: "华南畅行高速科技有限公司", category: "交通")])
+
+// 支付宝账单列表
+checkAll("支付宝账单列表", [
+    OCRLine("账单"), OCRLine("全部 支出 收入"), OCRLine("10月 支出¥2,345.60 收入¥1.32"),
+    OCRLine("滴滴出行 -23.50"), OCRLine("交通出行 今天 08:45"),
+    OCRLine("盒马鲜生 -286.40"), OCRLine("日用百货 昨天 19:20"),
+    OCRLine("余额宝收益 +1.32"), OCRLine("理财 10-16 15:00"),
+], [
+    Expect(amount: 23.5, merchant: "滴滴出行", category: "交通", date: "2026-10-18 08:45"),
+    Expect(amount: 286.4, merchant: "盒马鲜生", category: "购物", date: "2026-10-17 19:20"),
+    Expect(amount: 1.32, income: true, merchant: "余额宝收益", category: "理财", date: "2026-10-16 15:00"),
+])
+
+// 两条银行短信
+checkAll("银行短信两条", [
+    OCRLine("【招商银行】您账户1234于10月17日20:12在美团支付交易人民币45.60元，可用余额1234.56元。"),
+    OCRLine("【交通银行】您尾号7316的信用卡于10月17日12:05消费人民币46.00元。"),
+    OCRLine("【工商银行】您尾号6688卡10月15日10:00工资收入人民币16800.00元，余额20000.00元。"),
+], [
+    Expect(amount: 45.6, merchant: "美团", category: "餐饮", date: "2026-10-17 20:12", accountType: "debit", tail: "1234"),
+    Expect(amount: 46, date: "2026-10-17 12:05", accountType: "credit", tail: "7316"),
+    Expect(amount: 16800, income: true, category: "工资", date: "2026-10-15 10:00", tail: "6688"),
+])
+
+// 微信收款到账（收入）、退款（收入）、普通支付（支出）
+checkAll("微信收款", [OCRLine("微信支付"), OCRLine("今天 上午10:02"), OCRLine("二维码收款到账"), OCRLine("+¥58.00"),
+                    OCRLine("付款方 张三")],
+         [Expect(amount: 58, income: true, merchant: "张三", date: "2026-10-18 10:02")])
+checkAll("退款", [OCRLine("退款成功"), OCRLine("¥99.00"), OCRLine("退款方式 原路退回 花呗")],
+         [Expect(amount: 99, income: true, category: "退款")])
+checkAll("对方已收款=支出", [OCRLine("支付成功,对方已收款"), OCRLine("¥8.00"), OCRLine("收款方 李记早点")],
+         [Expect(amount: 8, income: false, merchant: "李记早点", category: "餐饮")])
+
+// 时段与星期
+checkAll("凌晨", [OCRLine("前天 凌晨12:30"), OCRLine("付款金额"), OCRLine("¥30.00")], [Expect(amount: 30, date: "2026-10-16 00:30")])
+checkAll("中午", [OCRLine("昨天 中午12:15"), OCRLine("付款金额"), OCRLine("¥30.00")], [Expect(amount: 30, date: "2026-10-17 12:15")])
+checkAll("星期", [OCRLine("星期四 晚上9:05"), OCRLine("使用零钱支付"), OCRLine("¥30.00")], [Expect(amount: 30, date: "2026-10-15 21:05")])
+checkAll("月日+下午", [OCRLine("10月12日 下午3:20"), OCRLine("付款金额"), OCRLine("¥30.00")], [Expect(amount: 30, date: "2026-10-12 15:20")])
+
+// 商户清理
+for (raw, want) in [("C 阿芳", "阿芳"), ("é阿芳", "阿芳"), ("© 美团外卖", "美团外卖"), ("KFC肯德基", "KFC肯德基"), ("T3出行", "T3出行")] {
+    let got = ReceiptParser.cleanMerchant(raw)
+    if got == want { print("✅ 商户清理 \(raw) → \(got)") } else { failures += 1; print("❌ 商户清理 \(raw) → \(got)") }
+}
+
 print(failures == 0 ? "ALL PASSED" : "\(failures) FAILED")
 exit(failures == 0 ? 0 : 1)

@@ -31,6 +31,8 @@ struct RecordEditorView: View {
     @State private var isRecognizing = false
     @State private var alertMessage: String?
     @State private var showDeleteConfirm = false
+    @State private var detectedReceipts: [ParsedReceipt] = []
+    @State private var showReceiptPicker = false
     @FocusState private var amountFocused: Bool
 
     private var categories: [LedgerCategory] {
@@ -161,6 +163,15 @@ struct RecordEditorView: View {
                 Button("好", role: .cancel) { alertMessage = nil }
             } message: {
                 Text(alertMessage ?? "")
+            }
+            .confirmationDialog("识别到 \(detectedReceipts.count) 笔交易，选择要填写的一笔", isPresented: $showReceiptPicker,
+                                titleVisibility: .visible) {
+                ForEach(Array(detectedReceipts.enumerated()), id: \.offset) { _, r in
+                    Button(Self.receiptTitle(r)) { apply(r) }
+                }
+                Button("取消", role: .cancel) {}
+            } message: {
+                Text("其余几笔可再次识别后选择，或用快捷指令「识图记账」一次全部记入。")
             }
             .confirmationDialog("确定删除这条记录？", isPresented: $showDeleteConfirm, titleVisibility: .visible) {
                 Button("删除", role: .destructive) { deleteRecord() }
@@ -346,11 +357,25 @@ struct RecordEditorView: View {
                 alertMessage = "无法读取这张图片"
                 return
             }
-            let parsed = try await ReceiptRecognizer.recognize(imageData: data)
-            apply(parsed)
+            let all = try await ReceiptRecognizer.recognizeAll(imageData: data)
+            let found = all.filter { ($0.amount ?? 0) > 0 }
+            if found.count > 1 {
+                // 一张截图里有多笔：让用户选择要填写哪一笔
+                detectedReceipts = found
+                showReceiptPicker = true
+            } else {
+                apply(found.first ?? all.first ?? ParsedReceipt())
+            }
         } catch {
             alertMessage = "识别失败：\(error.localizedDescription)"
         }
+    }
+
+    static func receiptTitle(_ r: ParsedReceipt) -> String {
+        var parts = [(r.isIncome ? "收入 " : "支出 ") + Money.format(r.amount ?? 0)]
+        if let m = r.merchant, !m.isEmpty { parts.append(m) }
+        if let d = r.date { parts.append(DateText.monthDayTime.string(from: d)) }
+        return parts.joined(separator: " · ")
     }
 
     @MainActor
@@ -361,7 +386,7 @@ struct RecordEditorView: View {
         }
         kind = parsed.isIncome ? .income : .expense
         amountText = String(format: "%.2f", amount)
-        if let m = parsed.merchant, merchant.isEmpty { merchant = m }
+        if let m = parsed.merchant { merchant = m }
         if let d = parsed.date { date = d }
         let list = allCategories.filter { $0.kind == kind }
         if let name = parsed.categoryName, let c = list.first(where: { $0.name == name }) {

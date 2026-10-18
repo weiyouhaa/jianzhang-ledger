@@ -10,6 +10,22 @@ struct ParsedReceipt: Equatable {
     /// 付款方式线索（支付宝 / 微信 / 银行卡尾号 / 信用卡 / 花呗）
     var accountHint: AccountHint?
     var rawText: String = ""
+    /// 金额候选得分（内部用于多笔拆分时过滤低置信度片段）
+    var score: Double = 0
+}
+
+/// OCR 的一行文字及其在图中的位置（归一化坐标，midY 0 = 顶部、1 = 底部）。
+/// 没有位置信息时 height 为 0，解析器只用文本规则。
+struct OCRLine: Equatable {
+    var text: String
+    var midY: Double = 0
+    var height: Double = 0
+
+    init(_ text: String, midY: Double = 0, height: Double = 0) {
+        self.text = text
+        self.midY = midY
+        self.height = height
+    }
 }
 
 /// 从 OCR 文本中提取的付款账户线索
@@ -46,7 +62,18 @@ enum AccountHintParser {
         let ns = text as NSString
         let range = NSRange(location: 0, length: ns.length)
         if let m = bankPattern.firstMatch(in: text, range: range) {
-            hint.bankName = ns.substring(with: m.range(at: 1))
+            var bank = ns.substring(with: m.range(at: 1))
+            // 「使用交通银行」「您的招商银行」→ 去掉前面的动词 / 代词
+            let prefixes = ["使用", "通过", "您的", "你的", "我的", "绑定", "来自", "用", "您", "在", "向", "从"]
+            var changed = true
+            while changed {
+                changed = false
+                for p in prefixes where bank.hasPrefix(p) && bank.count - p.count >= 4 {
+                    bank = String(bank.dropFirst(p.count))
+                    changed = true
+                }
+            }
+            hint.bankName = bank
         }
         for re in tailPatterns {
             if let m = re.firstMatch(in: text, range: range) {
@@ -82,33 +109,75 @@ enum ReceiptParser {
 
     // MARK: - 公共入口
 
+    /// 单笔解析（取第一笔；没有识别到金额时返回 amount 为 nil 的结果）
     static func parse(lines rawLines: [String], now: Date = Date(), calendar: Calendar = .current) -> ParsedReceipt {
-        let lines = rawLines
-            .map { normalize($0) }
-            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-            .filter { !$0.isEmpty }
+        let all = parseAll(lines: rawLines.map { OCRLine($0) }, now: now, calendar: calendar)
+        if let first = all.first { return first }
+        let lines = prepare(rawLines.map { OCRLine($0) }).map(\.text)
+        return parseBlock(lines: lines, heroes: [], now: now, calendar: calendar)
+    }
 
+    static func parseAll(lines rawLines: [String], now: Date = Date(), calendar: Calendar = .current) -> [ParsedReceipt] {
+        parseAll(lines: rawLines.map { OCRLine($0) }, now: now, calendar: calendar)
+    }
+
+    /// 多笔解析：按日期标题（昨天 下午3:25 / 10月17日 / 2026-10-17 …）、银行短信、账单列表行、
+    /// 以及多个大字金额（Vision 行高）把截图拆成若干笔交易，按截图从上到下返回。
+    static func parseAll(lines rawLines: [OCRLine], now: Date = Date(), calendar: Calendar = .current) -> [ParsedReceipt] {
+        let lines = prepare(rawLines)
+        guard !lines.isEmpty else { return [] }
+        let texts = lines.map(\.text)
+        let segments = TransactionSegmenter.segments(lines: lines)
+
+        var results: [ParsedReceipt] = []
+        var lastHadOwnDate = true
+        for seg in segments {
+            let blockLines = Array(texts[seg.range])
+            let heroes = Set(seg.heroes.map { $0 - seg.range.lowerBound })
+            let r = parseBlock(lines: blockLines, heroes: heroes, now: now, calendar: calendar)
+            let threshold: Double = (seg.isPreamble && segments.count > 1) ? 20 : -20
+            if r.amount != nil, r.score > threshold {
+                results.append(r)
+                lastHadOwnDate = r.date != nil
+            } else if !lastHadOwnDate, let d = r.date, !results.isEmpty {
+                // 小票末尾单独一行的日期，归到上一笔
+                results[results.count - 1].date = d
+                lastHadOwnDate = true
+            }
+        }
+        return results
+    }
+
+    static func prepare(_ raw: [OCRLine]) -> [OCRLine] {
+        raw.map { l in
+            var c = l
+            c.text = normalize(l.text).trimmingCharacters(in: .whitespacesAndNewlines)
+            return c
+        }
+        .filter { !$0.text.isEmpty }
+    }
+
+    /// 解析一笔交易的文本块
+    static func parseBlock(lines: [String], heroes: Set<Int>, now: Date, calendar: Calendar) -> ParsedReceipt {
         var result = ParsedReceipt()
         result.rawText = lines.joined(separator: "\n")
 
-        let candidates = amountCandidates(lines: lines)
+        var candidates = amountCandidates(lines: lines)
+        for i in candidates.indices where heroes.contains(candidates[i].lineIndex) {
+            candidates[i].score += 40   // 大字金额
+        }
         let best = candidates.max { a, b in
             if a.score == b.score { return a.lineIndex > b.lineIndex } // 同分取靠上的
             return a.score < b.score
         }
         if let best, best.score > -20 {
             result.amount = (best.value * 100).rounded() / 100
+            result.score = best.score
         }
 
-        // 收入 / 支出
+        // 收入 / 支出：默认支出，只有明确的收入信号才算收入
         let fullText = lines.joined(separator: " ")
-        if let best, best.sign == "-" {
-            result.isIncome = false
-        } else if let best, best.sign == "+" {
-            result.isIncome = true
-        } else {
-            result.isIncome = incomeKeywords.contains { fullText.contains($0) }
-        }
+        result.isIncome = IncomeDetector.isIncome(text: fullText, sign: best?.sign ?? "")
 
         result.merchant = merchant(lines: lines, amountLineIndex: best?.lineIndex)
         result.accountHint = AccountHintParser.parse(text: fullText)
@@ -276,14 +345,15 @@ enum ReceiptParser {
     // MARK: - 商户
 
     static let merchantKeywords = ["商户全称", "商户名称", "商家名称", "收款方全称", "收款商户", "收款方", "收款人",
-                                   "交易对方", "对方账户", "对方户名", "商品说明", "商品名称", "付款给", "转账给",
+                                   "交易对方", "对方账户", "对方户名", "付款方", "付款人", "商品说明", "商品名称", "付款给", "转账给",
                                    "店铺名称", "门店名称", "商户", "商家", "店铺", "门店", "对方"]
     static let merchantBlacklist = ["支付成功", "付款成功", "交易成功", "支付完成", "账单详情", "交易详情", "完成",
                                     "当前状态", "返回", "已支付", "订单详情", "转账成功", "收款成功", "收款到账",
                                     "已收款", "数量", "单价", "金额", "合计", "实付", "支付方式", "付款方式",
                                     "账单分类", "订单号", "交易单号", "商户单号", "支付时间", "交易时间", "创建时间",
                                     "备注", "查看", "联系", "申请", "电子小票", "全部账单", "微信支付", "支付宝",
-                                    "待收货", "已完成", "零钱", "储蓄卡", "信用卡"]
+                                    "待收货", "已完成", "零钱", "储蓄卡", "信用卡", "交易状态", "留言", "我的账单",
+                                    "支付服务", "账单服务", "付款成功", "对方已收款", "退款成功", "退款方式"]
 
     static func merchant(lines: [String], amountLineIndex: Int?) -> String? {
         for key in merchantKeywords {
@@ -304,6 +374,21 @@ enum ReceiptParser {
                 if isPlausibleMerchant(v) { return v }
             }
         }
+        // 金额同一行前面的文字（账单列表「滴滴出行 -23.50」）
+        if let idx = amountLineIndex, idx < lines.count {
+            let label = cleanMerchant(lines[idx].replacingOccurrences(
+                of: #"\s*[+-]?\s*¥?\s*[+-]?\s*[\d,]+(\.\d{1,2})?\s*元?\s*$"#, with: "", options: .regularExpression))
+            if label != cleanMerchant(lines[idx]), isPlausibleMerchant(label) { return label }
+        }
+        // 银行短信：「…在美团支付交易人民币45.60元」
+        let joined = lines.joined(separator: " ")
+        if let r = joined.range(of: #"在([\p{Han}A-Za-z0-9()（）·\-]{2,20}?)(?:消费|支付|交易|扣款|付款)"#, options: .regularExpression) {
+            var v = String(joined[r])
+            v = String(v.dropFirst())
+            for suffix in ["消费", "支付", "交易", "扣款", "付款"] where v.hasSuffix(suffix) { v = String(v.dropLast(suffix.count)); break }
+            v = cleanMerchant(v)
+            if isPlausibleMerchant(v) { return v }
+        }
         // 再往下看两行（「订单金额 ¥1299」下一行才是商户的情况）
         if let idx = amountLineIndex {
             for i in (idx + 1)..<min(idx + 3, lines.count) {
@@ -314,8 +399,21 @@ enum ReceiptParser {
         return nil
     }
 
-    private static func cleanMerchant(_ s: String) -> String {
+    /// 头像 / 图标被 OCR 成的杂字符：「C 阿芳」「é阿芳」「© 美团」
+    private static let avatarArtifactPatterns: [NSRegularExpression] = [
+        #"^[^\p{L}\p{N}(（]+"#,                       // 开头的符号
+        #"^[A-Za-zÀ-ÿ]{1,2}\s+(?=\p{Han})"#,           // 单个（或两个）拉丁字母 + 空格 + 汉字
+        #"^[À-ÿ](?=\p{Han})"#,                         // 带重音的单字母紧贴汉字
+        #"^[\p{Han}]\s+(?=[\p{Han}]{2,})"#,           // 单个汉字图标 + 空格（如「微 美团外卖」）
+    ].map { try! NSRegularExpression(pattern: $0) }
+
+    static func cleanMerchant(_ s: String) -> String {
         var v = s.trimmingCharacters(in: CharacterSet.whitespaces.union(CharacterSet(charactersIn: ":>›〉》|")))
+        for re in avatarArtifactPatterns {
+            let ns = v as NSString
+            v = re.stringByReplacingMatches(in: v, range: NSRange(location: 0, length: ns.length), withTemplate: "")
+        }
+        v = v.trimmingCharacters(in: CharacterSet.whitespaces.union(CharacterSet(charactersIn: ":>›〉》|")))
         if v.count > 30 { v = String(v.prefix(30)) }
         return v
     }
@@ -323,6 +421,8 @@ enum ReceiptParser {
     private static func isPlausibleMerchant(_ s: String) -> Bool {
         guard s.count >= 2, s.count <= 30 else { return false }
         if merchantBlacklist.contains(where: { s.contains($0) }) { return false }
+        if s.hasPrefix("使用") && s.contains("支付") { return false }       // 「使用零钱支付」
+        if TransactionSegmenter.isDateHeader(s) { return false }
         let digits = s.filter { $0.isNumber }.count
         if digits >= 3 { return false }
         let letters = s.unicodeScalars.filter { CharacterSet.letters.contains($0) }.count
@@ -331,12 +431,43 @@ enum ReceiptParser {
 
     // MARK: - 日期
 
+    static let periodPattern = "凌晨|早上|早晨|上午|中午|下午|傍晚|晚上|夜里|夜间"
     private static let fullDatePattern = try! NSRegularExpression(
-        pattern: #"(20\d{2})\s*[-/.年]\s*(\d{1,2})\s*[-/.月]\s*(\d{1,2})\s*日?\s*(?:(\d{1,2}):(\d{2})(?::(\d{2}))?)?"#)
+        pattern: #"(20\d{2})\s*[-/.年]\s*(\d{1,2})\s*[-/.月]\s*(\d{1,2})\s*日?\s*(?:("# + periodPattern + #")?\s*(\d{1,2}):(\d{2})(?::(\d{2}))?)?"#)
     private static let monthDayPattern = try! NSRegularExpression(
-        pattern: #"(\d{1,2})\s*月\s*(\d{1,2})\s*日\s*(?:(\d{1,2}):(\d{2}))?"#)
+        pattern: #"(?<!\d)(\d{1,2})\s*月\s*(\d{1,2})\s*日\s*(?:("# + periodPattern + #")?\s*(\d{1,2}):(\d{2}))?"#)
     private static let relativePattern = try! NSRegularExpression(
-        pattern: #"(今天|昨天|前天)\s*(\d{1,2}):(\d{2})"#)
+        pattern: #"(今天|昨天|前天|星期[一二三四五六日天]|周[一二三四五六日天])?\s*("# + periodPattern + #")?\s*(\d{1,2}):(\d{2})"#)
+    private static let dashMonthDayPattern = try! NSRegularExpression(
+        pattern: #"(?<![\d-])(\d{1,2})-(\d{1,2})\s+(\d{1,2}):(\d{2})"#)
+    private static let bareDayPattern = try! NSRegularExpression(pattern: #"(今天|昨天|前天)"#)
+
+    /// 「下午3:25」→ 15:25，「凌晨12:30」→ 0:30
+    static func hour24(_ h: Int, period: String) -> Int {
+        switch period {
+        case "下午", "傍晚", "晚上", "夜里", "夜间": return h < 12 ? h + 12 : h
+        case "中午": return h < 11 ? h + 12 : h
+        case "凌晨", "早上", "早晨", "上午": return h == 12 ? 0 : h
+        default: return h
+        }
+    }
+
+    private static func dayOffset(_ word: String, now: Date, calendar: Calendar) -> Int? {
+        switch word {
+        case "": return nil
+        case "今天": return 0
+        case "昨天": return -1
+        case "前天": return -2
+        default:
+            let names: [Character: Int] = ["日": 1, "天": 1, "一": 2, "二": 3, "三": 4, "四": 5, "五": 6, "六": 7]
+            guard let ch = word.last, let weekday = names[ch] else { return nil }
+            for back in 1...7 {
+                if let d = calendar.date(byAdding: .day, value: -back, to: now),
+                   calendar.component(.weekday, from: d) == weekday { return -back }
+            }
+            return nil
+        }
+    }
 
     static func date(lines: [String], now: Date, calendar: Calendar) -> Date? {
         let text = lines.joined(separator: "\n")
@@ -347,25 +478,46 @@ enum ReceiptParser {
         if let m = fullDatePattern.firstMatch(in: text, range: range) {
             var c = DateComponents()
             c.year = Int(group(m, 1, ns)); c.month = Int(group(m, 2, ns)); c.day = Int(group(m, 3, ns))
-            c.hour = Int(group(m, 4, ns)) ?? 12; c.minute = Int(group(m, 5, ns)) ?? 0; c.second = Int(group(m, 6, ns)) ?? 0
+            c.hour = hour24(Int(group(m, 5, ns)) ?? 12, period: group(m, 4, ns))
+            c.minute = Int(group(m, 6, ns)) ?? 0; c.second = Int(group(m, 7, ns)) ?? 0
             if valid(c), let d = calendar.date(from: c), d <= latest { return d }
         }
         if let m = monthDayPattern.firstMatch(in: text, range: range) {
             var c = DateComponents()
             c.year = calendar.component(.year, from: now)
             c.month = Int(group(m, 1, ns)); c.day = Int(group(m, 2, ns))
-            c.hour = Int(group(m, 3, ns)) ?? 12; c.minute = Int(group(m, 4, ns)) ?? 0
+            c.hour = hour24(Int(group(m, 4, ns)) ?? 12, period: group(m, 3, ns))
+            c.minute = Int(group(m, 5, ns)) ?? 0
             if valid(c), var d = calendar.date(from: c) {
                 if d > latest, let prev = calendar.date(byAdding: .year, value: -1, to: d) { d = prev }
                 return d
             }
         }
-        if let m = relativePattern.firstMatch(in: text, range: range) {
-            let offset: Int = ["今天": 0, "昨天": -1, "前天": -2][group(m, 1, ns)] ?? 0
-            if let day = calendar.date(byAdding: .day, value: offset, to: now),
-               let h = Int(group(m, 2, ns)), let mi = Int(group(m, 3, ns)), h < 24, mi < 60 {
-                return calendar.date(bySettingHour: h, minute: mi, second: 0, of: day)
+        for m in relativePattern.matches(in: text, range: range) {
+            let dayWord = group(m, 1, ns), period = group(m, 2, ns)
+            guard !dayWord.isEmpty || !period.isEmpty else { continue }   // 单独的「14:32」多半是状态栏
+            guard let h = Int(group(m, 3, ns)), let mi = Int(group(m, 4, ns)), h < 24, mi < 60 else { continue }
+            let offset = dayOffset(dayWord, now: now, calendar: calendar) ?? 0
+            guard let day = calendar.date(byAdding: .day, value: offset, to: now),
+                  var d = calendar.date(bySettingHour: hour24(h, period: period), minute: mi, second: 0, of: day) else { continue }
+            // 只有「下午3:00」没有日期、且晚于现在：视为昨天
+            if dayWord.isEmpty, d > now.addingTimeInterval(300), let y = calendar.date(byAdding: .day, value: -1, to: d) { d = y }
+            return d
+        }
+        if let m = dashMonthDayPattern.firstMatch(in: text, range: range) {
+            var c = DateComponents()
+            c.year = calendar.component(.year, from: now)
+            c.month = Int(group(m, 1, ns)); c.day = Int(group(m, 2, ns))
+            c.hour = Int(group(m, 3, ns)); c.minute = Int(group(m, 4, ns))
+            if valid(c), var d = calendar.date(from: c) {
+                if d > latest, let prev = calendar.date(byAdding: .year, value: -1, to: d) { d = prev }
+                return d
             }
+        }
+        if let m = bareDayPattern.firstMatch(in: text, range: range),
+           let offset = dayOffset(group(m, 1, ns), now: now, calendar: calendar),
+           let day = calendar.date(byAdding: .day, value: offset, to: now) {
+            return calendar.date(bySettingHour: 12, minute: 0, second: 0, of: day)
         }
         return nil
     }
@@ -374,11 +526,6 @@ enum ReceiptParser {
         guard let mo = c.month, let d = c.day else { return false }
         return (1...12).contains(mo) && (1...31).contains(d) && (0...23).contains(c.hour ?? 0) && (0...59).contains(c.minute ?? 0)
     }
-
-    // MARK: - 收入判断
-
-    static let incomeKeywords = ["收款成功", "已收款", "收款到账", "到账成功", "已到账", "退款成功", "已退款", "退款到账",
-                                 "收到转账", "已收钱", "转入成功", "已存入零钱", "红包已存入", "工资", "代发", "入账"]
 
     // MARK: - 工具
 
@@ -395,6 +542,179 @@ enum ReceiptParser {
     }
 }
 
+/// 收入 / 支出判断。默认支出；「对方已收款」是对方收到钱，属于支出。
+enum IncomeDetector {
+    /// 明确的支出信号
+    static let expensePatterns: [NSRegularExpression] = [
+        #"对方已收款|对方已收钱|待对方收款|等待对方收款"#,
+        #"支付成功|付款成功|已支付|支付完成|付款完成"#,
+        #"使用.{0,20}?支付"#,
+        #"实付|扣款|消费|付款给|转账给|向.{1,12}付款|支出|还款"#,
+    ].map { try! NSRegularExpression(pattern: $0) }
+
+    /// 明确的收入信号（先去掉「对方已收款」等表述再匹配）
+    static let incomePatterns: [NSRegularExpression] = [
+        #"收款到账|收款成功|已收款|已收钱|到账成功|已到账|入账|转入成功|已存入|收到转账|收到红包"#,
+        #"退款成功|已退款|退款到账|退款金额|退回"#,
+        #"收入|工资|代发|存入|转入"#,
+    ].map { try! NSRegularExpression(pattern: $0) }
+
+    static let neutralizers = ["对方已收款", "对方已收钱", "待对方收款", "等待对方收款", "可用余额", "转入账户"]
+
+    static func isIncome(text: String, sign: String) -> Bool {
+        if sign == "-" { return false }
+        let expense = expensePatterns.contains { matches($0, text) }
+        if sign == "+" { return !expense || strongIncome(text) }
+        var cleaned = text
+        for n in neutralizers { cleaned = cleaned.replacingOccurrences(of: n, with: " ") }
+        let income = incomePatterns.contains { matches($0, cleaned) }
+        if !income { return false }
+        if !expense { return true }
+        // 两种信号都有：退款 / 到账类明确信号优先，否则按支出
+        return strongIncome(cleaned)
+    }
+
+    private static func strongIncome(_ text: String) -> Bool {
+        ["退款成功", "已退款", "退款到账", "收款到账", "到账成功", "收到转账", "已存入零钱", "红包已存入"].contains { text.contains($0) }
+    }
+
+    private static func matches(_ re: NSRegularExpression, _ s: String) -> Bool {
+        re.firstMatch(in: s, range: NSRange(location: 0, length: (s as NSString).length)) != nil
+    }
+}
+
+/// 把一张截图的 OCR 行切分成若干笔交易
+enum TransactionSegmenter {
+    struct Segment: Equatable {
+        var range: Range<Int>
+        var heroes: [Int] = []       // 大字金额所在行（全局下标）
+        var isPreamble = false       // 第一个分隔点之前的内容（状态栏、导航标题等）
+    }
+
+    private static let headerPatterns: [NSRegularExpression] = [
+        #"20\d{2}\s*[-/.年]\s*\d{1,2}\s*[-/.月]\s*\d{1,2}\s*日?"#,
+        #"\d{1,2}\s*月\s*\d{1,2}\s*日"#,
+        #"(?<![\d-])\d{1,2}-\d{1,2}(?=\s+\d{1,2}:\d{2})"#,
+        #"今天|昨天|前天|星期[一二三四五六日天]|周[一二三四五六日天]"#,
+        #"(?:"# + ReceiptParser.periodPattern + #")\s*\d{1,2}:\d{2}"#,
+    ].map { try! NSRegularExpression(pattern: $0) }
+    private static let timePattern = try! NSRegularExpression(pattern: #"\d{1,2}:\d{2}(?::\d{2})?"#)
+    private static let amountOnlyPattern = try! NSRegularExpression(
+        pattern: #"^[+-]?\s*¥?\s*[+-]?\s*(?:\d{1,3}(?:,\d{3})+|\d+)\.\d{2}\s*元?$"#)
+    private static let yenAmountOnlyPattern = try! NSRegularExpression(
+        pattern: #"^[+-]?\s*¥\s*(?:\d{1,3}(?:,\d{3})+|\d+)\.\d{2}$"#)
+    /// 账单列表行：「滴滴出行 -23.50」
+    private static let billRowPattern = try! NSRegularExpression(
+        pattern: #"^(\S.{1,29}?)\s+[+-]\s*¥?\s*(?:\d{1,3}(?:,\d{3})+|\d+)\.\d{2}$"#)
+
+    /// 整行只有日期 / 时间（如「昨天 下午3:25」「10月17日 20:12」「2026-10-16 19:20」），状态栏的「8:50」不算
+    static func isDateHeader(_ text: String) -> Bool {
+        var s = text
+        var hit = false
+        for re in headerPatterns {
+            let ns = s as NSString
+            let r = NSRange(location: 0, length: ns.length)
+            if re.firstMatch(in: s, range: r) != nil { hit = true }
+            s = re.stringByReplacingMatches(in: s, range: r, withTemplate: " ")
+        }
+        guard hit else { return false }
+        let ns = s as NSString
+        s = timePattern.stringByReplacingMatches(in: s, range: NSRange(location: 0, length: ns.length), withTemplate: " ")
+        let rest = s.unicodeScalars.filter { CharacterSet.letters.contains($0) || CharacterSet.decimalDigits.contains($0) }
+        return rest.count <= 2
+    }
+
+    static func isAmountOnly(_ text: String) -> Bool { matches(amountOnlyPattern, text) }
+
+    private static func isPayLine(_ text: String) -> Bool {
+        ["支付", "付款", "收款", "到账", "转账", "使用", "方式", "金额", "实付"].contains { text.contains($0) }
+    }
+
+    private static func isBillRow(_ text: String) -> Bool {
+        let ns = text as NSString
+        guard let m = billRowPattern.firstMatch(in: text, range: NSRange(location: 0, length: ns.length)) else { return false }
+        let label = ns.substring(with: m.range(at: 1))
+        if ["优惠", "折扣", "立减", "减免", "抵扣", "运费", "配送费", "手续费", "找零", "返现", "券",
+            "合计", "实付", "总计", "应付", "金额", "小计"].contains(where: { label.contains($0) }) { return false }
+        return label.unicodeScalars.filter { CharacterSet.letters.contains($0) }.count >= 2
+    }
+
+    static func segments(lines: [OCRLine]) -> [Segment] {
+        let texts = lines.map(\.text)
+        let n = texts.count
+        guard n > 0 else { return [] }
+
+        // 1. 分隔点
+        var starts: [Int] = []
+        let smsStarts = texts.indices.filter { texts[$0].hasPrefix("【") }
+        let billRows = texts.indices.filter { isBillRow(texts[$0]) }
+        let headers = texts.indices.filter { isDateHeader(texts[$0]) }
+        if smsStarts.count >= 2 {
+            starts = smsStarts
+        } else if billRows.count >= 2 {
+            starts = billRows
+        } else {
+            starts = headers
+        }
+
+        var segs: [Segment] = []
+        // 账单列表 / 短信列表的开头是月度汇总等，不当作一笔交易
+        let listMode = smsStarts.count >= 2 || billRows.count >= 2
+        if starts.isEmpty || (starts[0] > 0 && !listMode) {
+            segs.append(Segment(range: 0..<(starts.first ?? n), isPreamble: !starts.isEmpty))
+        }
+        for (i, s) in starts.enumerated() {
+            segs.append(Segment(range: s..<(i + 1 < starts.count ? starts[i + 1] : n)))
+        }
+
+        // 2. 大字金额：优先用 Vision 行高（≥ 中位行高 × 1.6），没有位置信息时用文本规则
+        let heights = lines.map(\.height).filter { $0 > 0 }.sorted()
+        let median = heights.isEmpty ? 0 : heights[heights.count / 2]
+        var heroSet = Set<Int>()
+        if median > 0 {
+            for i in 0..<n where lines[i].height >= median * 1.6 && isAmountOnly(texts[i]) { heroSet.insert(i) }
+        }
+        if heroSet.isEmpty {
+            for i in 0..<n where matches(yenAmountOnlyPattern, texts[i]) {
+                let above = texts[max(0, i - 2)..<i]
+                if above.contains(where: isPayLine) { heroSet.insert(i) }
+            }
+        }
+
+        // 3. 同一块里有多个大字金额：在第二笔的标题行（金额上方第一行非支付方式文字）处再切开
+        var result: [Segment] = []
+        for seg in segs {
+            let heroes = seg.range.filter { heroSet.contains($0) }
+            guard heroes.count >= 2 else {
+                var s = seg; s.heroes = heroes; result.append(s); continue
+            }
+            var cuts: [Int] = []
+            for k in 1..<heroes.count {
+                let prev = heroes[k - 1], hero = heroes[k]
+                var cut = hero
+                var j = hero - 1
+                while j > prev {
+                    if isPayLine(texts[j]) || isAmountOnly(texts[j]) { j -= 1; continue }
+                    cut = j
+                    break
+                }
+                cuts.append(max(prev + 1, cut))
+            }
+            var lower = seg.range.lowerBound
+            for (k, c) in cuts.enumerated() {
+                result.append(Segment(range: lower..<c, heroes: [heroes[k]], isPreamble: seg.isPreamble && k == 0))
+                lower = c
+            }
+            result.append(Segment(range: lower..<seg.range.upperBound, heroes: [heroes[heroes.count - 1]]))
+        }
+        return result
+    }
+
+    private static func matches(_ re: NSRegularExpression, _ s: String) -> Bool {
+        re.firstMatch(in: s, range: NSRange(location: 0, length: (s as NSString).length)) != nil
+    }
+}
+
 /// 根据关键词猜测分类（名称需与默认分类一致；找不到时由调用方回退到「其他」）
 enum CategoryGuesser {
     static let expenseRules: [(String, [String])] = [
@@ -402,7 +722,7 @@ enum CategoryGuesser {
         ("娱乐", ["电影", "影城", "影院", "猫眼", "淘票票", "游戏", "Steam", "腾讯视频", "爱奇艺", "优酷", "网易云", "QQ音乐",
                 "哔哩哔哩", "bilibili", "B站", "KTV", "网吧", "剧本杀", "演出", "大麦", "健身"]),
         ("通讯", ["话费", "中国移动", "中国联通", "中国电信", "流量", "手机充值"]),
-        ("交通", ["滴滴", "打车", "快车", "地铁", "公交", "出行", "高德", "加油", "中石化", "中石油", "停车", "高速", "ETC",
+        ("交通", ["滴滴", "打车", "快车", "地铁", "公交", "出行", "高德", "加油", "中石化", "中石油", "停车", "高速", "ETC", "畅行", "通行费", "路桥", "收费站", "etc",
                 "12306", "铁路", "哈啰", "单车", "曹操", "T3", "花小猪", "如祺", "享道", "充电"]),
         ("旅行", ["携程", "飞猪", "去哪儿", "酒店", "机票", "航空", "民宿", "景区", "门票", "同程", "途牛"]),
         ("居住", ["房租", "租金", "自如", "贝壳", "链家", "家政", "保洁"]),

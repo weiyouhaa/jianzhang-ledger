@@ -172,6 +172,20 @@ enum IntentRecorder {
         return record
     }
 
+    /// 重复判断：金额相同、商户相同、时间相差 2 分钟以内（重复识别同一张截图时不重复记账）
+    @MainActor
+    static func isDuplicate(amount: Double, merchant: String, date: Date) -> Bool {
+        let context = DataStore.shared.mainContext
+        let start = date.addingTimeInterval(-120), end = date.addingTimeInterval(120)
+        let descriptor = FetchDescriptor<LedgerRecord>(predicate: #Predicate<LedgerRecord> { $0.date >= start && $0.date <= end })
+        let list = (try? context.fetch(descriptor)) ?? []
+        let rounded = (amount * 100).rounded() / 100
+        let m = merchant.trimmingCharacters(in: .whitespaces)
+        return list.contains { r in
+            abs(r.amount - rounded) < 0.005 && r.merchant.trimmingCharacters(in: .whitespaces) == m
+        }
+    }
+
     static func summary(of record: LedgerRecord) -> String {
         var parts = ["\(record.kind.title) \(Money.format(record.amount))", record.categoryName]
         if !record.merchant.isEmpty { parts.append(record.merchant) }
