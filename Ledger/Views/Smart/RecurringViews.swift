@@ -117,7 +117,8 @@ struct RecurringListView: View {
         switch days {
         case 0: return "今天"
         case 1: return "明天"
-        default: return "下次 \(date)（\(days) 天后）"
+        case 2...31: return "\(days) 天后"
+        default: return "下次 \(date)"
         }
     }
 }

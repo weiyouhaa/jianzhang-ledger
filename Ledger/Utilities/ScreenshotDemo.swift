@@ -269,6 +269,7 @@ enum ScreenshotDemo {
         let f = DateFormatter()
         f.locale = Locale(identifier: "en_US_POSIX")
         f.calendar = cal
+        f.timeZone = BillParser.timeZone   // 账单时间按北京时间解析
         f.dateFormat = "yyyy-MM-dd HH:mm:ss"
         func t(_ day: Int, _ h: Int, _ m: Int) -> String {
             let base = cal.date(byAdding: .day, value: -min(day, maxBack), to: now) ?? now
