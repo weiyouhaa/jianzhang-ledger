@@ -11,7 +11,7 @@ struct RecognizeReceiptIntent: AppIntent {
 
     @Parameter(
         title: "图片",
-        supportedContentTypes: [.image],
+        supportedTypeIdentifiers: ["public.image"],
         requestValueDialog: "请选择要识别的支付截图",
         inputConnectionBehavior: .connectToPreviousIntentResult
     )
