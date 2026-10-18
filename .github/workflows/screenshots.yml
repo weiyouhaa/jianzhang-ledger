@@ -89,6 +89,7 @@ jobs:
           shoot settings light 04-settings
           shoot lock     light 05-lock
           shoot search   light 06-search
+          shoot backup   light 09-backup-settings
           shoot home     dark  07-home-dark
           shoot stats    dark  08-stats-dark
           ls -l screenshots

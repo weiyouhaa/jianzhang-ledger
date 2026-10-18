@@ -21,11 +21,23 @@ struct RootView: View {
         }
         .preferredColorScheme(colorScheme)
         .onAppear { syncLockWindow(lock.isLocked) }
+        .task {
+            // 刷新 iCloud 容器可用性（供下次启动决定是否启用 CloudKit），并按需自动备份
+            await CloudSync.refreshAvailability()
+            if DataStore.syncStatus.isCloud { DataStore.dedupeCategories(in: DataStore.shared.mainContext) }
+            await AutoBackup.runIfDue(context: DataStore.shared.mainContext)
+        }
         .onChange(of: lock.isLocked) { _, locked in
             syncLockWindow(locked)
         }
         .onChange(of: scenePhase) { _, phase in
             lock.handleScenePhase(phase)
+            if phase == .active {
+                Task { @MainActor in
+                    if DataStore.syncStatus.isCloud { DataStore.dedupeCategories(in: DataStore.shared.mainContext) }
+                    await AutoBackup.runIfDue(context: DataStore.shared.mainContext)
+                }
+            }
             if hideInAppSwitcher && phase != .active {
                 OverlayWindowManager.shared.showPrivacy(style: interfaceStyle)
             } else {

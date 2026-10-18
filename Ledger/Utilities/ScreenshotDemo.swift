@@ -19,7 +19,7 @@ enum ScreenshotDemo {
     static var initialTab: Int {
         switch screen {
         case "stats": return 1
-        case "settings": return 2
+        case "settings", "backup": return 2
         default: return 0
         }
     }
@@ -42,6 +42,11 @@ enum ScreenshotDemo {
         let context = ModelContext(container)
         UserDefaults.standard.set(5000.0, forKey: SettingsKey.monthlyBudget)
         UserDefaults.standard.set("¥", forKey: SettingsKey.currencySymbol)
+        if screen == "backup" {
+            UserDefaults.standard.set(true, forKey: SettingsKey.autoBackupEnabled)
+            UserDefaults.standard.set(Date().addingTimeInterval(-3 * 3600).timeIntervalSince1970, forKey: SettingsKey.lastBackupAt)
+            UserDefaults.standard.set(AutoBackup.locationTitle(isICloud: false), forKey: SettingsKey.lastBackupLocation)
+        }
 
         let samples: [Sample] = [
             .init(day: 0, hour: 12, minute: 18, amount: 35, category: "餐饮", kind: .expense, note: "", merchant: "星巴克咖啡", account: "微信", source: "ocr"),

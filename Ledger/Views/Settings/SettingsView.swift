@@ -12,6 +12,8 @@ struct SettingsView: View {
     @AppStorage(SettingsKey.appearance) private var appearance = 0
     @AppStorage(SettingsKey.defaultAccount) private var defaultAccount = ""
     @AppStorage(SettingsKey.hideInAppSwitcher) private var hideInAppSwitcher = true
+    @AppStorage(SettingsKey.lastBackupAt) private var lastBackupAt: Double = 0
+    @State private var showDemoBackup = false
 
     @State private var passcodeFlow: PasscodeFlowView.Mode?
     @State private var passcodeToggle = false
@@ -26,12 +28,18 @@ struct SettingsView: View {
             Form {
                 securitySection
                 bookkeepingSection
+                backupSection
                 shortcutSection
                 appearanceSection
                 dataSection
                 aboutSection
             }
             .navigationTitle("设置")
+            .navigationDestination(isPresented: $showDemoBackup) { BackupSettingsView() }
+            .task {
+                // 截图模式：直接打开「iCloud 与备份」
+                if ScreenshotDemo.screen == "backup" && !showDemoBackup { showDemoBackup = true }
+            }
             .toolbar {
                 ToolbarItemGroup(placement: .keyboard) {
                     Spacer()
@@ -164,6 +172,33 @@ struct SettingsView: View {
             } label: {
                 Label("货币符号", systemImage: "dollarsign.circle.fill")
             }
+        }
+    }
+
+    private var backupSection: some View {
+        Section {
+            NavigationLink {
+                BackupSettingsView()
+            } label: {
+                HStack {
+                    Label("iCloud 同步与备份", systemImage: DataStore.syncStatus.isCloud ? "icloud.fill" : "externaldrive.badge.icloud")
+                    Spacer()
+                    Text(DataStore.syncStatus.title)
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            HStack {
+                Label("上次备份", systemImage: "clock")
+                Spacer()
+                Text(lastBackupAt > 0 ? DateText.full.string(from: Date(timeIntervalSince1970: lastBackupAt)) : "从未")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            }
+        } header: {
+            Text("iCloud 与备份")
+        } footer: {
+            Text("可导出备份到 iCloud 云盘并随时恢复；iCloud 自动同步需要付费开发者账号签名。")
         }
     }
 

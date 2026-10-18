@@ -62,7 +62,6 @@ jobs:
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGN_IDENTITY="" \
-            CODE_SIGN_ENTITLEMENTS="" \
             DEVELOPMENT_TEAM="" \
             "${EXTRA[@]}" \
             | tee "$RUNNER_TEMP/xcodebuild.log" | grep -E "error:|warning: .*deprecated|BUILD|ARCHIVE" || true
@@ -90,12 +89,16 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: JianZhang-unsigned-ipa
-          path: ${{ env.IPA_NAME }}
+          path: |
+            ${{ env.IPA_NAME }}
+            Config/Ledger.entitlements
           if-no-files-found: error
 
       - name: Create GitHub Release (tags only)
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
-          files: ${{ env.IPA_NAME }}
+          files: |
+            ${{ env.IPA_NAME }}
+            Config/Ledger.entitlements
           generate_release_notes: true

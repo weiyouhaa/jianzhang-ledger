@@ -88,6 +88,14 @@ enum SettingsKey {
     static let appearance = "appearance"          // 0 跟随系统 1 浅色 2 深色
     static let defaultAccount = "defaultAccount"
     static let hideInAppSwitcher = "hideInAppSwitcher"
+    // iCloud 与备份
+    static let iCloudSyncEnabled = "icloud.syncEnabled"
+    static let iCloudContainerOK = "icloud.containerAvailable"
+    static let autoBackupEnabled = "backup.autoEnabled"
+    static let autoBackupInterval = "backup.intervalSeconds"
+    static let autoBackupKeep = "backup.keepCount"
+    static let lastBackupAt = "backup.lastAt"            // timeIntervalSince1970，0 = 从未
+    static let lastBackupLocation = "backup.lastLocation"
 }
 
 extension Color {

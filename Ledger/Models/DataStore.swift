@@ -3,18 +3,65 @@ import SwiftData
 
 /// 全局共享的 SwiftData 容器。App 界面与 App Intents（在 App 进程内运行）共用同一个容器 / 同一个存储文件。
 enum DataStore {
-    static let shared: ModelContainer = {
+    /// 启动时创建一次：容器 + 当前同步状态
+    static let setup: (container: ModelContainer, status: SyncStatus) = makeContainer()
+    static var shared: ModelContainer { setup.container }
+    static var syncStatus: SyncStatus { setup.status }
+
+    /// 存储文件名保持 "Ledger" 不变（Application Support/Ledger.store），本地 / iCloud 模式共用同一个文件，切换不丢数据
+    private static func makeContainer() -> (container: ModelContainer, status: SyncStatus) {
         let schema = Schema([LedgerRecord.self, LedgerCategory.self])
-        let config = ModelConfiguration("Ledger", schema: schema, isStoredInMemoryOnly: ScreenshotDemo.isActive, allowsSave: true)
+        var status: SyncStatus = .local
+
+        if !ScreenshotDemo.isActive && UserDefaults.standard.bool(forKey: SettingsKey.iCloudSyncEnabled) {
+            if !CloudSync.hasAccount {
+                status = .noAccount
+            } else if !UserDefaults.standard.bool(forKey: SettingsKey.iCloudContainerOK) {
+                status = .noEntitlement
+            } else {
+                let cloudConfig = ModelConfiguration("Ledger", schema: schema, isStoredInMemoryOnly: false, allowsSave: true,
+                                                     cloudKitDatabase: .private(CloudSync.containerID))
+                do {
+                    let container = try ModelContainer(for: schema, configurations: [cloudConfig])
+                    seedIfNeeded(container: container)
+                    return (container, .cloud)
+                } catch {
+                    status = .failed(error.localizedDescription)
+                }
+            }
+        }
+
+        // 本地模式：显式关闭 CloudKit（即使重签后带有 iCloud 权限，也不会自动开启同步）
+        let localConfig = ModelConfiguration("Ledger", schema: schema, isStoredInMemoryOnly: ScreenshotDemo.isActive,
+                                             allowsSave: true, cloudKitDatabase: .none)
         do {
-            let container = try ModelContainer(for: schema, configurations: [config])
+            let container = try ModelContainer(for: schema, configurations: [localConfig])
             seedIfNeeded(container: container)
             ScreenshotDemo.seed(container: container)   // 仅截图模式下生效
-            return container
+            return (container, status)
         } catch {
             fatalError("无法创建数据存储：\(error)")
         }
-    }()
+    }
+
+    /// iCloud 同步时，多台设备各自生成的默认分类会重复：按「类型 + 名称」合并，记录归到最早创建的分类
+    @MainActor
+    static func dedupeCategories(in context: ModelContext) {
+        let all = (try? context.fetch(FetchDescriptor<LedgerCategory>(sortBy: [SortDescriptor(\LedgerCategory.createdAt)]))) ?? []
+        var keep: [String: LedgerCategory] = [:]
+        var changed = false
+        for c in all {
+            let key = c.kindRaw + "|" + c.name
+            if let primary = keep[key] {
+                for r in c.records ?? [] { r.category = primary }
+                context.delete(c)
+                changed = true
+            } else {
+                keep[key] = c
+            }
+        }
+        if changed { try? context.save() }
+    }
 
     /// 首次启动写入默认分类（使用独立的 ModelContext，不依赖主线程）
     static func seedIfNeeded(container: ModelContainer) {

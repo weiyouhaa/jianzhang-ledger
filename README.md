@@ -32,6 +32,25 @@
 - 多任务界面隐私遮罩：App 进入非活跃状态时自动遮挡内容（可关闭）
 - 锁屏与遮罩使用独立的高层级窗口，即使当时打开着编辑页等弹窗也能完全遮住
 
+### iCloud 与备份
+设置 › **iCloud 与备份** 提供两层方案：
+
+**① 备份到 iCloud 云盘（任何签名方式都可用，推荐）**
+- 「导出备份到文件…」：生成带版本号的 JSON 备份 `简账备份-yyyyMMdd-HHmmss.json`，包含全部记录、分类和预算 / 货币 / 主题 / 默认账户等设置（**不含 App 密码和面容 ID 设置**）。在系统存储面板里选择「iCloud 云盘」即可存到云端。
+- 「从备份恢复…」：从「文件」选择备份 → 预览（备份时间、来源设备、记录 / 分类数量、时间范围、收支合计）→ 选择：
+  - **合并**：按记录 UUID 去重，已存在的跳过；同类型同名分类自动对应，不会重复；
+  - **替换全部数据**：二次确认后删除当前所有记录和分类再导入，同时恢复预算等设置。
+  - 若设置了 App 密码，恢复前必须输入密码。
+- **自动备份**（可选）：每天 / 每 3 天 / 每周，回到 App 时到期自动备份，只保留最近 5 / 10 / 20 / 30 份，显示上次备份时间和位置。
+  - 签名带 iCloud 权限时写入 iCloud 容器，出现在「文件 › iCloud 云盘 › 简账」；
+  - 否则写入 App 的「文稿」目录（已开启 `UIFileSharingEnabled` / `LSSupportsOpeningDocumentsInPlace`），在「文件 › 我的 iPhone › 简账」中可见，可以手动复制或移到 iCloud 云盘。
+
+**② iCloud 自动同步（CloudKit，需付费开发者账号）**
+- 打开「iCloud 同步」开关后，**完全退出并重新打开 App** 生效。数据存入 iCloud 私有数据库 `iCloud.<Bundle ID>`（默认 `iCloud.com.fve.ledger`），在登录同一 Apple ID 的设备间同步。
+- 开启时会检测：设备是否登录 iCloud（`ubiquityIdentityToken`）、当前签名能否访问 iCloud 容器。检测不通过不会开启；如果启动时 CloudKit 容器创建失败，会自动回退到本机存储，不会闪退，状态栏会说明原因。
+- **必须使用付费 Apple 开发者账号签名**，并在开发者后台为 App ID 开启 iCloud（CloudKit）能力、创建上述容器，签名时带上 `Config/Ledger.entitlements` 中的权限（构建产物中也附带了这个文件）。免费 Apple ID、爱思助手、Sideloadly、AltStore 的签名通常会去掉 iCloud 权限，此时请用方案 ①。
+- 本地和 iCloud 模式使用同一个数据库文件，开关切换不会丢失本机数据；首次开启会把现有数据上传到 iCloud。多台设备各自生成的默认分类会按「类型 + 名称」自动合并。建议开启前先导出一次备份。
+
 ### 快捷指令 / Siri（App Intents）
 | 操作 | 说明 |
 | --- | --- |
@@ -109,12 +128,13 @@ App 内 设置 › 快捷指令 › 识图记账设置教程 里也有同样的�
 
 ## 隐私说明
 
-- **所有数据只保存在本机**（SwiftData 本地数据库），不包含任何网络请求代码，不接入任何统计 / 广告 SDK。
+- **默认所有数据只保存在本机**（SwiftData 本地数据库），不包含任何自有服务器或网络请求代码，不接入任何统计 / 广告 SDK。
 - **OCR 在设备上完成**（Apple Vision 框架），截图不会离开手机，App 也不会保存截图本身。
 - 密码只以加盐哈希形式存于钥匙串，且仅本设备可用。
 - 只申请面容 ID 权限（用于解锁）；相册通过系统照片选择器按需选图，不读取整个相册。
 - **注意**：快捷指令 / Siri 的「识图记账」「记一笔」「本月收支」在后台运行、不显示界面，因此 **不需要输入 App 密码**；但它们都设置了 `authenticationPolicy = .requiresAuthentication`，需要 iPhone 本身已解锁才能运行。如果在意「本月收支」被他人通过 Siri 听到，可以在「快捷指令」App 中关闭该 App 的 Siri 建议。
-- 数据备份：请定期在 设置 › 数据 › 导出 CSV。卸载 App 会删除所有数据。
+- 数据备份：在 设置 › iCloud 与备份 中导出 JSON 备份（可完整恢复）或开启自动备份；CSV 导出用于表格分析。卸载 App 会删除本机数据（iCloud 云盘中的备份文件不受影响）。
+- 网络：只有在你使用付费账号签名并主动开启「iCloud 同步」时，数据才会经由 Apple 的 CloudKit 同步到你自己的 iCloud 私有数据库；简账本身没有任何服务器。
 
 ---
 
@@ -123,13 +143,15 @@ App 内 设置 › 快捷指令 › 识图记账设置教程 里也有同样的�
 ```
 ledger-app/
 ├── project.yml                     # XcodeGen 配置（iOS 17，Swift 5 语言模式）
-├── Config/Info.plist               # 显示名、面容 ID 用途说明等
+├── Config/Info.plist               # 显示名、面容 ID 用途说明、文件共享、iCloud 云盘容器
+├── Config/Ledger.entitlements      # iCloud（CloudKit + 云盘）权限，供付费账号重签使用
 ├── .github/workflows/build.yml     # 未签名 ipa 构建 + Release
 ├── Ledger/
 │   ├── App/                        # 入口、根视图、Tab
 │   ├── Models/                     # SwiftData 模型、共享 ModelContainer、默认分类
 │   ├── Views/                      # 首页、记账编辑、统计、搜索、设置、分类管理、教程
 │   ├── Security/                   # 钥匙串、密码哈希、应用锁、锁屏 / 隐私遮罩窗口
+│   ├── Backup/                     # JSON 备份 / 恢复、自动备份、iCloud 同步状态与设置页
 │   ├── Intents/                    # App Intents：识图记账、记一笔、本月收支、AppShortcuts
 │   ├── OCR/                        # Vision 文字识别 + 纯 Swift 解析器
 │   ├── Utilities/                  # 格式化、颜色、CSV
