@@ -8,8 +8,9 @@ import UIKit
 
 struct LedgerBackup: Codable {
     static let formatID = "jianzhang-backup"
-    /// v2：新增账户、转账（转入账户、手续费）。v1 备份仍可导入。
-    static let currentVersion = 2
+    /// v2：新增账户、转账（转入账户、手续费）。
+    /// v3：新增记账规则、周期账单、导入批次、分类预算。v1 / v2 备份仍可导入。
+    static let currentVersion = 3
 
     var format: String = LedgerBackup.formatID
     var version: Int = LedgerBackup.currentVersion
@@ -19,6 +20,9 @@ struct LedgerBackup: Codable {
     var categories: [CategoryDTO]
     var records: [RecordDTO]
     var accounts: [AccountDTO]? = nil
+    var rules: [RuleDTO]? = nil
+    var recurring: [RecurringDTO]? = nil
+    var importBatches: [BatchDTO]? = nil
     /// 不包含密码、面容 ID 等安全设置
     var settings: SettingsDTO
 
@@ -30,6 +34,8 @@ struct LedgerBackup: Codable {
         var kind: String
         var sortOrder: Int
         var createdAt: Date
+        var monthlyBudget: Double? = nil
+        var lastAccountID: String? = nil
     }
 
     struct RecordDTO: Codable {
@@ -46,6 +52,63 @@ struct LedgerBackup: Codable {
         var accountID: UUID? = nil
         var toAccountID: UUID? = nil
         var fee: Double? = nil
+        var externalID: String? = nil
+        var importBatchID: String? = nil
+        var recurringKey: String? = nil
+    }
+
+    struct RuleDTO: Codable {
+        var id: UUID
+        var keyword: String
+        var displayName: String
+        var isLearned: Bool
+        var kind: String
+        var categoryID: String
+        var accountID: String
+        var hitCount: Int
+        var isEnabled: Bool
+        var createdAt: Date
+        var updatedAt: Date
+    }
+
+    struct RecurringDTO: Codable {
+        var id: UUID
+        var name: String
+        var amount: Double
+        var kind: String
+        var categoryID: String
+        var accountID: String
+        var toAccountID: String
+        var note: String
+        var merchant: String
+        var frequency: String
+        var interval: Int
+        var weekday: Int
+        var monthDay: Int
+        var lastDayOfMonth: Bool
+        var startDate: Date
+        var endDate: Date?
+        var maxCount: Int
+        var autoCreate: Bool
+        var remindEnabled: Bool
+        var remindDaysBefore: Int
+        var remindHour: Int
+        var remindMinute: Int
+        var isPaused: Bool
+        var lastProcessedAt: Date?
+        var createdAt: Date
+    }
+
+    struct BatchDTO: Codable {
+        var id: UUID
+        var source: String
+        var fileName: String
+        var createdAt: Date
+        var recordCount: Int
+        var expenseTotal: Double
+        var incomeTotal: Double
+        var firstDate: Date?
+        var lastDate: Date?
     }
 
     struct AccountDTO: Codable {
@@ -71,6 +134,11 @@ struct LedgerBackup: Codable {
         var appearance: Int?
         var defaultAccount: String?
         var hideInAppSwitcher: Bool?
+        var yearlyBudget: Double? = nil
+        var budgetRollover: Bool? = nil
+        var budgetAlerts: Bool? = nil
+        var budgetWarnPercent: Int? = nil
+        var learnRules: Bool? = nil
     }
 
     var recordDateRange: ClosedRange<Date>? {
@@ -103,12 +171,16 @@ struct RestoreResult {
     var skippedRecords = 0
     var insertedCategories = 0
     var insertedAccounts = 0
+    var insertedRules = 0
+    var insertedRecurring = 0
 
     var summary: String {
         var s = "导入 \(insertedRecords) 笔记录"
         if skippedRecords > 0 { s += "，跳过 \(skippedRecords) 笔已存在的记录" }
         if insertedCategories > 0 { s += "，新增 \(insertedCategories) 个分类" }
         if insertedAccounts > 0 { s += "，新增 \(insertedAccounts) 个账户" }
+        if insertedRules > 0 { s += "，\(insertedRules) 条记账规则" }
+        if insertedRecurring > 0 { s += "，\(insertedRecurring) 个周期账单" }
         return s + "。"
     }
 }
@@ -136,21 +208,34 @@ enum BackupService {
             currencySymbol: d.string(forKey: SettingsKey.currencySymbol),
             appearance: d.integer(forKey: SettingsKey.appearance),
             defaultAccount: d.string(forKey: SettingsKey.defaultAccount),
-            hideInAppSwitcher: d.object(forKey: SettingsKey.hideInAppSwitcher) as? Bool
+            hideInAppSwitcher: d.object(forKey: SettingsKey.hideInAppSwitcher) as? Bool,
+            yearlyBudget: d.double(forKey: BudgetKey.yearly),
+            budgetRollover: d.bool(forKey: BudgetKey.rollover),
+            budgetAlerts: d.bool(forKey: BudgetKey.alertsEnabled),
+            budgetWarnPercent: d.object(forKey: BudgetKey.warnPercent) as? Int,
+            learnRules: d.object(forKey: RuleStore.learnKey) as? Bool
         )
+        let rules = (try? context.fetch(FetchDescriptor<CategoryRule>())) ?? []
+        let recurring = (try? context.fetch(FetchDescriptor<RecurringRule>())) ?? []
+        let batches = (try? context.fetch(FetchDescriptor<ImportBatch>())) ?? []
         return LedgerBackup(
             createdAt: Date(),
             appVersion: Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "1.0",
             device: UIDevice.current.name,
             categories: categories.map {
                 LedgerBackup.CategoryDTO(id: $0.id, name: $0.name, icon: $0.icon, colorHex: $0.colorHex, kind: $0.kindRaw,
-                      sortOrder: $0.sortOrder, createdAt: $0.createdAt)
+                      sortOrder: $0.sortOrder, createdAt: $0.createdAt,
+                      monthlyBudget: $0.monthlyBudget > 0 ? $0.monthlyBudget : nil,
+                      lastAccountID: $0.lastAccountID.isEmpty ? nil : $0.lastAccountID)
             },
             records: records.map {
                 LedgerBackup.RecordDTO(id: $0.id, amount: $0.amount, kind: $0.kindRaw, note: $0.note, merchant: $0.merchant,
                       account: $0.accountName, date: $0.date, source: $0.source, createdAt: $0.createdAt,
                       categoryID: $0.category?.id, accountID: $0.accountRef?.id, toAccountID: $0.toAccount?.id,
-                      fee: $0.fee > 0 ? $0.fee : nil)
+                      fee: $0.fee > 0 ? $0.fee : nil,
+                      externalID: $0.externalID.isEmpty ? nil : $0.externalID,
+                      importBatchID: $0.importBatchID.isEmpty ? nil : $0.importBatchID,
+                      recurringKey: $0.recurringKey.isEmpty ? nil : $0.recurringKey)
             },
             accounts: accounts.map {
                 LedgerBackup.AccountDTO(id: $0.id, name: $0.name, type: $0.typeRaw, initialBalance: $0.initialBalance,
@@ -158,6 +243,27 @@ enum BackupService {
                                         icon: $0.icon, colorHex: $0.colorHex, note: $0.note,
                                         includeInNetWorth: $0.includeInNetWorth, isArchived: $0.isArchived,
                                         sortOrder: $0.sortOrder, createdAt: $0.createdAt)
+            },
+            rules: rules.map {
+                LedgerBackup.RuleDTO(id: $0.id, keyword: $0.keyword, displayName: $0.displayName, isLearned: $0.isLearned,
+                                     kind: $0.kindRaw, categoryID: $0.categoryID, accountID: $0.accountID,
+                                     hitCount: $0.hitCount, isEnabled: $0.isEnabled, createdAt: $0.createdAt, updatedAt: $0.updatedAt)
+            },
+            recurring: recurring.map {
+                LedgerBackup.RecurringDTO(id: $0.id, name: $0.name, amount: $0.amount, kind: $0.kindRaw,
+                                          categoryID: $0.categoryID, accountID: $0.accountID, toAccountID: $0.toAccountID,
+                                          note: $0.note, merchant: $0.merchant, frequency: $0.frequencyRaw,
+                                          interval: $0.interval, weekday: $0.weekday, monthDay: $0.monthDay,
+                                          lastDayOfMonth: $0.lastDayOfMonth, startDate: $0.startDate, endDate: $0.endDate,
+                                          maxCount: $0.maxCount, autoCreate: $0.autoCreate, remindEnabled: $0.remindEnabled,
+                                          remindDaysBefore: $0.remindDaysBefore, remindHour: $0.remindHour,
+                                          remindMinute: $0.remindMinute, isPaused: $0.isPaused,
+                                          lastProcessedAt: $0.lastProcessedAt, createdAt: $0.createdAt)
+            },
+            importBatches: batches.map {
+                LedgerBackup.BatchDTO(id: $0.id, source: $0.sourceRaw, fileName: $0.fileName, createdAt: $0.createdAt,
+                                      recordCount: $0.recordCount, expenseTotal: $0.expenseTotal, incomeTotal: $0.incomeTotal,
+                                      firstDate: $0.firstDate, lastDate: $0.lastDate)
             },
             settings: settings
         )
@@ -215,12 +321,18 @@ enum BackupService {
         var byID: [UUID: LedgerCategory] = [:]
         var byName: [String: LedgerCategory] = [:]
         var existingRecordIDs = Set<UUID>()
+        let existingRules = (try? context.fetch(FetchDescriptor<CategoryRule>())) ?? []
+        let existingRecurring = (try? context.fetch(FetchDescriptor<RecurringRule>())) ?? []
+        let existingBatches = (try? context.fetch(FetchDescriptor<ImportBatch>())) ?? []
 
         switch mode {
         case .replace:
             for r in existingRecords { context.delete(r) }
             for c in existingCategories { context.delete(c) }
             for a in existingAccounts { context.delete(a) }
+            for r in existingRules { context.delete(r) }
+            for r in existingRecurring { context.delete(r) }
+            for b in existingBatches { context.delete(b) }
         case .merge:
             for c in existingCategories {
                 byID[c.id] = c
@@ -265,6 +377,7 @@ enum BackupService {
                                    kind: RecordKind(rawValue: dto.kind) ?? .expense, sortOrder: dto.sortOrder)
             c.id = dto.id
             c.createdAt = dto.createdAt
+            c.monthlyBudget = dto.monthlyBudget ?? 0
             context.insert(c)
             categoryMap[dto.id] = c
             byName[dto.kind + "|" + dto.name] = c
@@ -284,9 +397,84 @@ enum BackupService {
             r.accountRef = dto.accountID.flatMap { accountMap[$0] }
             r.toAccount = dto.toAccountID.flatMap { accountMap[$0] }
             r.fee = dto.fee ?? 0
+            r.externalID = dto.externalID ?? ""
+            r.importBatchID = dto.importBatchID ?? ""
+            r.recurringKey = dto.recurringKey ?? ""
             context.insert(r)
             existingRecordIDs.insert(dto.id)
             result.insertedRecords += 1
+        }
+
+        // v3：分类上次账户、分类预算（合并时只补充未设置的）
+        func mapCategory(_ s: String) -> String {
+            guard let id = UUID(uuidString: s) else { return "" }
+            return (categoryMap[id]?.id ?? id).uuidString
+        }
+        func mapAccount(_ s: String) -> String {
+            guard let id = UUID(uuidString: s) else { return "" }
+            return (accountMap[id]?.id ?? id).uuidString
+        }
+        for dto in backup.categories {
+            guard let c = categoryMap[dto.id] else { continue }
+            if let b = dto.monthlyBudget, b > 0, c.monthlyBudget == 0 { c.monthlyBudget = b }
+            if let a = dto.lastAccountID, c.lastAccountID.isEmpty { c.lastAccountID = mapAccount(a) }
+        }
+
+        let ruleIDs = Set(mode == .merge ? existingRules.map(\.id) : [])
+        let ruleKeys = Set(mode == .merge ? existingRules.map { "\($0.isLearned)|\($0.keyword)" } : [])
+        for dto in backup.rules ?? [] where !ruleIDs.contains(dto.id) && !ruleKeys.contains("\(dto.isLearned)|\(dto.keyword)") {
+            let r = CategoryRule(keyword: dto.keyword, displayName: dto.displayName, isLearned: dto.isLearned,
+                                 kind: RecordKind(rawValue: dto.kind), categoryID: nil, accountID: nil)
+            r.id = dto.id
+            r.categoryID = mapCategory(dto.categoryID)
+            r.accountID = mapAccount(dto.accountID)
+            r.hitCount = dto.hitCount
+            r.isEnabled = dto.isEnabled
+            r.createdAt = dto.createdAt
+            r.updatedAt = dto.updatedAt
+            context.insert(r)
+            result.insertedRules += 1
+        }
+
+        let recurringIDs = Set(mode == .merge ? existingRecurring.map(\.id) : [])
+        for dto in backup.recurring ?? [] where !recurringIDs.contains(dto.id) {
+            let r = RecurringRule(name: dto.name, amount: dto.amount, kind: RecordKind(rawValue: dto.kind) ?? .expense,
+                                  frequency: RecurrenceFrequency(rawValue: dto.frequency) ?? .monthly, startDate: dto.startDate)
+            r.id = dto.id
+            r.categoryID = mapCategory(dto.categoryID)
+            r.accountID = mapAccount(dto.accountID)
+            r.toAccountID = mapAccount(dto.toAccountID)
+            r.note = dto.note
+            r.merchant = dto.merchant
+            r.interval = dto.interval
+            r.weekday = dto.weekday
+            r.monthDay = dto.monthDay
+            r.lastDayOfMonth = dto.lastDayOfMonth
+            r.endDate = dto.endDate
+            r.maxCount = dto.maxCount
+            r.autoCreate = dto.autoCreate
+            r.remindEnabled = dto.remindEnabled
+            r.remindDaysBefore = dto.remindDaysBefore
+            r.remindHour = dto.remindHour
+            r.remindMinute = dto.remindMinute
+            r.isPaused = dto.isPaused
+            r.lastProcessedAt = dto.lastProcessedAt
+            r.createdAt = dto.createdAt
+            context.insert(r)
+            result.insertedRecurring += 1
+        }
+
+        let batchIDs = Set(mode == .merge ? existingBatches.map(\.id) : [])
+        for dto in backup.importBatches ?? [] where !batchIDs.contains(dto.id) {
+            let b = ImportBatch(source: BillSource(rawValue: dto.source) ?? .alipay, fileName: dto.fileName)
+            b.id = dto.id
+            b.createdAt = dto.createdAt
+            b.recordCount = dto.recordCount
+            b.expenseTotal = dto.expenseTotal
+            b.incomeTotal = dto.incomeTotal
+            b.firstDate = dto.firstDate
+            b.lastDate = dto.lastDate
+            context.insert(b)
         }
 
         if mode == .replace {
@@ -307,6 +495,11 @@ enum BackupService {
         if let v = s.appearance { d.set(v, forKey: SettingsKey.appearance) }
         if let v = s.defaultAccount { d.set(v, forKey: SettingsKey.defaultAccount) }
         if let v = s.hideInAppSwitcher { d.set(v, forKey: SettingsKey.hideInAppSwitcher) }
+        if let v = s.yearlyBudget { d.set(v, forKey: BudgetKey.yearly) }
+        if let v = s.budgetRollover { d.set(v, forKey: BudgetKey.rollover) }
+        // 预算提醒需要通知权限：恢复后由用户在「预算」页重新开启
+        if let v = s.budgetWarnPercent { d.set(v, forKey: BudgetKey.warnPercent) }
+        if let v = s.learnRules { d.set(v, forKey: RuleStore.learnKey) }
     }
 }
 

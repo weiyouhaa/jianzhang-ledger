@@ -8,6 +8,8 @@ struct RecordEditorView: View {
     var initialDate: Date = Date()
     var initialKind: RecordKind = .expense
     var presetAccountID: UUID? = nil
+    /// 周期账单提醒「记一笔」时带入的内容
+    var prefill: RecordPrefill? = nil
 
     @Environment(\.modelContext) private var context
     @Environment(\.dismiss) private var dismiss
@@ -26,6 +28,11 @@ struct RecordEditorView: View {
     @State private var date = Date()
     @State private var source = "manual"
     @State private var didLoad = false
+    @State private var recurringKey = ""
+    /// 用户是否手动改过账户 / 分类（自动带出时不覆盖用户的选择）
+    @State private var accountTouched = false
+    @State private var categoryTouched = false
+    @State private var ruleHint: String?
 
     @State private var photoItem: PhotosPickerItem?
     @State private var isRecognizing = false
@@ -107,7 +114,11 @@ struct RecordEditorView: View {
                     TextField("备注", text: $note)
                     if kind.countsInStats {
                         TextField("商户（可选）", text: $merchant)
-                        accountPicker(title: "账户", selection: $accountID, allowNone: true)
+                        accountPicker(title: "账户", selection: userAccountBinding, allowNone: true)
+                    }
+                } footer: {
+                    if let ruleHint, kind.countsInStats {
+                        Label(ruleHint, systemImage: "wand.and.stars")
                     }
                 }
 
@@ -132,6 +143,19 @@ struct RecordEditorView: View {
                         }
                     } footer: {
                         Text("在本机识别金额、商户、时间与付款账户，图片不会上传。")
+                    }
+                }
+
+                if let record, record.kind != .adjustment {
+                    Section {
+                        NavigationLink {
+                            RecurringEditorView(rule: nil, template: record)
+                        } label: {
+                            Label(record.recurringKey.isEmpty ? "设为周期账单" : "由周期账单生成 · 再建一个周期",
+                                  systemImage: "arrow.triangle.2.circlepath")
+                        }
+                    } footer: {
+                        Text("按这条记录的金额、分类和账户，每月 / 每周等自动记账或提醒。")
                     }
                 }
 
@@ -170,6 +194,9 @@ struct RecordEditorView: View {
                 if newKind.countsInStats && !categories.contains(where: { $0.id == selectedCategoryID }) {
                     selectedCategoryID = categories.first?.id
                 }
+            }
+            .onChange(of: merchant) { _, value in
+                applyRule(merchant: value, overrideCategory: !categoryTouched)
             }
             .onChange(of: photoItem) { _, item in
                 guard let item else { return }
@@ -215,6 +242,12 @@ struct RecordEditorView: View {
                     .onTapGesture {
                         UISelectionFeedbackGenerator().selectionChanged()
                         selectedCategoryID = c.id
+                        categoryTouched = true
+                        ruleHint = nil
+                        // 新记录：带出该分类上次使用的账户
+                        if record == nil, !accountTouched, let a = RuleStore.lastAccount(for: c, in: context) {
+                            accountID = a.id
+                        }
                     }
                 }
             }
@@ -266,6 +299,23 @@ struct RecordEditorView: View {
         }
     }
 
+    private var userAccountBinding: Binding<UUID?> {
+        Binding(get: { accountID }, set: { accountID = $0; accountTouched = true })
+    }
+
+    /// 套用记账规则（分类记忆）。只影响新记录，且不覆盖用户手动选择的分类 / 账户。
+    private func applyRule(merchant value: String, overrideCategory: Bool) {
+        guard record == nil, kind.countsInStats else { return }
+        guard let hit = RuleStore.match(merchant: value, text: note, kind: kind, in: context, countHit: false) else { return }
+        if overrideCategory, let c = hit.category, c.kind == kind {
+            selectedCategoryID = c.id
+            ruleHint = "已按记账规则「\(hit.rule.displayName.isEmpty ? hit.rule.keyword : hit.rule.displayName)」选择 \(c.name)"
+        }
+        if !accountTouched, let a = hit.account ?? RuleStore.lastAccount(for: hit.category, in: context) {
+            accountID = a.id
+        }
+    }
+
     private var alertBinding: Binding<Bool> {
         Binding(get: { alertMessage != nil }, set: { if !$0 { alertMessage = nil } })
     }
@@ -286,11 +336,28 @@ struct RecordEditorView: View {
             feeText = record.fee > 0 ? String(format: "%.2f", record.fee) : ""
             date = record.date
             source = record.source
+        } else if let p = prefill {
+            kind = p.kind
+            amountText = p.amount > 0 ? String(format: "%.2f", p.amount) : ""
+            date = p.date
+            note = p.note
+            merchant = p.merchant
+            accountID = p.accountID ?? allAccounts.first(where: { $0.name == defaultAccount && !$0.isArchived })?.id
+            toAccountID = p.toAccountID
+            selectedCategoryID = p.categoryID ?? allCategories.first(where: { $0.kind == (p.kind.countsInStats ? p.kind : .expense) })?.id
+            recurringKey = p.recurringKey
+            source = p.recurringKey.isEmpty ? "manual" : "recurring"
+            accountTouched = true
+            categoryTouched = true
         } else {
             kind = initialKind
             date = initialDate
-            accountID = presetAccountID ?? allAccounts.first(where: { $0.name == defaultAccount && !$0.isArchived })?.id
             selectedCategoryID = allCategories.first(where: { $0.kind == (initialKind.countsInStats ? initialKind : .expense) })?.id
+            let firstCategory = allCategories.first(where: { $0.id == selectedCategoryID })
+            accountID = presetAccountID
+                ?? (initialKind.countsInStats ? RuleStore.lastAccount(for: firstCategory, in: context)?.id : nil)
+                ?? allAccounts.first(where: { $0.name == defaultAccount && !$0.isArchived })?.id
+            if presetAccountID != nil { accountTouched = true }
             amountFocused = true
         }
     }
@@ -313,6 +380,13 @@ struct RecordEditorView: View {
         let trimmedNote = note.trimmingCharacters(in: .whitespacesAndNewlines)
         let trimmedMerchant = kind.countsInStats ? merchant.trimmingCharacters(in: .whitespacesAndNewlines) : ""
 
+        // 分类记忆：有商户时记住「商户 → 分类 + 账户」（编辑时仅在分类或账户改变时更新）
+        let categoryChanged = record == nil || record?.category?.id != category?.id || record?.accountRef?.id != fromAccount?.id
+        if kind.countsInStats, !trimmedMerchant.isEmpty, categoryChanged {
+            RuleStore.learn(merchant: trimmedMerchant, kind: kind, category: category, account: fromAccount, in: context)
+        }
+        if kind.countsInStats { RuleStore.rememberAccount(fromAccount, for: category) }
+
         let target: LedgerRecord
         if let record {
             target = record
@@ -324,6 +398,7 @@ struct RecordEditorView: View {
         } else {
             target = LedgerRecord(amount: amount, kind: kind, category: nil, note: trimmedNote,
                                   merchant: trimmedMerchant, date: date, source: source)
+            target.recurringKey = recurringKey
             context.insert(target)
         }
         target.category = category
@@ -335,6 +410,7 @@ struct RecordEditorView: View {
         do {
             try context.save()
             UINotificationFeedbackGenerator().notificationOccurred(.success)
+            BudgetMonitor.check(in: context)
             dismiss()
         } catch {
             alertMessage = "保存失败：\(error.localizedDescription)"
@@ -394,12 +470,17 @@ struct RecordEditorView: View {
         if let m = parsed.merchant { merchant = m }
         if let d = parsed.date { date = d }
         let list = allCategories.filter { $0.kind == kind }
-        if let name = parsed.categoryName, let c = list.first(where: { $0.name == name }) {
+        let hit = RuleStore.match(merchant: parsed.merchant ?? "", kind: kind, in: context, countHit: false)
+        if let c = hit?.category, c.kind == kind {
+            // 记账规则优先于关键词猜测
+            selectedCategoryID = c.id
+            ruleHint = "已按记账规则「\(hit!.rule.displayName.isEmpty ? hit!.rule.keyword : hit!.rule.displayName)」选择 \(c.name)"
+        } else if let name = parsed.categoryName, let c = list.first(where: { $0.name == name }) {
             selectedCategoryID = c.id
         } else if !list.contains(where: { $0.id == selectedCategoryID }) {
             selectedCategoryID = list.first?.id
         }
-        if let a = DataStore.account(matching: parsed.accountHint, in: context) {
+        if let a = DataStore.account(matching: parsed.accountHint, in: context) ?? hit?.account {
             accountID = a.id
         }
         source = "ocr"

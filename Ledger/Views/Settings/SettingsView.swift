@@ -15,20 +15,26 @@ struct SettingsView: View {
     @AppStorage(SettingsKey.hideInAppSwitcher) private var hideInAppSwitcher = true
     @AppStorage(SettingsKey.lastBackupAt) private var lastBackupAt: Double = 0
     @State private var showDemoBackup = false
+    @State private var demoDestination: String?
+    @State private var showFileImporter = false
+    @State private var importSession: ImportSession?
+    @State private var importMessage: String?
+    @Query private var rules: [CategoryRule]
+    @Query private var recurringRules: [RecurringRule]
+    @Query private var batches: [ImportBatch]
 
     @State private var passcodeFlow: PasscodeFlowView.Mode?
     @State private var passcodeToggle = false
     @State private var biometricToggle = false
-    @State private var budgetText = ""
     @State private var showDeleteAll = false
     @State private var biometricError: String?
-    @FocusState private var budgetFocused: Bool
 
     var body: some View {
         NavigationStack {
             Form {
                 securitySection
                 bookkeepingSection
+                smartSection
                 backupSection
                 shortcutSection
                 appearanceSection
@@ -37,26 +43,45 @@ struct SettingsView: View {
             }
             .navigationTitle("设置")
             .navigationDestination(isPresented: $showDemoBackup) { BackupSettingsView() }
-            .task {
-                // 截图模式：直接打开「iCloud 与备份」
-                if ScreenshotDemo.screen == "backup" && !showDemoBackup { showDemoBackup = true }
-            }
-            .toolbar {
-                ToolbarItemGroup(placement: .keyboard) {
-                    Spacer()
-                    Button("完成") { budgetFocused = false }
+            .navigationDestination(item: $demoDestination) { screen in
+                switch screen {
+                case "rules": RulesView()
+                case "recurring": RecurringListView()
+                default: BudgetView()
                 }
+            }
+            .task {
+                // 截图模式：直接打开对应页面
+                switch ScreenshotDemo.screen {
+                case "backup": if !showDemoBackup { showDemoBackup = true }
+                case "rules", "recurring", "budgets": if demoDestination == nil { demoDestination = ScreenshotDemo.screen }
+                case "import":
+                    if importSession == nil, let session = ScreenshotDemo.importSession() { importSession = session }
+                default: break
+                }
+            }
+            .fileImporter(isPresented: $showFileImporter, allowedContentTypes: ImportSession.contentTypes) { result in
+                switch result {
+                case .success(let url):
+                    do { importSession = try ImportSession.load(url: url) }
+                    catch { importMessage = error.localizedDescription }
+                case .failure(let error):
+                    importMessage = error.localizedDescription
+                }
+            }
+            .sheet(item: $importSession) { session in
+                ImportPreviewView(session: session) { count in
+                    if count > 0 { importMessage = "已导入 \(count) 笔。可在「导入记录」中整批撤销。" }
+                }
+            }
+            .alert("账单导入", isPresented: Binding(get: { importMessage != nil }, set: { if !$0 { importMessage = nil } })) {
+                Button("好", role: .cancel) {}
+            } message: {
+                Text(importMessage ?? "")
             }
             .onAppear {
                 passcodeToggle = lock.passcodeEnabled
                 biometricToggle = lock.biometricsEnabled
-                if budget <= 0 {
-                    budgetText = ""
-                } else if budget == budget.rounded() {
-                    budgetText = String(format: "%.0f", budget)
-                } else {
-                    budgetText = String(format: "%.2f", budget)
-                }
             }
             .onChange(of: lock.passcodeEnabled) { _, enabled in
                 passcodeToggle = enabled
@@ -134,17 +159,16 @@ struct SettingsView: View {
             } label: {
                 Label("分类管理", systemImage: "square.grid.2x2.fill")
             }
-            HStack {
-                Label("每月预算", systemImage: "target")
-                Spacer()
-                TextField("未设置", text: $budgetText)
-                    .keyboardType(.decimalPad)
-                    .multilineTextAlignment(.trailing)
-                    .focused($budgetFocused)
-                    .frame(maxWidth: 140)
-                    .onChange(of: budgetText) { _, newValue in
-                        budget = max(0, Money.parse(newValue) ?? 0)
-                    }
+            NavigationLink {
+                BudgetView()
+            } label: {
+                HStack {
+                    Label("预算", systemImage: "target")
+                    Spacer()
+                    Text(budget > 0 ? "每月 \(Money.format(budget))" : "未设置")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
             }
             HStack {
                 Label("默认账户", systemImage: "creditcard.fill")
@@ -167,6 +191,45 @@ struct SettingsView: View {
                 Text("日元 JP¥").tag("JP¥")
             } label: {
                 Label("货币符号", systemImage: "dollarsign.circle.fill")
+            }
+        }
+    }
+
+    private var smartSection: some View {
+        Section {
+            NavigationLink {
+                RulesView()
+            } label: {
+                settingRow("记账规则", icon: "wand.and.stars", detail: rules.isEmpty ? "" : "\(rules.count) 条")
+            }
+            Button {
+                showFileImporter = true
+            } label: {
+                Label("导入支付宝 / 微信账单", systemImage: "square.and.arrow.down.on.square")
+            }
+            NavigationLink {
+                ImportBatchesView()
+            } label: {
+                settingRow("导入记录", icon: "clock.arrow.circlepath", detail: batches.isEmpty ? "" : "\(batches.count) 次")
+            }
+            NavigationLink {
+                RecurringListView()
+            } label: {
+                settingRow("周期账单", icon: "arrow.triangle.2.circlepath", detail: recurringRules.isEmpty ? "" : "\(recurringRules.count) 项")
+            }
+        } header: {
+            Text("智能记账")
+        } footer: {
+            Text("支付宝：我的 › 账单 › 右上角 ··· › 开具交易流水证明 › 用于个人对账；微信：我 › 服务 › 钱包 › 账单 › 常见问题 › 下载账单 › 用于个人对账。收到的 CSV / XLSX 文件（解压后）用「存储到文件」保存，再在这里导入。")
+        }
+    }
+
+    private func settingRow(_ title: String, icon: String, detail: String) -> some View {
+        HStack {
+            Label(title, systemImage: icon)
+            Spacer()
+            if !detail.isEmpty {
+                Text(detail).font(.subheadline).foregroundStyle(.secondary)
             }
         }
     }
@@ -306,6 +369,7 @@ struct SettingsView: View {
     @MainActor
     private func deleteAll() {
         for r in records { context.delete(r) }
+        for b in batches { context.delete(b) }
         try? context.save()
     }
 }

@@ -94,6 +94,11 @@ jobs:
           shoot account  light 11-account-detail
           shoot assets   dark  12-assets-dark
           shoot delete   light 13-delete-confirm
+          shoot rules       light 14-rules
+          shoot import      light 15-import-preview
+          shoot recurring   light 16-recurring
+          shoot budgets     light 17-budgets
+          shoot statsbudget light 18-stats-budget
           shoot home     dark  07-home-dark
           shoot stats    dark  08-stats-dark
           ls -l screenshots

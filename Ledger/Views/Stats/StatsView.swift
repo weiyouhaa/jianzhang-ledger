@@ -4,7 +4,10 @@ import Charts
 
 struct StatsView: View {
     @Query(sort: \LedgerRecord.date, order: .reverse) private var allRecords: [LedgerRecord]
+    @Query(sort: \LedgerCategory.sortOrder) private var categories: [LedgerCategory]
     @AppStorage(SettingsKey.monthlyBudget) private var budget: Double = 0
+    @AppStorage(BudgetKey.yearly) private var yearlyBudget: Double = 0
+    @AppStorage(BudgetKey.rollover) private var rollover = false
 
     @State private var period: Period = .month
     @State private var anchor: Date = Date()
@@ -74,11 +77,16 @@ struct StatsView: View {
 
                     overviewCard(expense: expense, income: income, count: periodRecords.count)
 
-                    if period == .month && budget > 0 {
+                    if period == .month {
+                        let status = BudgetService.status(records: allRecords, categories: categories, month: anchor)
+                        if status.total != nil || !status.categories.isEmpty {
+                            card { BudgetStatsCard(status: status) }
+                        }
+                    } else if yearlyBudget > 0 {
                         card {
                             VStack(alignment: .leading, spacing: 10) {
-                                Label("预算", systemImage: "target").font(.headline)
-                                BudgetProgressView(spent: expense, budget: budget)
+                                Label("年度预算", systemImage: "target").font(.headline)
+                                BudgetProgressView(spent: expense, budget: yearlyBudget, title: "\(periodTitle)预算")
                             }
                         }
                     }

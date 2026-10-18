@@ -10,7 +10,8 @@ enum DataStore {
 
     /// 存储文件名保持 "Ledger" 不变（Application Support/Ledger.store），本地 / iCloud 模式共用同一个文件，切换不丢数据
     private static func makeContainer() -> (container: ModelContainer, status: SyncStatus) {
-        let schema = Schema([LedgerRecord.self, LedgerCategory.self, LedgerAccount.self])
+        let schema = Schema([LedgerRecord.self, LedgerCategory.self, LedgerAccount.self,
+                             CategoryRule.self, ImportBatch.self, RecurringRule.self])
         var status: SyncStatus = .local
 
         if !ScreenshotDemo.isActive && UserDefaults.standard.bool(forKey: SettingsKey.iCloudSyncEnabled) {
@@ -122,6 +123,16 @@ enum DataStore {
     static func accounts(in context: ModelContext, includeArchived: Bool = false) -> [LedgerAccount] {
         let all = (try? context.fetch(FetchDescriptor<LedgerAccount>(sortBy: [SortDescriptor(\LedgerAccount.sortOrder)]))) ?? []
         return includeArchived ? all : all.filter { !$0.isArchived }
+    }
+
+    static func account(idString: String, in context: ModelContext) -> LedgerAccount? {
+        guard let id = UUID(uuidString: idString) else { return nil }
+        return account(id: id, in: context)
+    }
+
+    static func category(idString: String, in context: ModelContext) -> LedgerCategory? {
+        guard let id = UUID(uuidString: idString) else { return nil }
+        return category(id: id, in: context)
     }
 
     static func account(id: UUID, in context: ModelContext) -> LedgerAccount? {

@@ -83,13 +83,14 @@ struct BudgetProgressView: View {
     let spent: Double
     let budget: Double
     var light: Bool = false
+    var title: String = "本月预算"
 
     var body: some View {
         let ratio = budget > 0 ? spent / budget : 0
         let over = ratio > 1
         VStack(alignment: .leading, spacing: 6) {
             HStack {
-                Text("本月预算 \(Money.format(budget))")
+                Text("\(title) \(Money.format(budget))")
                 Spacer()
                 Text(over ? "超支 \(Money.format(spent - budget))" : "剩余 \(Money.format(budget - spent))")
             }

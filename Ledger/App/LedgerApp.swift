@@ -3,6 +3,7 @@ import SwiftData
 
 @main
 struct LedgerApp: App {
+    @UIApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @StateObject private var lock = AppLockManager()
 
     var body: some Scene {

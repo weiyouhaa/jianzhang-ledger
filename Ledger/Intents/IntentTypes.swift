@@ -153,23 +153,37 @@ enum IntentRecorder {
                      note: String, merchant: String, date: Date, source: String,
                      accountID: UUID? = nil, accountHint: AccountHint? = nil) throws -> LedgerRecord {
         let context = DataStore.shared.mainContext
+        // 分类：指定 > 记账规则（分类记忆）> 关键词猜测
+        let hit = categoryID == nil ? RuleStore.match(merchant: merchant, text: note, kind: kind, in: context) : nil
         let category = categoryID.flatMap { DataStore.category(id: $0, in: context) }
+            ?? hit?.category
             ?? DataStore.category(named: categoryName, kind: kind, in: context)
-        // 账户：指定 > 识图线索匹配 > 默认账户
-        let defaultName = UserDefaults.standard.string(forKey: SettingsKey.defaultAccount) ?? ""
+        // 账户：指定 > 识图线索匹配 > 规则账户 > 该分类上次使用的账户 > 默认账户
         let account: LedgerAccount? = accountID.flatMap { DataStore.account(id: $0, in: context) }
             ?? DataStore.account(matching: accountHint, in: context)
-            ?? DataStore.account(named: defaultName, in: context)
+            ?? hit?.account
+            ?? RuleStore.lastAccount(for: category, in: context)
+            ?? RuleStore.defaultAccount(in: context)
         let record = LedgerRecord(amount: (amount * 100).rounded() / 100, kind: kind, category: category,
                                   note: note, merchant: merchant, account: account?.name ?? "", date: date, source: source)
         record.accountRef = account
         context.insert(record)
+        RuleStore.rememberAccount(account, for: category)
         do {
             try context.save()
         } catch {
             throw LedgerIntentError.saveFailed
         }
+        BudgetMonitor.check(in: context)
         return record
+    }
+
+    /// 预览用：规则命中时显示规则分类
+    @MainActor
+    static func previewCategoryName(kind: RecordKind, merchant: String, guessed: String?) -> String {
+        let context = DataStore.shared.mainContext
+        if let c = RuleStore.match(merchant: merchant, kind: kind, in: context, countHit: false)?.category { return c.name }
+        return guessed ?? (kind == .income ? "其他收入" : "其他")
     }
 
     /// 重复判断：金额相同、商户相同、时间相差 2 分钟以内（重复识别同一张截图时不重复记账）

@@ -41,6 +41,10 @@ final class LedgerCategory {
     var kindRaw: String = RecordKind.expense.rawValue
     var sortOrder: Int = 0
     var createdAt: Date = Date()
+    /// 分类月预算（0 = 未设置）
+    var monthlyBudget: Double = 0
+    /// 该分类最近一次使用的账户（UUID 字符串），记一笔时自动带出
+    var lastAccountID: String = ""
 
     @Relationship(deleteRule: .nullify, inverse: \LedgerRecord.category)
     var records: [LedgerRecord]? = []
@@ -82,6 +86,12 @@ final class LedgerRecord {
     var toAccount: LedgerAccount?
     /// 转账手续费（从转出账户扣除）
     var fee: Double = 0
+    /// 外部订单号（账单导入时的交易订单号，用于去重）
+    var externalID: String = ""
+    /// 所属导入批次（ImportBatch.id 的字符串），用于整批撤销
+    var importBatchID: String = ""
+    /// 周期账单生成的记录：「规则ID|yyyy-MM-dd」，保证不重复生成
+    var recurringKey: String = ""
 
     init(amount: Double, kind: RecordKind, category: LedgerCategory?, note: String = "", merchant: String = "",
          account: String = "", date: Date = Date(), source: String = "manual") {

@@ -95,7 +95,8 @@ struct RecognizeReceiptIntent: AppIntent {
 
         func line(_ item: Item) -> String {
             var parts = ["\(item.kind.title) \(Money.format(item.amount))"]
-            parts.append(category?.name ?? item.parsed.categoryName ?? (item.kind == .income ? "其他收入" : "其他"))
+            parts.append(category?.name ?? IntentRecorder.previewCategoryName(kind: item.kind, merchant: item.merchant,
+                                                                                guessed: item.parsed.categoryName))
             if !item.merchant.isEmpty { parts.append(item.merchant) }
             parts.append(item.dateRecognized ? DateText.monthDayTime.string(from: item.date) : "时间未识别")
             return parts.joined(separator: " · ")

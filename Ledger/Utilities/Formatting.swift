@@ -36,6 +36,11 @@ enum Money {
     }
 
     /// 解析用户输入的金额字符串
+    /// 输入框用：整数不带小数
+    static func plain(_ value: Double) -> String {
+        value == value.rounded() ? String(format: "%.0f", value) : String(format: "%.2f", value)
+    }
+
     static func parse(_ text: String) -> Double? {
         let cleaned = text.replacingOccurrences(of: ",", with: "")
             .replacingOccurrences(of: "，", with: "")

@@ -5,6 +5,7 @@ struct HomeView: View {
     @Environment(\.modelContext) private var context
     @Query(sort: \LedgerRecord.date, order: .reverse) private var allRecords: [LedgerRecord]
     @AppStorage(SettingsKey.monthlyBudget) private var budget: Double = 0
+    @AppStorage(BudgetKey.rollover) private var rollover = false
 
     @State private var month: Date = DateText.calendar.startOfMonth(for: Date())
     @State private var editorTarget: EditorTarget?
@@ -61,7 +62,7 @@ struct HomeView: View {
                         month: month,
                         income: income,
                         expense: expense,
-                        budget: budget,
+                        budget: BudgetService.effectiveMonthlyBudget(records: allRecords, month: month),
                         canGoNext: !isCurrentMonth,
                         onPrevious: { shiftMonth(-1) },
                         onNext: { shiftMonth(1) }

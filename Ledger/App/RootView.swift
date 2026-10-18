@@ -26,6 +26,7 @@ struct RootView: View {
             await CloudSync.refreshAvailability()
             if DataStore.syncStatus.isCloud { DataStore.dedupeCategories(in: DataStore.shared.mainContext) }
             await AutoBackup.runIfDue(context: DataStore.shared.mainContext)
+            await Self.runSmartTasks()
         }
         .onChange(of: lock.isLocked) { _, locked in
             syncLockWindow(locked)
@@ -36,6 +37,7 @@ struct RootView: View {
                 Task { @MainActor in
                     if DataStore.syncStatus.isCloud { DataStore.dedupeCategories(in: DataStore.shared.mainContext) }
                     await AutoBackup.runIfDue(context: DataStore.shared.mainContext)
+                    await Self.runSmartTasks()
                 }
             }
             if hideInAppSwitcher && phase != .active {
@@ -44,6 +46,16 @@ struct RootView: View {
                 OverlayWindowManager.shared.hidePrivacy()
             }
         }
+    }
+
+    /// 周期账单追补记账、预算检查、重排提醒
+    @MainActor
+    static func runSmartTasks() async {
+        guard !ScreenshotDemo.isActive else { return }
+        let context = DataStore.shared.mainContext
+        RecurringEngine.run(in: context)
+        BudgetMonitor.check(in: context)
+        await NotificationManager.shared.rescheduleRecurring(in: context)
     }
 
     private var colorScheme: ColorScheme? {
@@ -75,6 +87,7 @@ struct RootView: View {
 
 struct MainTabView: View {
     @State private var tab = ScreenshotDemo.initialTab
+    @ObservedObject private var router = NotificationRouter.shared
 
     var body: some View {
         TabView(selection: $tab) {
@@ -90,6 +103,9 @@ struct MainTabView: View {
             SettingsView()
                 .tabItem { Label("设置", systemImage: "gearshape.fill") }
                 .tag(3)
+        }
+        .sheet(item: $router.prefill) { p in
+            RecordEditorView(record: nil, prefill: p)
         }
     }
 }
