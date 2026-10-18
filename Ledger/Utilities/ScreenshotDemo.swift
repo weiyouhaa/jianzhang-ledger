@@ -157,8 +157,12 @@ enum ScreenshotDemo {
                 r.accountRef = accountByName[item.3]
                 context.insert(r)
                 if item.0 == "购物" {
-                    let payDay = cal.date(byAdding: .day, value: 22, to: start) ?? start
-                    transfer(amount, from: "招商银行储蓄卡", to: "招行信用卡", date: payDay, note: "信用卡还款")
+                    // 次月 23 日还清上月账单
+                    let nextMonth = cal.date(byAdding: .month, value: 1, to: start) ?? start
+                    let payDay = cal.date(byAdding: .day, value: 22, to: nextMonth) ?? nextMonth
+                    if payDay < now, back > 1 {
+                        transfer(amount, from: "招商银行储蓄卡", to: "招行信用卡", date: payDay, note: "信用卡还款")
+                    }
                 }
             }
             let mid = cal.date(byAdding: .day, value: 15, to: start) ?? start

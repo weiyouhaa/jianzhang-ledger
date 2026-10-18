@@ -167,7 +167,7 @@ final class LedgerRecord {
 
 /// 账户类型
 enum AccountType: String, CaseIterable, Identifiable, Codable {
-    case cash, debit, alipay, wechat, investment, receivable, otherAsset
+    case debit, alipay, wechat, cash, investment, receivable, otherAsset
     case credit, consumerCredit, loan, otherLiability
 
     var id: String { rawValue }

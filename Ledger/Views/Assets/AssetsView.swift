@@ -59,6 +59,13 @@ struct AssetsView: View {
                         .listRowBackground(Color.clear)
                     }
                 } else {
+                    ForEach(assetGroups) { group in
+                        accountSection(group, balances: balances)
+                    }
+                    ForEach(liabilityGroups) { group in
+                        accountSection(group, balances: balances)
+                    }
+
                     let trend = netWorthTrend(included)
                     if trend.count > 1 {
                         Section("净资产趋势") {
@@ -66,13 +73,6 @@ struct AssetsView: View {
                                 .frame(height: 170)
                                 .padding(.vertical, 6)
                         }
-                    }
-
-                    ForEach(assetGroups) { group in
-                        accountSection(group, balances: balances)
-                    }
-                    ForEach(liabilityGroups) { group in
-                        accountSection(group, balances: balances)
                     }
                 }
 
