@@ -1,0 +1,13 @@
+# Xcode / XcodeGen
+*.xcodeproj
+*.xcworkspace
+xcuserdata/
+DerivedData/
+build/
+*.ipa
+*.xcarchive
+Payload/
+.DS_Store
+# Linux 本地语法检查产物
+Tools/ParserCheck/.build/
+Tools/ParserCheck/parsercheck

@@ -1,0 +1,51 @@
+# XcodeGen 配置：CI 中运行 `xcodegen generate` 生成 Ledger.xcodeproj（不提交到仓库）
+name: Ledger
+
+options:
+  bundleIdPrefix: com.fve
+  developmentLanguage: zh-Hans
+  createIntermediateGroups: true
+  deploymentTarget:
+    iOS: "17.0"
+
+settings:
+  base:
+    MARKETING_VERSION: "1.0.0"
+    CURRENT_PROJECT_VERSION: "1"
+    # Xcode 只接受 4.0 / 4.2 / 5.0 / 6.0；5.0 即 Swift 5 语言模式（由新编译器编译，支持 5.9+ 语法），避免 Swift 6 严格并发报错
+    SWIFT_VERSION: "5.0"
+    SWIFT_STRICT_CONCURRENCY: minimal
+    IPHONEOS_DEPLOYMENT_TARGET: "17.0"
+    TARGETED_DEVICE_FAMILY: "1"
+
+targets:
+  Ledger:
+    type: application
+    platform: iOS
+    sources:
+      - path: Ledger
+    settings:
+      base:
+        PRODUCT_NAME: Ledger
+        # 可在此修改 Bundle ID，或在 CI 中通过 workflow_dispatch 输入覆盖
+        PRODUCT_BUNDLE_IDENTIFIER: com.fve.ledger
+        INFOPLIST_FILE: Config/Info.plist
+        GENERATE_INFOPLIST_FILE: NO
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
+        CODE_SIGN_STYLE: Automatic
+        DEVELOPMENT_TEAM: ""
+        ENABLE_PREVIEWS: YES
+        SUPPORTS_MACCATALYST: NO
+        SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD: NO
+        LOCALIZATION_PREFERS_STRING_CATALOGS: NO
+
+schemes:
+  Ledger:
+    build:
+      targets:
+        Ledger: all
+    run:
+      config: Debug
+    archive:
+      config: Release
