@@ -56,6 +56,11 @@ jobs:
             Tools/ImportCheck/main.swift -o "$RUNNER_TEMP/importcheck"
           "$RUNNER_TEMP/importcheck" Tests/Fixtures/import
 
+      - name: Passcode route tests (real vs decoy unlock)
+        run: |
+          swiftc Tools/PasscodeRouteCheck/main.swift -o "$RUNNER_TEMP/passcoderoute"
+          "$RUNNER_TEMP/passcoderoute"
+
       - name: Backup crypto tests (AES-GCM round-trip, wrong password, tampering, plain v1/v3)
         run: |
           swiftc Ledger/Backup/BackupCrypto.swift Ledger/Backup/BackupFormat.swift Tools/BackupCryptoCheck/main.swift \

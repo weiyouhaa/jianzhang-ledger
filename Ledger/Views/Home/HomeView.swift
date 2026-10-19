@@ -4,13 +4,20 @@ import SwiftData
 struct HomeView: View {
     @Environment(\.modelContext) private var context
     @Query(sort: \LedgerRecord.date, order: .reverse) private var allRecords: [LedgerRecord]
-    @AppStorage(SettingsKey.monthlyBudget) private var budget: Double = 0
+    @AppStorage(SettingsKey.monthlyBudget) private var realBudget: Double = 0
     @AppStorage(BudgetKey.rollover) private var rollover = false
 
     @State private var month: Date = DateText.calendar.startOfMonth(for: Date())
     @State private var editorTarget: EditorTarget?
     @State private var pendingDelete: LedgerRecord?
     @State private var showDemoSearch = false
+
+    private var budget: Double {
+        if SessionManager.shared.isDecoy {
+            return UserDefaults.standard.object(forKey: "decoy.monthlyBudget") as? Double ?? 3000
+        }
+        return realBudget
+    }
 
     enum EditorTarget: Identifiable {
         case new

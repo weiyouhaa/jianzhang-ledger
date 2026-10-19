@@ -8,6 +8,8 @@ import UserNotifications
 final class NotificationRouter: ObservableObject {
     static let shared = NotificationRouter()
     @Published var prefill: RecordPrefill?
+    /// 快捷指令「到 App 里改」：按记录 UUID 打开编辑页
+    @Published var editRecordID: String?
 }
 
 final class AppDelegate: NSObject, UIApplicationDelegate {

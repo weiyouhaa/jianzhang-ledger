@@ -294,13 +294,14 @@ struct ReviewSnippetDemoView: View {
                         choice("✏️ 修改第几笔…", .primary)
                         choice("🗑 删除第几笔…", .red)
                     }
+                    choice("⌨️ 在 App 里改金额 / 商户 / 时间", .primary)
                     HStack(spacing: 8) {
-                        choice("➕ 添加一笔", .primary)
+                        choice("➕ 添加一笔（打开 App）", .primary)
                         choice("♻️ 重复的 1 笔仍然保存", .primary)
                     }
                     choice("取消", .secondary)
                 }
-                Text("示意图：iOS 26 上快捷指令弹窗的样式（requestChoice + 片段视图）；iOS 17 / 18 以列表选择呈现。")
+                Text("示意图：需要改金额/商户/时间时选「在 App 里改」，会先保存再打开简账（弹窗内不再弹出键盘）。")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
             }

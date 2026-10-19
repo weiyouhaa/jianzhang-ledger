@@ -35,16 +35,15 @@ struct ShortcutGuideView: View {
             }
 
             Section {
-                Label("✅ 全部保存：保存列表中的所有记录（已存在的重复记录默认跳过）", systemImage: "checkmark.circle")
-                Label("✏️ 修改：选第几笔，再选金额、收支类型、分类、商户 / 备注、账户或时间逐项修改，完成后回到列表", systemImage: "pencil")
-                Label("🗑 删除：去掉识别错的那一笔", systemImage: "trash")
-                Label("➕ 添加一笔：补上漏识别的记录（金额、类型、分类，商户和账户可跳过）", systemImage: "plus.circle")
-                Label("♻️ 重复项：标为「已存在」的记录可以改为仍然保存", systemImage: "arrow.triangle.2.circlepath")
-                Label("取消：不保存任何记录", systemImage: "xmark.circle")
+                Label("✅ 全部保存：保存列表中未跳过的记录", systemImage: "checkmark.circle")
+                Label("✏️ 修改：可在弹窗内改收支类型、分类、账户，或把时间改为现在", systemImage: "pencil")
+                Label("⌨️ 在 App 里改金额 / 商户 / 时间：先保存当前列表，再打开简账编辑对应那一笔（弹窗里不再弹出键盘）", systemImage: "arrow.up.forward.app")
+                Label("➕ 添加一笔（打开 App）：先保存列表，再打开新建记账页", systemImage: "plus.circle")
+                Label("🗑 删除 / ♻️ 重复项 / 取消", systemImage: "trash")
             } header: {
                 Text("弹窗审核")
             } footer: {
-                Text("iOS 26 上以按钮和识别结果卡片显示；iOS 17 / 18 以选择列表显示（明细写在提示文字里）。修改过分类或账户的商户会自动记入「分类记忆」。")
+                Text("iOS 26+ 用按钮 + 卡片；iOS 17 / 18 用列表。因系统限制，弹窗内无法稳定弹出键盘，需要打字的修改会跳进 App。")
             }
             .font(.subheadline)
 

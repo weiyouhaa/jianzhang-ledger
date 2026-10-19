@@ -3,6 +3,7 @@ import UIKit
 
 struct RootView: View {
     @EnvironmentObject private var lock: AppLockManager
+    @EnvironmentObject private var session: SessionManager
     @Environment(\.scenePhase) private var scenePhase
     @AppStorage(SettingsKey.appearance) private var appearance = 0
     @AppStorage(SettingsKey.hideInAppSwitcher) private var hideInAppSwitcher = true
@@ -24,13 +25,28 @@ struct RootView: View {
             }
         }
         .preferredColorScheme(colorScheme)
-        .onAppear { syncLockWindow(lock.isLocked) }
+        .onOpenURL { url in
+            guard url.scheme == "jianzhang" else { return }
+            if !lock.isLocked { PendingAppEdit.consumeIfNeeded() }
+        }
+        .onAppear {
+            syncLockWindow(lock.isLocked)
+            if ScreenshotDemo.screen == "decoyhome" {
+                SessionManager.shared.forceDecoyForDemo()
+            }
+            if ScreenshotDemo.screen == "decoysettings" {
+                // 截图设置页：真实模式，但防窥开关显示为开
+                DecoyPasscodeStore.isEnabled = true
+            }
+        }
         .task {
-            // 刷新 iCloud 容器可用性（供下次启动决定是否启用 CloudKit），并按需自动备份
             await CloudSync.refreshAvailability()
-            if DataStore.syncStatus.isCloud { DataStore.dedupeCategories(in: DataStore.shared.mainContext) }
-            await AutoBackup.runIfDue(context: DataStore.shared.mainContext)
+            if !SessionManager.shared.isDecoy {
+                if DataStore.syncStatus.isCloud { DataStore.dedupeCategories(in: DataStore.shared.mainContext) }
+                await AutoBackup.runIfDue(context: DataStore.shared.mainContext)
+            }
             await Self.runSmartTasks()
+            if !lock.isLocked { PendingAppEdit.consumeIfNeeded() }
         }
         .onChange(of: lock.isLocked) { _, locked in
             syncLockWindow(locked)
@@ -39,12 +55,14 @@ struct RootView: View {
             lock.handleScenePhase(phase)
             if phase == .active {
                 Task { @MainActor in
-                    if DataStore.syncStatus.isCloud { DataStore.dedupeCategories(in: DataStore.shared.mainContext) }
-                    await AutoBackup.runIfDue(context: DataStore.shared.mainContext)
+                    if !SessionManager.shared.isDecoy {
+                        if DataStore.syncStatus.isCloud { DataStore.dedupeCategories(in: DataStore.shared.mainContext) }
+                        await AutoBackup.runIfDue(context: DataStore.shared.mainContext)
+                    }
                     await Self.runSmartTasks()
                 }
             }
-            if phase == .background {
+            if phase == .background, !SessionManager.shared.isDecoy {
                 AutoBackup.runOnBackground(context: DataStore.shared.mainContext)
             }
             if hideInAppSwitcher && phase != .active {
@@ -59,6 +77,8 @@ struct RootView: View {
     @MainActor
     static func runSmartTasks() async {
         guard !ScreenshotDemo.isActive else { return }
+        // 防窥模式：不跑真实周期账单 / 预算通知，避免真实数据渗入通知中心
+        if SessionManager.shared.isDecoy { return }
         let context = DataStore.shared.mainContext
         RecurringEngine.run(in: context)
         BudgetMonitor.check(in: context)
@@ -114,5 +134,21 @@ struct MainTabView: View {
         .sheet(item: $router.prefill) { p in
             RecordEditorView(record: nil, prefill: p)
         }
+        .sheet(isPresented: Binding(
+            get: { router.editRecordID != nil },
+            set: { if !$0 { router.editRecordID = nil } }
+        )) {
+            if let id = router.editRecordID.flatMap({ UUID(uuidString: $0) }),
+               let record = DataStore.record(id: id, in: DataStore.activeContext) {
+                RecordEditorView(record: record)
+            } else {
+                NavigationStack {
+                    Text("找不到这条记录，可能已被删除。")
+                        .padding()
+                        .toolbar { ToolbarItem(placement: .cancellationAction) { Button("关闭") { router.editRecordID = nil } } }
+                }
+            }
+        }
+        .onAppear { PendingAppEdit.consumeIfNeeded() }
     }
 }

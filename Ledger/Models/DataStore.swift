@@ -8,6 +8,15 @@ enum DataStore {
     static var shared: ModelContainer { setup.container }
     static var syncStatus: SyncStatus { setup.status }
 
+    /// 当前 UI 应使用的容器（防窥模式下为独立文件）
+    @MainActor
+    static var active: ModelContainer { SessionManager.shared.container }
+
+    @MainActor
+    static var activeContext: ModelContext { SessionManager.shared.container.mainContext }
+
+    private static let decoyStoreName = "LedgerDecoy"
+
     /// 存储文件名保持 "Ledger" 不变（Application Support/Ledger.store），本地 / iCloud 模式共用同一个文件，切换不丢数据
     private static func makeContainer() -> (container: ModelContainer, status: SyncStatus) {
         let schema = Schema([LedgerRecord.self, LedgerCategory.self, LedgerAccount.self,
@@ -197,6 +206,13 @@ enum DataStore {
         return list.first(where: { $0.name == fallbackName }) ?? list.last
     }
 
+    static func record(id: UUID, in context: ModelContext) -> LedgerRecord? {
+        let target = id
+        var d = FetchDescriptor<LedgerRecord>(predicate: #Predicate<LedgerRecord> { $0.id == target })
+        d.fetchLimit = 1
+        return (try? context.fetch(d))?.first
+    }
+
     static func category(id: UUID, in context: ModelContext) -> LedgerCategory? {
         let target = id
         var descriptor = FetchDescriptor<LedgerCategory>(predicate: #Predicate<LedgerCategory> { $0.id == target })
@@ -212,5 +228,30 @@ enum DataStore {
             sortBy: [SortDescriptor(\LedgerRecord.date, order: .reverse)]
         )
         return (try? context.fetch(descriptor)) ?? []
+    }
+
+    // MARK: - 防窥独立库（永不走 CloudKit）
+
+    static func makeDecoyContainer(inMemory: Bool) -> ModelContainer {
+        let schema = Schema([LedgerRecord.self, LedgerCategory.self, LedgerAccount.self,
+                             CategoryRule.self, ImportBatch.self, RecurringRule.self])
+        let config = ModelConfiguration(decoyStoreName, schema: schema, isStoredInMemoryOnly: inMemory,
+                                        allowsSave: true, cloudKitDatabase: .none)
+        do {
+            let container = try ModelContainer(for: schema, configurations: [config])
+            DecoySeeder.seedIfNeeded(container: container)
+            return container
+        } catch {
+            fatalError("无法创建防窥数据存储：\(error)")
+        }
+    }
+
+    static func deleteDecoyStoreFiles() {
+        let fm = FileManager.default
+        guard let support = try? fm.url(for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: false) else { return }
+        for name in [decoyStoreName + ".store", decoyStoreName + ".store-shm", decoyStoreName + ".store-wal"] {
+            try? fm.removeItem(at: support.appendingPathComponent(name))
+        }
+        UserDefaults.standard.removeObject(forKey: DecoySeeder.seededKey)
     }
 }

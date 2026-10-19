@@ -26,6 +26,12 @@ struct SettingsView: View {
     @State private var passcodeFlow: PasscodeFlowView.Mode?
     @State private var passcodeToggle = false
     @State private var biometricToggle = false
+    @State private var decoyEnabled = DecoyPasscodeStore.isEnabled
+    @State private var showDecoySetup = false
+    @State private var showDecoyEditor = false
+    @State private var showDecoyResetConfirm = false
+    @State private var decoyMessage: String?
+    @EnvironmentObject private var session: SessionManager
     @State private var showDeleteAll = false
     @State private var showCSVWarning = false
     @State private var csvShare: ShareItem?
@@ -36,12 +42,18 @@ struct SettingsView: View {
         NavigationStack {
             Form {
                 securitySection
-                bookkeepingSection
-                smartSection
-                backupSection
-                shortcutSection
+                if !session.isDecoy {
+                    bookkeepingSection
+                    smartSection
+                    backupSection
+                    shortcutSection
+                } else {
+                    decoyDataSection
+                }
                 appearanceSection
-                dataSection
+                if !session.isDecoy {
+                    dataSection
+                }
                 aboutSection
             }
             .navigationTitle("设置")
@@ -57,6 +69,10 @@ struct SettingsView: View {
                 // 截图模式：直接打开对应页面
                 switch ScreenshotDemo.screen {
                 case "backup", "backupencrypt": if !showDemoBackup { showDemoBackup = true }
+                case "decoysettings":
+                    decoyEnabled = true
+                    // 截图里展开防窥选项：依赖 decoyEnabled 已为 true
+                    break
                 case "rules", "recurring", "budgets": if demoDestination == nil { demoDestination = ScreenshotDemo.screen }
                 case "import":
                     if importSession == nil, let session = ScreenshotDemo.importSession() { importSession = session }
@@ -91,7 +107,10 @@ struct SettingsView: View {
                 biometricToggle = lock.biometricsEnabled
             }
             .onChange(of: passcodeToggle) { _, on in
-                if on != lock.passcodeEnabled {
+                if session.isDecoy {
+                    passcodeToggle = lock.passcodeEnabled
+                    decoyMessage = "暂时无法修改密码，请稍后再试。"
+                } else if on != lock.passcodeEnabled {
                     passcodeFlow = on ? .set : .disable
                 }
             }
@@ -123,7 +142,11 @@ struct SettingsView: View {
             }
             if lock.passcodeEnabled {
                 Button {
-                    passcodeFlow = .change
+                    if session.isDecoy {
+                        decoyMessage = "暂时无法修改密码，请稍后再试。"
+                    } else {
+                        passcodeFlow = .change
+                    }
                 } label: {
                     Label("修改密码", systemImage: "key.fill")
                 }
@@ -148,11 +171,59 @@ struct SettingsView: View {
             Toggle(isOn: $hideInAppSwitcher) {
                 Label("多任务界面隐藏内容", systemImage: "eye.slash.fill")
             }
+            if lock.passcodeEnabled && !session.isDecoy {
+                Toggle(isOn: Binding(
+                    get: { decoyEnabled },
+                    set: { on in
+                        if on {
+                            showDecoySetup = true
+                        } else {
+                            DecoyPasscodeStore.remove()
+                            decoyEnabled = false
+                        }
+                    }
+                )) {
+                    Label("防窥模式", systemImage: "eye.trianglebadge.exclamationmark")
+                }
+                if decoyEnabled {
+                    Button { showDecoyEditor = true } label: {
+                        Label("编辑防窥数据", systemImage: "pencil.and.outline")
+                    }
+                    Button(role: .destructive) { showDecoyResetConfirm = true } label: {
+                        Label("重置为预设数据", systemImage: "arrow.counterclockwise")
+                    }
+                }
+            }
         } header: {
             Text("安全与隐私")
         } footer: {
-            Text("密码以加盐哈希保存在本机钥匙串。快捷指令 / Siri 记账在后台运行，不需要解锁 App，但需要设备已解锁。")
+            if session.isDecoy {
+                Text("密码以加盐哈希保存在本机钥匙串。")
+            } else {
+                Text("密码以加盐哈希保存在本机钥匙串。面容 ID / 触控 ID 始终进入真实账本；只有输入防窥密码才会进入防窥账本。防窥数据存在独立文件中，不会同步到 iCloud，也不会写入真实备份。快捷指令记账始终写入真实账本。")
+            }
         }
+        .onAppear { decoyEnabled = DecoyPasscodeStore.isEnabled }
+        .sheet(isPresented: $showDecoySetup, onDismiss: { decoyEnabled = DecoyPasscodeStore.isEnabled }) {
+            DecoyPasscodeSetupView { decoyEnabled = true }
+                .environmentObject(lock)
+        }
+        .fullScreenCover(isPresented: $showDecoyEditor) {
+            DecoyDataEditorHost()
+                .environmentObject(lock)
+        }
+        .confirmationDialog("重置防窥数据？", isPresented: $showDecoyResetConfirm, titleVisibility: .visible) {
+            Button("恢复为预设数据", role: .destructive) {
+                session.resetDecoyStore()
+                decoyMessage = "已恢复为预设的防窥账本数据。"
+            }
+            Button("取消", role: .cancel) {}
+        } message: {
+            Text("当前防窥账本里的账户和记录会被替换成一套普通的小额示例数据。")
+        }
+        /.alert("提示", isPresented: Binding(get: { decoyMessage != nil }, set: { if !$0 { decoyMessage = nil } })) {
+            Button("好", role: .cancel) {}
+        } message: { Text(decoyMessage ?? "") }
     }
 
     private var bookkeepingSection: some View {
@@ -234,6 +305,20 @@ struct SettingsView: View {
             if !detail.isEmpty {
                 Text(detail).font(.subheadline).foregroundStyle(.secondary)
             }
+        }
+    }
+
+    /// 防窥模式下的「数据」：措辞普通，绝不提防窥，且不会碰到真实备份
+    private var decoyDataSection: some View {
+        Section {
+            Label("账本保存在本机", systemImage: "internaldrive.fill")
+            Text("当前不会使用 iCloud 同步或自动备份。")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+        } header: {
+            Text("数据")
+        } footer: {
+            Text("所有记账仅保存在这台设备上。")
         }
     }
 

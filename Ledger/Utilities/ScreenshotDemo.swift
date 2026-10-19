@@ -1,7 +1,7 @@
 import Foundation
 import SwiftData
 
-/// 仅用于自动截图：Debug 构建下传入启动参数 `-UIScreenshotDemo <screen>`（home、add、assetssocial、quickbalance、backupencrypt、reviewsnippet、stats、statsbudget、assets、account、settings、backup、lock、search、delete、rules、import、recurring、budgets）时，
+/// 仅用于自动截图：Debug 构建下传入启动参数 `-UIScreenshotDemo <screen>`（home、add、assetssocial、quickbalance、backupencrypt、reviewsnippet、decoysettings、decoyhome、stats、statsbudget、assets、account、settings、backup、lock、search、delete、rules、import、recurring、budgets）时，
 /// 使用内存数据库并写入示例数据，直接打开对应页面。正常启动（或 Release 构建）完全不受影响。
 enum ScreenshotDemo {
     static let screen: String? = {
@@ -20,7 +20,8 @@ enum ScreenshotDemo {
         switch screen {
         case "stats", "statsbudget": return 1
         case "assets", "account", "assetssocial", "quickbalance": return 2
-        case "settings", "backup", "backupencrypt", "rules", "import", "recurring", "budgets": return 3
+        case "settings", "backup", "backupencrypt", "decoysettings", "rules", "import", "recurring", "budgets": return 3
+        case "decoyhome": return 0
         default: return 0
         }
     }
@@ -49,6 +50,10 @@ enum ScreenshotDemo {
         UserDefaults.standard.set(80, forKey: BudgetKey.warnPercent)
         UserDefaults.standard.set(true, forKey: RuleStore.learnKey)
         UserDefaults.standard.set("¥", forKey: SettingsKey.currencySymbol)
+        if screen == "decoysettings" || screen == "decoyhome" {
+            // 截图：展示防窥相关界面。decoyhome 直接进防窥账本首页。
+            UserDefaults.standard.set(true, forKey: "lock.decoyEnabled")
+        }
         if screen == "backup" || screen == "backupencrypt" {
             UserDefaults.standard.set(true, forKey: SettingsKey.autoBackupEnabled)
             UserDefaults.standard.set(true, forKey: SettingsKey.backupEncryption)

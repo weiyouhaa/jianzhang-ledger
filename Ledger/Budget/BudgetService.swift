@@ -124,7 +124,7 @@ enum BudgetMonitor {
     static var alertOver: Bool { UserDefaults.standard.object(forKey: BudgetKey.alertOver) as? Bool ?? true }
 
     static func check(in context: ModelContext) {
-        guard alertsEnabled, !ScreenshotDemo.isActive else { return }
+        guard alertsEnabled, !ScreenshotDemo.isActive, !SessionManager.shared.isDecoy else { return }
         let status = BudgetService.currentStatus(in: context)
         let monthKey = DayKey.formatter.string(from: status.month).prefix(7)
         let yearKey = monthKey.prefix(4)

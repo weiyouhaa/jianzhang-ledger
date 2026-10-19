@@ -545,7 +545,8 @@ enum AutoBackup {
     /// 回到前台时调用：定期模式按频率；滚动模式每次都检查（数据无变化则跳过写入）
     @MainActor
     static func runIfDue(context: ModelContext) async {
-        guard !ScreenshotDemo.isActive, UserDefaults.standard.bool(forKey: SettingsKey.autoBackupEnabled), !isRunning else { return }
+        guard !ScreenshotDemo.isActive, !SessionManager.shared.isDecoy,
+              UserDefaults.standard.bool(forKey: SettingsKey.autoBackupEnabled), !isRunning else { return }
         if mode == .periodic {
             let last = UserDefaults.standard.double(forKey: SettingsKey.lastBackupAt)
             guard Date().timeIntervalSince1970 - last >= Double(interval) else { return }
@@ -558,7 +559,8 @@ enum AutoBackup {
     /// 切到后台时调用（仅滚动模式）：申请后台时间把文件写完
     @MainActor
     static func runOnBackground(context: ModelContext) {
-        guard !ScreenshotDemo.isActive, UserDefaults.standard.bool(forKey: SettingsKey.autoBackupEnabled),
+        guard !ScreenshotDemo.isActive, !SessionManager.shared.isDecoy,
+              UserDefaults.standard.bool(forKey: SettingsKey.autoBackupEnabled),
               mode == .rolling, !isRunning else { return }
         isRunning = true
         var taskID = UIBackgroundTaskIdentifier.invalid

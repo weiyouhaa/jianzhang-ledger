@@ -39,7 +39,8 @@ final class AppLockManager: ObservableObject {
     init() {
         let enabled: Bool
         if let demo = ScreenshotDemo.screen {
-            enabled = (demo == "lock")   // 截图模式：只有 lock 页面显示锁屏
+            // 截图：锁屏页 / 防窥设置页需要显示密码相关 UI
+            enabled = (demo == "lock" || demo == "decoysettings")
         } else {
             enabled = PasscodeStore.isSet
         }
@@ -85,6 +86,16 @@ final class AppLockManager: ObservableObject {
         if PasscodeStore.verify(passcode) {
             failedAttempts = 0
             lockoutUntil = nil
+            SessionManager.shared.enterReal()
+            withAnimation(.easeOut(duration: 0.25)) { isLocked = false }
+            PendingAppEdit.consumeIfNeeded()
+            return true
+        }
+        // 防窥密码：进入独立账本，界面与真账看起来一样
+        if DecoyPasscodeStore.verify(passcode) {
+            failedAttempts = 0
+            lockoutUntil = nil
+            SessionManager.shared.enterDecoy()
             withAnimation(.easeOut(duration: 0.25)) { isLocked = false }
             return true
         }
@@ -134,7 +145,10 @@ final class AppLockManager: ObservableObject {
             if ok {
                 failedAttempts = 0
                 lockoutUntil = nil
+                // 面容 / 触控 ID 始终进入真实账本（文档约定，防窥只能输密码）
+                SessionManager.shared.enterReal()
                 withAnimation(.easeOut(duration: 0.25)) { isLocked = false }
+                PendingAppEdit.consumeIfNeeded()
             }
         }
     }
@@ -160,9 +174,11 @@ final class AppLockManager: ObservableObject {
 
     func disablePasscode() {
         PasscodeStore.remove()
+        DecoyPasscodeStore.remove()
         passcodeEnabled = false
         biometricsEnabled = false
         isLocked = false
+        SessionManager.shared.enterReal()
     }
 
     func verify(_ passcode: String) -> Bool {

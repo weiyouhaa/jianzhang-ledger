@@ -103,6 +103,8 @@ jobs:
           shoot quickbalance light 20-quick-balance
           shoot backupencrypt light 21-encrypted-backup
           shoot reviewsnippet light 22-review-snippet
+          shoot decoysettings light 23-decoy-settings
+          shoot decoyhome light 24-decoy-home
           shoot home     dark  07-home-dark
           shoot stats    dark  08-stats-dark
           ls -l screenshots
