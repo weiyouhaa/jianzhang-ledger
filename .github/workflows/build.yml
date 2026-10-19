@@ -56,6 +56,12 @@ jobs:
             Tools/ImportCheck/main.swift -o "$RUNNER_TEMP/importcheck"
           "$RUNNER_TEMP/importcheck" Tests/Fixtures/import
 
+      - name: Backup crypto tests (AES-GCM round-trip, wrong password, tampering, plain v1/v3)
+        run: |
+          swiftc Ledger/Backup/BackupCrypto.swift Ledger/Backup/BackupFormat.swift Tools/BackupCryptoCheck/main.swift \
+            -o "$RUNNER_TEMP/backupcheck"
+          "$RUNNER_TEMP/backupcheck" Tests/Fixtures/backup
+
       - name: Install XcodeGen
         run: brew install xcodegen
 

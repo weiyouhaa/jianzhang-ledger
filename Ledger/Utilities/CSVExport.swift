@@ -1,6 +1,10 @@
 import Foundation
 import CoreTransferable
 import UniformTypeIdentifiers
+#if canImport(UIKit)
+import SwiftUI
+import UIKit
+#endif
 
 /// 导出用的纯值快照（避免把 @Model 对象带进 Sendable 闭包）
 struct RecordSnapshot: Sendable {
@@ -75,3 +79,22 @@ struct CSVExportFile: Transferable, Sendable {
         }
     }
 }
+
+/// 分享用的临时文件
+struct ShareItem: Identifiable {
+    let id = UUID()
+    let url: URL
+}
+
+#if canImport(UIKit)
+/// 系统分享面板
+struct ActivityView: UIViewControllerRepresentable {
+    let items: [Any]
+
+    func makeUIViewController(context: Context) -> UIActivityViewController {
+        UIActivityViewController(activityItems: items, applicationActivities: nil)
+    }
+
+    func updateUIViewController(_ controller: UIActivityViewController, context: Context) {}
+}
+#endif

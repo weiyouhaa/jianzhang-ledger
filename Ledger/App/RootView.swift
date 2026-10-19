@@ -40,6 +40,9 @@ struct RootView: View {
                     await Self.runSmartTasks()
                 }
             }
+            if phase == .background {
+                AutoBackup.runOnBackground(context: DataStore.shared.mainContext)
+            }
             if hideInAppSwitcher && phase != .active {
                 OverlayWindowManager.shared.showPrivacy(style: interfaceStyle)
             } else {

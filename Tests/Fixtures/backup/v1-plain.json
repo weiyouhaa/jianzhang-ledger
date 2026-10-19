@@ -1,0 +1,15 @@
+{
+  "format" : "jianzhang-backup",
+  "version" : 1,
+  "createdAt" : "2026-03-01T08:00:00Z",
+  "appVersion" : "0.9",
+  "device" : "iPhone",
+  "categories" : [
+    { "id" : "11111111-1111-1111-1111-111111111111", "name" : "餐饮", "icon" : "fork.knife", "colorHex" : "#FF9500", "kind" : "expense", "sortOrder" : 0, "createdAt" : "2026-03-01T08:00:00Z" }
+  ],
+  "records" : [
+    { "id" : "22222222-2222-2222-2222-222222222222", "amount" : 35, "kind" : "expense", "note" : "午饭", "merchant" : "星巴克", "account" : "微信", "date" : "2026-03-01T12:00:00Z", "source" : "manual", "createdAt" : "2026-03-01T12:00:00Z", "categoryID" : "11111111-1111-1111-1111-111111111111" },
+    { "id" : "33333333-3333-3333-3333-333333333333", "amount" : 8000, "kind" : "income", "note" : "工资", "merchant" : "", "account" : "银行卡", "date" : "2026-03-05T09:00:00Z", "source" : "manual", "createdAt" : "2026-03-05T09:00:00Z" }
+  ],
+  "settings" : { "monthlyBudget" : 5000, "currencySymbol" : "¥" }
+}

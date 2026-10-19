@@ -11,8 +11,13 @@ struct BackupSettingsView: View {
     @AppStorage(SettingsKey.autoBackupEnabled) private var autoBackupEnabled = false
     @AppStorage(SettingsKey.autoBackupInterval) private var autoBackupInterval = 86_400
     @AppStorage(SettingsKey.autoBackupKeep) private var autoBackupKeep = 10
+    @AppStorage(SettingsKey.autoBackupMode) private var autoBackupMode = AutoBackupMode.rolling.rawValue
+    @AppStorage(SettingsKey.autoBackupDailySnapshot) private var dailySnapshot = true
+    @AppStorage(SettingsKey.autoBackupSnapshotKeep) private var snapshotKeep = 7
     @AppStorage(SettingsKey.lastBackupAt) private var lastBackupAt: Double = 0
     @AppStorage(SettingsKey.lastBackupLocation) private var lastBackupLocation = ""
+    @AppStorage(SettingsKey.backupEncryption) private var encryptionEnabled = true
+    @AppStorage(SettingsKey.backupNeedsPassword) private var needsPassword = false
 
     @State private var syncToggle = false
     @State private var didLoad = false
@@ -26,6 +31,15 @@ struct BackupSettingsView: View {
     @State private var showExporter = false
     @State private var showImporter = false
     @State private var pendingImport: ImportedBackup?
+    @State private var pendingEncrypted: EncryptedImport?
+    @State private var decryptedHold: ImportedBackup?
+    @State private var showExportSheet = false
+    @State private var showPasswordSetup = false
+    @State private var passwordSetupPrompt: String?
+    @State private var hasSavedPassword = BackupPasswordStore.hasPassword
+    @State private var auth: SensitiveAuthRequest?
+    @State private var revealedPassword: String?
+    @State private var showRemoveConfirm = false
     @State private var alertTitle = ""
     @State private var alertMessage: String?
 
@@ -38,6 +52,7 @@ struct BackupSettingsView: View {
     var body: some View {
         Form {
             syncSection
+            encryptionSection
             manualSection
             autoSection
         }
@@ -47,6 +62,15 @@ struct BackupSettingsView: View {
             guard !didLoad else { return }
             didLoad = true
             syncToggle = syncEnabled
+            if ScreenshotDemo.screen == "backupencrypt" {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { showExportSheet = true }
+            }
+        }
+        .onChange(of: autoBackupEnabled) { _, on in
+            if on && encryptionEnabled && !BackupPasswordStore.hasPassword { promptForPassword() }
+        }
+        .onChange(of: encryptionEnabled) { _, on in
+            if on && autoBackupEnabled && !BackupPasswordStore.hasPassword { promptForPassword() }
         }
         .task {
             checkingICloud = true
@@ -57,7 +81,8 @@ struct BackupSettingsView: View {
         .onChange(of: syncToggle) { _, on in
             handleSyncToggle(on)
         }
-        .fileExporter(isPresented: $showExporter, document: exportDocument, contentType: .json,
+        .fileExporter(isPresented: $showExporter, document: exportDocument,
+                      contentType: exportFileName.hasSuffix(".json") ? .json : .jzBackup,
                       defaultFilename: exportFileName) { result in
             switch result {
             case .success(let url):
@@ -66,18 +91,68 @@ struct BackupSettingsView: View {
                 showAlert("导出失败", error.localizedDescription)
             }
         }
-        .fileImporter(isPresented: $showImporter, allowedContentTypes: [.json]) { result in
+        .fileImporter(isPresented: $showImporter, allowedContentTypes: [.jzBackup, .json, .data]) { result in
             switch result {
             case .success(let url):
                 do {
-                    let backup = try BackupService.read(from: url)
-                    pendingImport = ImportedBackup(fileName: url.lastPathComponent, backup: backup)
+                    // 按文件头识别：JZBK = 加密备份，需要密码；否则按明文 JSON（v1–v3）解析
+                    let data = try BackupService.readData(from: url)
+                    if BackupCrypto.isEncrypted(data) {
+                        pendingEncrypted = EncryptedImport(fileName: url.lastPathComponent, data: data)
+                    } else {
+                        let backup = try BackupService.decode(data)
+                        pendingImport = ImportedBackup(fileName: url.lastPathComponent, backup: backup)
+                    }
                 } catch {
                     showAlert("无法导入", error.localizedDescription)
                 }
             case .failure(let error):
                 showAlert("无法导入", error.localizedDescription)
             }
+        }
+        .sheet(item: $pendingEncrypted, onDismiss: {
+            if let d = decryptedHold { decryptedHold = nil; pendingImport = d }
+        }) { item in
+            BackupUnlockSheet(item: item) { backup in
+                decryptedHold = ImportedBackup(fileName: item.fileName, backup: backup)
+            }
+            .environmentObject(lock)
+        }
+        .sheet(isPresented: $showExportSheet) {
+            BackupExportSheet { data, name in
+                exportDocument = BackupDocument(data: data)
+                exportFileName = name
+                Task { @MainActor in
+                    try? await Task.sleep(nanoseconds: 600_000_000)
+                    showExporter = true
+                }
+            }
+            .environmentObject(lock)
+        }
+        .sheet(isPresented: $showPasswordSetup, onDismiss: { hasSavedPassword = BackupPasswordStore.hasPassword }) {
+            BackupPasswordSetupSheet(prompt: passwordSetupPrompt)
+        }
+        .sensitiveAuthSheet($auth, lock: lock)
+        .alert("备份密码", isPresented: Binding(get: { revealedPassword != nil }, set: { if !$0 { revealedPassword = nil } })) {
+            Button("拷贝") {
+                UIPasteboard.general.setItems([[UIPasteboard.typeAutomatic: revealedPassword ?? ""]],
+                                              options: [.localOnly: true, .expirationDate: Date().addingTimeInterval(60)])
+                revealedPassword = nil
+            }
+            Button("好", role: .cancel) { revealedPassword = nil }
+        } message: {
+            Text(revealedPassword ?? "")
+        }
+        .confirmationDialog("移除已保存的备份密码？", isPresented: $showRemoveConfirm, titleVisibility: .visible) {
+            Button("移除", role: .destructive) {
+                lock.authenticateSensitive(reason: "验证后移除已保存的备份密码", pending: $auth) {
+                    BackupPasswordStore.remove()
+                    hasSavedPassword = false
+                }
+            }
+            Button("取消", role: .cancel) {}
+        } message: {
+            Text(autoBackupEnabled && encryptionEnabled ? "移除后自动备份将暂停，直到重新设置密码。已有的加密备份仍需原密码解密。" : "已有的加密备份仍需原密码解密。")
         }
         .sheet(item: $pendingImport) { item in
             BackupPreviewView(item: item) { mode in
@@ -132,6 +207,87 @@ struct BackupSettingsView: View {
         }
     }
 
+    private var encryptionSection: some View {
+        Section {
+            Toggle(isOn: $encryptionEnabled) {
+                Label("加密备份", systemImage: "lock.doc.fill")
+            }
+            if encryptionEnabled {
+                HStack {
+                    Label("备份密码", systemImage: "key.fill")
+                    Spacer()
+                    Text(hasSavedPassword ? "已保存在本机" : "未保存")
+                        .foregroundStyle(hasSavedPassword ? Color.secondary : Color.orange)
+                }
+                if autoBackupEnabled && !hasSavedPassword {
+                    Button {
+                        promptForPassword()
+                    } label: {
+                        Label(needsPassword ? "自动备份已暂停：请设置备份密码" : "设置备份密码，用于加密自动备份",
+                              systemImage: "exclamationmark.triangle.fill")
+                            .foregroundStyle(.orange)
+                    }
+                }
+                if hasSavedPassword {
+                    Button {
+                        lock.authenticateSensitive(reason: "验证后查看备份密码", pending: $auth) {
+                            revealedPassword = BackupPasswordStore.load()
+                        }
+                    } label: {
+                        Label("查看备份密码", systemImage: "eye")
+                    }
+                    Button {
+                        lock.authenticateSensitive(reason: "验证后修改备份密码", pending: $auth) {
+                            passwordSetupPrompt = nil
+                            showPasswordSetup = true
+                        }
+                    } label: {
+                        Label("修改备份密码", systemImage: "key.horizontal")
+                    }
+                    Button(role: .destructive) {
+                        showRemoveConfirm = true
+                    } label: {
+                        Label("移除已保存的密码", systemImage: "trash")
+                    }
+                } else if !autoBackupEnabled {
+                    Button {
+                        passwordSetupPrompt = nil
+                        showPasswordSetup = true
+                    } label: {
+                        Label("在本机保存备份密码…", systemImage: "key.horizontal")
+                    }
+                }
+            }
+        } header: {
+            Text("备份加密")
+        } footer: {
+            if encryptionEnabled {
+                Text("导出和自动备份使用 AES-256-GCM 加密（.jzbackup），只有输入备份密码才能恢复。**忘记密码将无法恢复备份，简账无法帮你找回。**备份密码可保存在本机钥匙串（仅此设备），查看或修改需要验证\(lock.passcodeEnabled ? "App 密码" : "设备密码")或\(lock.biometryName)。")
+            } else {
+                Text("关闭后备份为**明文 JSON**，任何拿到文件的人都能查看你的全部账目。")
+                    .foregroundStyle(.orange)
+            }
+        }
+    }
+
+    private var isRolling: Bool { autoBackupMode != AutoBackupMode.periodic.rawValue }
+
+    private var autoFooter: String {
+        let where_ = "签名带 iCloud 权限时备份到「iCloud 云盘 › 简账」，否则保存在「文件 › 我的 iPhone › 简账」，可手动复制到 iCloud 云盘。"
+        let enc = encryptionEnabled ? "备份已加密，每次都使用本机保存的同一个备份密码，不会重复询问；只有你主动修改时才会更换。" : "备份为明文 JSON。"
+        if autoBackupEnabled && isRolling {
+            let ext = encryptionEnabled ? BackupCrypto.fileExtension : "json"
+            let snap = dailySnapshot ? "另外每天保留一份快照（最近 \(snapshotKeep) 天，当前 \(backupCount) 份），即使误删数据后滚动文件被覆盖，也能从快照找回。" : "未开启每日快照：误删数据后再打开或关闭 App，滚动文件会被覆盖。"
+            return "每次打开简账或切到后台时更新同一个文件「\(AutoBackup.rollingBaseName).\(ext)」，先写临时文件再整体替换，写入中断也不会损坏原备份；数据没有变化时不重复写入。" + snap + enc + where_
+        }
+        return "回到 App 时按频率自动备份，保留最近 \(autoBackupKeep) 份（当前 \(backupCount) 份）。" + enc + where_
+    }
+
+    private func promptForPassword() {
+        passwordSetupPrompt = "自动备份已开启加密，需要在本机保存一个备份密码才能自动加密备份。"
+        showPasswordSetup = true
+    }
+
     private var manualSection: some View {
         Section {
             Button {
@@ -147,7 +303,7 @@ struct BackupSettingsView: View {
         } header: {
             Text("手动备份")
         } footer: {
-            Text("备份为 JSON 文件，包含全部记录、分类和预算等设置（不含密码）。导出时选择「iCloud 云盘」即可存到云端；恢复时可选择合并（按 ID 去重）或替换全部数据\(lock.passcodeEnabled ? "，需要输入 App 密码" : "")。")
+            Text("备份包含全部记录、分类、账户和预算等设置（不含 App 密码）。导出时选择「iCloud 云盘」即可存到云端；恢复时自动识别加密备份（.jzbackup）和旧版明文 JSON，可选择合并（按 ID 去重）或替换全部数据\(lock.passcodeEnabled ? "，需要输入 App 密码" : "")。")
         }
     }
 
@@ -157,19 +313,46 @@ struct BackupSettingsView: View {
                 Label("自动备份", systemImage: "clock.arrow.circlepath")
             }
             if autoBackupEnabled {
-                Picker(selection: $autoBackupInterval) {
-                    ForEach(AutoBackup.intervalOptions, id: \.self) { s in
-                        Text(AutoBackup.intervalTitle(s)).tag(s)
+                Picker(selection: $autoBackupMode) {
+                    ForEach(AutoBackupMode.allCases) { m in
+                        Text(m.title).tag(m.rawValue)
                     }
                 } label: {
-                    Label("频率", systemImage: "calendar")
+                    Label("方式", systemImage: "arrow.triangle.2.circlepath")
                 }
-                Picker(selection: $autoBackupKeep) {
-                    ForEach(AutoBackup.keepOptions, id: \.self) { n in
-                        Text("\(n) 份").tag(n)
+                if isRolling {
+                    Toggle(isOn: $dailySnapshot) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Label("另存每日快照", systemImage: "calendar.badge.clock")
+                            Text("防止误删数据后被覆盖，可从快照找回")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
                     }
-                } label: {
-                    Label("保留最近", systemImage: "square.stack.3d.up.fill")
+                    if dailySnapshot {
+                        Picker(selection: $snapshotKeep) {
+                            ForEach(AutoBackup.snapshotKeepOptions, id: \.self) { n in
+                                Text("\(n) 天").tag(n)
+                            }
+                        } label: {
+                            Label("快照保留", systemImage: "square.stack.3d.up.fill")
+                        }
+                    }
+                } else {
+                    Picker(selection: $autoBackupInterval) {
+                        ForEach(AutoBackup.intervalOptions, id: \.self) { s in
+                            Text(AutoBackup.intervalTitle(s)).tag(s)
+                        }
+                    } label: {
+                        Label("频率", systemImage: "calendar")
+                    }
+                    Picker(selection: $autoBackupKeep) {
+                        ForEach(AutoBackup.keepOptions, id: \.self) { n in
+                            Text("\(n) 份").tag(n)
+                        }
+                    } label: {
+                        Label("保留最近", systemImage: "square.stack.3d.up.fill")
+                    }
                 }
             }
             Button {
@@ -183,7 +366,7 @@ struct BackupSettingsView: View {
             }
             .disabled(backingUp)
             HStack {
-                Text("上次备份")
+                Text(autoBackupEnabled && isRolling ? "上次更新" : "上次备份")
                 Spacer()
                 Text(lastBackupText).foregroundStyle(.secondary)
             }
@@ -200,7 +383,7 @@ struct BackupSettingsView: View {
         } header: {
             Text("自动备份")
         } footer: {
-            Text("回到 App 时按频率自动备份。签名带 iCloud 权限时备份到「iCloud 云盘 › 简账」，否则保存在「文件 › 我的 iPhone › 简账」，可手动复制到 iCloud 云盘。当前共有 \(backupCount) 份备份。")
+            Text(autoFooter)
         }
     }
 
@@ -220,16 +403,8 @@ struct BackupSettingsView: View {
         alertMessage = message
     }
 
-    @MainActor
     private func prepareExport() {
-        do {
-            let data = try BackupService.encode(BackupService.makeBackup(context: context))
-            exportDocument = BackupDocument(data: data)
-            exportFileName = BackupService.fileName()
-            showExporter = true
-        } catch {
-            showAlert("导出失败", error.localizedDescription)
-        }
+        showExportSheet = true
     }
 
     @MainActor
@@ -240,6 +415,8 @@ struct BackupSettingsView: View {
             let url = try await AutoBackup.backupNow(context: context)
             backupCount = await AutoBackup.countBackups()
             showAlert("备份完成", "已保存「\(url.lastPathComponent)」。")
+        } catch BackupError.passwordRequired {
+            promptForPassword()
         } catch {
             showAlert("备份失败", error.localizedDescription)
         }

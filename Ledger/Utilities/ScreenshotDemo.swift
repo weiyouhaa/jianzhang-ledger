@@ -1,7 +1,7 @@
 import Foundation
 import SwiftData
 
-/// 仅用于自动截图：Debug 构建下传入启动参数 `-UIScreenshotDemo <screen>`（home、add、assetssocial、quickbalance、stats、statsbudget、assets、account、settings、backup、lock、search、delete、rules、import、recurring、budgets）时，
+/// 仅用于自动截图：Debug 构建下传入启动参数 `-UIScreenshotDemo <screen>`（home、add、assetssocial、quickbalance、backupencrypt、stats、statsbudget、assets、account、settings、backup、lock、search、delete、rules、import、recurring、budgets）时，
 /// 使用内存数据库并写入示例数据，直接打开对应页面。正常启动（或 Release 构建）完全不受影响。
 enum ScreenshotDemo {
     static let screen: String? = {
@@ -20,7 +20,7 @@ enum ScreenshotDemo {
         switch screen {
         case "stats", "statsbudget": return 1
         case "assets", "account", "assetssocial", "quickbalance": return 2
-        case "settings", "backup", "rules", "import", "recurring", "budgets": return 3
+        case "settings", "backup", "backupencrypt", "rules", "import", "recurring", "budgets": return 3
         default: return 0
         }
     }
@@ -49,8 +49,13 @@ enum ScreenshotDemo {
         UserDefaults.standard.set(80, forKey: BudgetKey.warnPercent)
         UserDefaults.standard.set(true, forKey: RuleStore.learnKey)
         UserDefaults.standard.set("¥", forKey: SettingsKey.currencySymbol)
-        if screen == "backup" {
+        if screen == "backup" || screen == "backupencrypt" {
             UserDefaults.standard.set(true, forKey: SettingsKey.autoBackupEnabled)
+            UserDefaults.standard.set(true, forKey: SettingsKey.backupEncryption)
+            UserDefaults.standard.set(false, forKey: SettingsKey.backupNeedsPassword)
+            UserDefaults.standard.set(AutoBackupMode.rolling.rawValue, forKey: SettingsKey.autoBackupMode)
+            UserDefaults.standard.set(true, forKey: SettingsKey.autoBackupDailySnapshot)
+            UserDefaults.standard.set(7, forKey: SettingsKey.autoBackupSnapshotKeep)
             UserDefaults.standard.set(Date().addingTimeInterval(-3 * 3600).timeIntervalSince1970, forKey: SettingsKey.lastBackupAt)
             UserDefaults.standard.set(AutoBackup.locationTitle(isICloud: false), forKey: SettingsKey.lastBackupLocation)
         }

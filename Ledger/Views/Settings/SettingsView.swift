@@ -27,6 +27,9 @@ struct SettingsView: View {
     @State private var passcodeToggle = false
     @State private var biometricToggle = false
     @State private var showDeleteAll = false
+    @State private var showCSVWarning = false
+    @State private var csvShare: ShareItem?
+    @AppStorage(SettingsKey.backupNeedsPassword) private var backupNeedsPassword = false
     @State private var biometricError: String?
 
     var body: some View {
@@ -53,7 +56,7 @@ struct SettingsView: View {
             .task {
                 // 截图模式：直接打开对应页面
                 switch ScreenshotDemo.screen {
-                case "backup": if !showDemoBackup { showDemoBackup = true }
+                case "backup", "backupencrypt": if !showDemoBackup { showDemoBackup = true }
                 case "rules", "recurring", "budgets": if demoDestination == nil { demoDestination = ScreenshotDemo.screen }
                 case "import":
                     if importSession == nil, let session = ScreenshotDemo.importSession() { importSession = session }
@@ -247,6 +250,11 @@ struct SettingsView: View {
                         .foregroundStyle(.secondary)
                 }
             }
+            if backupNeedsPassword {
+                Label("自动备份已暂停：需要设置备份密码", systemImage: "exclamationmark.triangle.fill")
+                    .font(.subheadline)
+                    .foregroundStyle(.orange)
+            }
             HStack {
                 Label("上次备份", systemImage: "clock")
                 Spacer()
@@ -291,13 +299,23 @@ struct SettingsView: View {
 
     private var dataSection: some View {
         Section {
-            ShareLink(
-                item: CSVExportFile(rows: records.map { RecordSnapshot($0) }, fileName: exportFileName),
-                preview: SharePreview("简账导出（\(records.count) 笔）")
-            ) {
+            Button {
+                showCSVWarning = true
+            } label: {
                 Label("导出 CSV", systemImage: "square.and.arrow.up")
             }
             .disabled(records.isEmpty)
+            .alert("导出明文 CSV？", isPresented: $showCSVWarning) {
+                Button("继续导出") { exportCSV() }
+                Button("取消", role: .cancel) {}
+            } message: {
+                Text("CSV 文件没有加密，任何拿到文件的人都能看到全部 \(records.count) 笔记录、金额和备注。请只分享给信任的人或 App；需要加密请使用「iCloud 与备份 › 导出备份」。")
+            }
+            .sheet(item: $csvShare) { item in
+                ActivityView(items: [item.url])
+                    .presentationDetents([.medium, .large])
+                    .ignoresSafeArea()
+            }
             Button(role: .destructive) {
                 showDeleteAll = true
             } label: {
@@ -331,6 +349,18 @@ struct SettingsView: View {
     }
 
     // MARK: - Helpers
+
+    private func exportCSV() {
+        let rows = records.map { RecordSnapshot($0) }
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent(exportFileName)
+        do {
+            try? FileManager.default.removeItem(at: url)
+            try CSVBuilder.build(rows).write(to: url, options: [.atomic, .completeFileProtection])
+            csvShare = ShareItem(url: url)
+        } catch {
+            importMessage = "导出失败：\(error.localizedDescription)"
+        }
+    }
 
     private var exportFileName: String {
         let f = DateFormatter()

@@ -107,6 +107,17 @@ enum SettingsKey {
     static let autoBackupKeep = "backup.keepCount"
     static let lastBackupAt = "backup.lastAt"            // timeIntervalSince1970，0 = 从未
     static let lastBackupLocation = "backup.lastLocation"
+    /// 加密备份（默认开启）
+    static let backupEncryption = "backup.encryptionEnabled"
+    /// 自动备份因没有保存备份密码而跳过
+    static let backupNeedsPassword = "backup.needsPassword"
+    /// 自动备份方式：rolling（每次打开/关闭时更新同一文件，默认）/ periodic（定期保留多份）
+    static let autoBackupMode = "backup.mode"
+    /// 滚动模式下额外保留每日快照（默认开，保留 7 份）
+    static let autoBackupDailySnapshot = "backup.dailySnapshot"
+    static let autoBackupSnapshotKeep = "backup.snapshotKeep"
+    static let autoBackupFingerprint = "backup.fingerprint"
+    static let lastBackupCheckAt = "backup.lastCheckAt"
 }
 
 extension Color {
