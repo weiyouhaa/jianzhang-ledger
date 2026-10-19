@@ -1,3 +1,4 @@
+
 import SwiftUI
 import SwiftData
 
@@ -39,7 +40,6 @@ struct DecoyPasscodeSetupView: View {
                             return false
                         }
                         if DecoyPasscodeStore.save(code) {
-                            // 确保防窥库已创建并写入预设
                             _ = DataStore.makeDecoyContainer(inMemory: false)
                             onSaved()
                             dismiss()
@@ -62,20 +62,31 @@ struct DecoyPasscodeSetupView: View {
     }
 }
 
-/// 真实模式下编辑防窥数据：用独立 modelContainer，不切换全局 SessionMode（避免锁屏态错乱）
+/// 真实模式下编辑防窥数据：独立 modelContainer，不切换全局 SessionMode
 struct DecoyDataEditorHost: View {
     @Environment(\.dismiss) private var dismiss
-    private let container = DataStore.makeDecoyContainer(inMemory: false)
+    @State private var container: ModelContainer?
 
     var body: some View {
         NavigationStack {
-            TabView {
-                HomeView()
-                    .tabItem { Label("明细", systemImage: "list.bullet.rectangle.portrait") }
-                AssetsView()
-                    .tabItem { Label("资产", systemImage: "wallet.pass.fill") }
-                DecoyEditorSettingsStub()
-                    .tabItem { Label("设置", systemImage: "gearshape.fill") }
+            Group {
+                if let container {
+                    TabView {
+                        HomeView()
+                            .tabItem { Label("明细", systemImage: "list.bullet.rectangle.portrait") }
+                        AssetsView()
+                            .tabItem { Label("资产", systemImage: "wallet.pass.fill") }
+                        Form {
+                            Text("这里改的是防窥账本里的账户和流水，不影响真实数据。改完点右上角「完成」。")
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                        }
+                        .tabItem { Label("说明", systemImage: "info.circle") }
+                    }
+                    .modelContainer(container)
+                } else {
+                    ProgressView("正在打开…")
+                }
             }
             .navigationTitle("编辑防窥数据")
             .navigationBarTitleDisplayMode(.inline)
@@ -85,22 +96,10 @@ struct DecoyDataEditorHost: View {
                 }
             }
         }
-        .modelContainer(container)
-    }
-}
-
-/// 防窥编辑器里的极简设置，避免露出「防窥」字样或真实备份入口
-private struct DecoyEditorSettingsStub: View {
-    var body: some View {
-        NavigationStack {
-            Form {
-                Section {
-                    Text("这里改的是防窥账本里的账户和流水，不影响真实数据。改完点右上角「完成」。")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                }
+        .onAppear {
+            if container == nil {
+                container = DataStore.makeDecoyContainer(inMemory: false)
             }
-            .navigationTitle("说明")
         }
     }
 }

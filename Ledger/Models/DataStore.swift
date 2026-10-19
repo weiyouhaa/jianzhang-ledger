@@ -232,6 +232,7 @@ enum DataStore {
 
     // MARK: - 防窥独立库（永不走 CloudKit）
 
+    @MainActor
     static func makeDecoyContainer(inMemory: Bool) -> ModelContainer {
         let schema = Schema([LedgerRecord.self, LedgerCategory.self, LedgerAccount.self,
                              CategoryRule.self, ImportBatch.self, RecurringRule.self])

@@ -126,7 +126,24 @@ struct RecognizeReceiptIntent: AppIntent {
                 }
                 items = reviewed
             } catch let jump as JumpToApp {
-                return try finishAndOpenApp(jump, context: context)
+                let saved = try persist(jump.items, context: context)
+                let focusID: UUID?
+                if let idx = jump.focusRecordIndex, idx < jump.items.count {
+                    let target = jump.items[idx]
+                    focusID = saved.first(where: {
+                        abs($0.amount - target.amount) < 0.005
+                            && $0.merchant == target.merchant
+                            && abs($0.date.timeIntervalSince(target.date)) < 2
+                    })?.id ?? saved.last?.id
+                } else {
+                    focusID = nil
+                }
+                PendingAppEdit.save(.init(recordID: focusID?.uuidString, isNew: jump.focusRecordIndex == nil, focus: nil))
+                Self.bringAppToForeground()
+                let msg = jump.focusRecordIndex == nil
+                    ? "已保存 \(saved.count) 笔。正在打开简账，请在新建页补上这一笔。"
+                    : "已保存 \(saved.count) 笔。正在打开简账继续修改。"
+                return try finish(jump.items, cancelled: false, alreadySaved: saved, jumpMessage: msg, context: context)
             } catch {
                 if Self.isUserCancel(error) {
                     return try finish([], cancelled: true, context: context)
@@ -141,7 +158,9 @@ struct RecognizeReceiptIntent: AppIntent {
     // MARK: - 保存
 
     @MainActor
-    private func finish(_ items: [ReviewItem], cancelled: Bool, errorMessage: String? = nil, context: ModelContext) throws -> some IntentResult & ProvidesDialog & ShowsSnippetView & ReturnsValue<Double> {
+    private func finish(_ items: [ReviewItem], cancelled: Bool, errorMessage: String? = nil,
+                        alreadySaved: [LedgerRecord]? = nil, jumpMessage: String? = nil,
+                        context: ModelContext) throws -> some IntentResult & ProvidesDialog & ShowsSnippetView & ReturnsValue<Double> {
         if let errorMessage {
             return .result(value: Double(0),
                            dialog: IntentDialog("审核出错，没有保存任何记录。\n\(errorMessage)"),
@@ -151,54 +170,44 @@ struct RecognizeReceiptIntent: AppIntent {
             return .result(value: Double(0), dialog: IntentDialog("已取消，未保存任何记录。"),
                            view: ReviewSnippetView(title: "已取消", rows: []))
         }
+
+        let saved: [LedgerRecord]
         let toSave = items.filter(\.willSave)
         let skipped = items.filter { !$0.willSave }
-        let skippedRows = skipped.enumerated().map { ReviewFormatter.row($0.element, index: $0.offset + 1, in: context) }
 
-        guard !toSave.isEmpty else {
-            let text = skipped.isEmpty
-                ? "没有需要保存的记录，未记账。"
-                : "截图中的 \(skipped.count) 笔都已记过，未重复记账。"
-            return .result(value: Double(0), dialog: IntentDialog("\(text)"),
-                           view: ReviewSnippetView(title: "未记账", rows: skippedRows))
-        }
-
-        var saved: [LedgerRecord] = []
-        for item in toSave {
-            let record = try IntentRecorder.save(
-                amount: item.amount, kind: item.kind,
-                categoryID: item.categoryID, categoryName: nil,
-                note: item.note, merchant: item.merchant,
-                date: item.date, source: item.isManual ? "shortcut" : "ocr",
-                accountID: item.accountID
-            )
-            saved.append(record)
-            // 分类记忆：用户在弹窗里改过分类 / 账户的商户，记住这次的选择
-            if (item.categoryEdited || item.accountEdited), !item.merchant.isEmpty {
-                RuleStore.learn(merchant: item.merchant, kind: item.kind, category: record.category,
-                                account: item.accountEdited ? record.accountRef : nil, in: context)
+        if let alreadySaved {
+            saved = alreadySaved
+        } else {
+            guard !toSave.isEmpty else {
+                let text = skipped.isEmpty
+                    ? "没有需要保存的记录，未记账。"
+                    : "截图中的 \(skipped.count) 笔都已记过，未重复记账。"
+                let skippedRows = skipped.enumerated().map { ReviewFormatter.row($0.element, index: $0.offset + 1, in: context) }
+                return .result(value: Double(0), dialog: IntentDialog("\(text)"),
+                               view: ReviewSnippetView(title: "未记账", rows: skippedRows))
             }
+            saved = try persist(items, context: context)
         }
-        try? context.save()
-        BudgetMonitor.check(in: context)
 
         var text: String
-        if saved.count == 1 {
+        if let jumpMessage {
+            text = jumpMessage
+        } else if saved.count == 1 {
             text = "已记账：" + IntentRecorder.summary(of: saved[0])
         } else {
-            let total = saved.reduce(0) { $0 + ($1.kind == .income ? 0 : $1.amount) }
-            text = "已记 \(saved.count) 笔" + (total > 0 ? "，支出合计 \(Money.format(total))" : "") + "。"
-        }
-        if !skipped.isEmpty { text += "跳过 \(skipped.count) 笔重复。" }
-        // 预算：超支 / 接近上限时提醒（通知由 BudgetMonitor 发送）
-        if saved.contains(where: { $0.kind == .expense }), let t = BudgetService.currentStatus(in: context).total, t.budget > 0 {
-            text += t.isOver ? "本月预算已超支 \(Money.format(-t.remaining))。" : "本月预算剩余 \(Money.format(t.remaining))。"
+            let expenseTotal = saved.reduce(0) { $0 + ($1.kind == .income ? 0 : $1.amount) }
+            text = "已记 \(saved.count) 笔" + (expenseTotal > 0 ? "，支出合计 \(Money.format(expenseTotal))" : "") + "。"
+            if !skipped.isEmpty { text += "跳过 \(skipped.count) 笔重复。" }
+            if saved.contains(where: { $0.kind == .expense }), let b = BudgetService.currentStatus(in: context).total, b.budget > 0 {
+                text += b.isOver ? "本月预算已超支 \(Money.format(-b.remaining))。" : "本月预算剩余 \(Money.format(b.remaining))。"
+            }
         }
 
         let savedRows = toSave.enumerated().map { ReviewFormatter.row($0.element, index: $0.offset + 1, in: context) }
+        let title = jumpMessage == nil ? "已记账" : "已保存，前往 App"
         let total = saved.reduce(0) { $0 + $1.amount }
         return .result(value: total, dialog: IntentDialog("\(text)"),
-                       view: ReviewSnippetView(title: "已记账", rows: savedRows))
+                       view: ReviewSnippetView(title: title, rows: savedRows))
     }
 
     // MARK: - 审核循环
@@ -424,37 +433,6 @@ struct RecognizeReceiptIntent: AppIntent {
         return nil
     }
 
-
-    /// 保存当前审核列表，记下要编辑的记录，再通过 opensIntent 把简账带到前台
-    @MainActor
-    private func finishAndOpenApp(_ jump: JumpToApp, context: ModelContext) throws -> some IntentResult & ProvidesDialog & ShowsSnippetView & ReturnsValue<Double> {
-        // 先按「全部保存」写入（跳过重复项），保证弹窗里改过的不丢
-        let saved = try persist(jump.items, context: context)
-        let focusID: UUID?
-        if let idx = jump.focusRecordIndex, idx < jump.items.count {
-            let target = jump.items[idx]
-            // 找到刚保存的对应记录（同金额+商户+时间）
-            focusID = saved.first(where: {
-                abs($0.amount - target.amount) < 0.005
-                    && $0.merchant == target.merchant
-                    && abs($0.date.timeIntervalSince(target.date)) < 2
-            })?.id ?? saved.last?.id
-        } else {
-            focusID = nil
-        }
-        PendingAppEdit.save(.init(recordID: focusID?.uuidString, isNew: jump.focusRecordIndex == nil, focus: nil))
-        let rows = jump.items.filter(\.willSave).enumerated().map { ReviewFormatter.row($0.element, index: $0.offset + 1, in: context) }
-        let dialog = jump.focusRecordIndex == nil
-            ? "已保存 \(saved.count) 笔。正在打开简账，请在新建页补上这一笔。"
-            : "已保存 \(saved.count) 笔。正在打开简账继续修改。"
-        // 用 URL Scheme 把简账带到前台（App Intent 在 App 进程内运行）。
-        // 不用 requestValue/opensIntent 链：iOS 27 上 requestChoice 后再拉输入会直接关弹窗；
-        // opensIntent 又会和其它 return 的 opaque 类型冲突。
-        Self.bringAppToForeground()
-        return .result(value: saved.reduce(0) { $0 + $1.amount },
-                       dialog: IntentDialog("\(dialog)"),
-                       view: ReviewSnippetView(title: "已保存，前往 App", rows: rows))
-    }
 
     @MainActor
     private static func bringAppToForeground() {

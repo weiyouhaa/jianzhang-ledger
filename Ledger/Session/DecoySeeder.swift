@@ -26,7 +26,7 @@ enum DecoySeeder {
         let cash = LedgerAccount(name: "现金", type: .cash, initialBalance: 320, sortOrder: 0)
         let wechat = LedgerAccount(name: "微信", type: .wechat, initialBalance: 860, sortOrder: 1)
         let alipay = LedgerAccount(name: "支付宝", type: .alipay, initialBalance: 1240, sortOrder: 2)
-        let bank = LedgerAccount(name: "银行卡", type: .debitCard, initialBalance: 6800, sortOrder: 3)
+        let bank = LedgerAccount(name: "银行卡", type: .debit, initialBalance: 6800, sortOrder: 3)
         for a in [cash, wechat, alipay, bank] { context.insert(a) }
 
         let cats = (try? context.fetch(FetchDescriptor<LedgerCategory>())) ?? []

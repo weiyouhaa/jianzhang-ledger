@@ -221,7 +221,7 @@ struct SettingsView: View {
         } message: {
             Text("当前防窥账本里的账户和记录会被替换成一套普通的小额示例数据。")
         }
-        /.alert("提示", isPresented: Binding(get: { decoyMessage != nil }, set: { if !$0 { decoyMessage = nil } })) {
+        .alert("提示", isPresented: Binding(get: { decoyMessage != nil }, set: { if !$0 { decoyMessage = nil } })) {
             Button("好", role: .cancel) {}
         } message: { Text(decoyMessage ?? "") }
     }
