@@ -240,7 +240,7 @@ enum DataStore {
                                         allowsSave: true, cloudKitDatabase: .none)
         do {
             let container = try ModelContainer(for: schema, configurations: [config])
-            DecoySeeder.seedIfNeeded(container: container)
+            DecoySeeder.seedIfNeeded(container: container, force: inMemory)
             return container
         } catch {
             fatalError("无法创建防窥数据存储：\(error)")

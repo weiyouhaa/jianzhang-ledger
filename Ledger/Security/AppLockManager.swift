@@ -39,13 +39,15 @@ final class AppLockManager: ObservableObject {
     init() {
         let enabled: Bool
         if let demo = ScreenshotDemo.screen {
-            // 截图：锁屏页 / 防窥设置页需要显示密码相关 UI
+            // 截图：锁屏页显示锁屏；防窥设置页需要密码锁 UI 但不要挡住设置
             enabled = (demo == "lock" || demo == "decoysettings")
+            passcodeEnabled = enabled
+            isLocked = (demo == "lock")
         } else {
             enabled = PasscodeStore.isSet
+            passcodeEnabled = enabled
+            isLocked = enabled
         }
-        passcodeEnabled = enabled
-        isLocked = enabled
         biometricsEnabled = UserDefaults.standard.bool(forKey: Keys.biometrics)
         gracePeriod = UserDefaults.standard.object(forKey: Keys.grace) as? Int ?? 0
     }
