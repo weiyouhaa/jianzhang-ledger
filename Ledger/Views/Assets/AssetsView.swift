@@ -114,7 +114,7 @@ struct AssetsView: View {
                 // 截图模式：滚动到「公积金与社保」
                 if ScreenshotDemo.screen == "assetssocial" {
                     try? await Task.sleep(nanoseconds: 600_000_000)
-                    proxy.scrollTo("social", anchor: .top)
+                    proxy.scrollTo("social", anchor: UnitPoint(x: 0.5, y: 0.3))
                 }
             }
           }
