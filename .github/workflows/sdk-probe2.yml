@@ -1,0 +1,17 @@
+name: SDK probe2
+on: workflow_dispatch
+jobs:
+  probe:
+    runs-on: macos-15
+    steps:
+      - uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest-stable
+      - name: Grep
+        run: |
+          SDK=$(xcrun --sdk iphoneos --show-sdk-path)
+          F=$(find -L "$SDK/" -path "*AppIntents.framework*" -name "arm64e-apple-ios.swiftinterface" | head -1)
+          for pat in "struct AppIntentError" "static var canceled" "static var cancelled" "userCancelled" "requestValue" "needsValueError" "isCancellationError"; do
+            echo "===== $pat"
+            grep -n -A8 "$pat" "$F" | head -40
+          done
