@@ -193,7 +193,9 @@ App 内 设置 › 快捷指令 › 识图记账设置教程 里也有同样的�
 不同系统版本的交互：
 - **iOS 26**：`requestChoice(between:dialog:view:)` —— 按钮 + 识别结果卡片（SwiftUI 片段视图），选项超过 8 个时（如账户很多）改用列表；
 - **iOS 17 / 18**：没有多选按钮接口，改用参数的 `requestDisambiguation(among:dialog:)` 弹出选择列表（每项带图标和副标题），识别明细写在提示文字里；最后的「已记账」结果卡片在所有版本都显示。
-- 金额、商户·备注、时间通过对应参数的 `requestValue` 输入；收支类型、分类、账户用 `requestDisambiguation` 从列表里选。
+- 金额：先选快捷调整（±1 / +10）或「输入金额…」，再弹文本框（支持 `35`、`35.5`、`¥35`），**不用** Double 的 `requestValue`（iOS 26/27 上接在 `requestChoice` 后面会直接关掉弹窗）。
+- 商户·备注、自定义时间同样走 String 文本框；时间也可选「改为现在」。收支类型、分类、账户用 `requestDisambiguation` 从列表里选。
+- 非取消的错误会提示原因并回到审核，不会再静默消失。
 
 截图 `22-review-snippet.png` 是在 App 里渲染的弹窗示意（快捷指令的真实弹窗无法在 CI 中截图）。
 

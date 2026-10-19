@@ -40,13 +40,13 @@ struct RecognizeReceiptIntent: AppIntent {
     @Parameter(title: "备注")
     var note: String?
 
-    // MARK: 审核流程内部使用的参数（不在参数摘要中显示，每次询问都通过对应参数的 requestValue / requestDisambiguation 发起）
+    // MARK: 审核流程内部参数（不出现在参数摘要）
+    // 自由输入统一走 String：iOS 26/27 上 requestChoice 之后再对 Double/Date 调 requestValue
+    // 会直接结束弹窗（真机复现）；String 文本框更稳，金额/时间自行解析。
+    // 多轮询问前先把对应参数置 nil，避免「已有值」被当成已解析而不再弹窗。
 
     @Parameter(title: "选项")
     var reviewChoice: ReviewChoiceEntity?
-
-    @Parameter(title: "金额")
-    var reviewAmount: Double?
 
     @Parameter(title: "收支类型")
     var reviewKind: RecordKindAppEnum?
@@ -57,11 +57,13 @@ struct RecognizeReceiptIntent: AppIntent {
     @Parameter(title: "账户")
     var reviewAccount: AccountEntity?
 
-    @Parameter(title: "商户 / 备注")
-    var reviewText: String?
+    /// 金额 / 商户备注 / 自定义时间 共用；每次询问前清空
+    @Parameter(title: "输入内容")
+    var reviewInput: String?
 
-    @Parameter(title: "时间")
-    var reviewDate: Date?
+    /// 备用输入槽：同一轮里若主槽异常，换一个参数再问
+    @Parameter(title: "输入内容（备用）")
+    var reviewInputAlt: String?
 
     static var parameterSummary: some ParameterSummary {
         Summary("识别 \(\.$image) 并记账") {
@@ -123,11 +125,23 @@ struct RecognizeReceiptIntent: AppIntent {
         if review {
             var steps = 0
             let rawPreview = String((parsedList.first?.rawText ?? "").replacingOccurrences(of: "\n", with: " ").prefix(40))
-            guard let reviewed = try await runReview(items, steps: &steps, context: context,
-                                                     emptyHint: found.isEmpty ? "没有识别到金额" + (rawPreview.isEmpty ? "。" : "（识别到的文字：\(rawPreview)）。") : nil) else {
-                return try finish([], cancelled: true, context: context)
+            do {
+                guard let reviewed = try await runReview(items, steps: &steps, context: context,
+                                                         emptyHint: found.isEmpty ? "没有识别到金额" + (rawPreview.isEmpty ? "。" : "（识别到的文字：\(rawPreview)）。") : nil) else {
+                    return try finish([], cancelled: true, context: context)
+                }
+                items = reviewed
+            } catch {
+                if Self.isUserCancel(error) {
+                    return try finish([], cancelled: true, context: context)
+                }
+                // 非取消错误：弹窗说明原因，避免快捷指令弹窗直接消失、看起来像闪退
+                let msg = error.localizedDescription
+                return .result(value: Double(0),
+                               dialog: IntentDialog("审核出错，没有保存任何记录。\n\(msg)"),
+                               view: ReviewSnippetView(title: "出错了", rows: rowsFor(items, context: context),
+                                                       footnote: msg))
             }
-            items = reviewed
         }
 
         return try finish(items, cancelled: false, context: context)
@@ -207,6 +221,12 @@ struct RecognizeReceiptIntent: AppIntent {
 
     private struct ReviewCancelled: Error, CustomLocalizedStringResourceConvertible {
         var localizedStringResource: LocalizedStringResource { "已取消，未保存任何记录。" }
+    }
+
+    private struct ReviewInputError: Error, LocalizedError {
+        let message: String
+        init(_ message: String) { self.message = message }
+        var errorDescription: String? { message }
     }
 
     @MainActor
@@ -337,42 +357,62 @@ struct RecognizeReceiptIntent: AppIntent {
                                        view: ReviewSnippetView(title: "第 \(number) 笔", rows: [row]))
             guard let field = Field(rawValue: key), field != .done else { break }
             steps += 1
-            switch field {
-            case .amount:
-                let v = try await $reviewAmount.requestValue(IntentDialog("新的金额是多少？（当前 \(Money.format(item.amount))）"))
-                if v > 0 && v < 100_000_000 { item.amount = (v * 100).rounded() / 100 }
-            case .kind:
-                let k = try await $reviewKind.requestDisambiguation(among: [.expense, .income],
-                                                                    dialog: IntentDialog("收支类型（当前\(item.kind == .income ? "收入" : "支出")）"))
-                if k.kind != item.kind {
-                    item.kind = k.kind
-                    // 分类跟着换成新类型下的默认分类
-                    let resolved = IntentRecorder.resolve(kind: item.kind, merchant: item.merchant, note: item.note,
-                                                          categoryID: nil, categoryName: nil, accountID: item.accountID, accountHint: nil)
-                    item.categoryID = resolved.category?.id
+            do {
+                switch field {
+                case .amount:
+                    if let v = try await askAmount(current: item.amount, steps: &steps,
+                                                   snippet: ReviewSnippetView(title: "第 \(number) 笔", rows: [row])) {
+                        item.amount = v
+                    }
+                case .kind:
+                    reviewKind = nil
+                    let k = try await $reviewKind.requestDisambiguation(among: [.expense, .income],
+                                                                        dialog: IntentDialog("收支类型（当前\(item.kind == .income ? "收入" : "支出")）"))
+                    if k.kind != item.kind {
+                        item.kind = k.kind
+                        let resolved = IntentRecorder.resolve(kind: item.kind, merchant: item.merchant, note: item.note,
+                                                              categoryID: nil, categoryName: nil, accountID: item.accountID, accountHint: nil)
+                        item.categoryID = resolved.category?.id
+                    }
+                case .category:
+                    let list = DataStore.categories(kind: item.kind, in: context).map { CategoryEntity($0) }
+                    guard !list.isEmpty else { continue }
+                    reviewCategory = nil
+                    let c = try await $reviewCategory.requestDisambiguation(among: list, dialog: IntentDialog("选择分类（当前 \(row.categoryName)）"))
+                    item.categoryID = c.id
+                    item.kind = RecordKind(rawValue: c.kindRaw) ?? item.kind
+                    item.categoryEdited = true
+                case .text:
+                    let t = try await askText(
+                        IntentDialog("输入「商户 / 备注」，例如「星巴克 / 下午茶」；只填商户可不写斜杠，输入「-」清空。当前：\(textSummary(item))")
+                    )
+                    applyText(t, to: &item)
+                case .account:
+                    let list = DataStore.accounts(in: context).map { AccountEntity($0) }
+                    guard !list.isEmpty else { continue }
+                    reviewAccount = nil
+                    let a = try await $reviewAccount.requestDisambiguation(among: list, dialog: IntentDialog("选择账户（当前 \(row.accountName)）"))
+                    item.accountID = a.id
+                    item.accountEdited = true
+                case .date:
+                    if let d = try await askDate(current: item.date, steps: &steps,
+                                                 snippet: ReviewSnippetView(title: "第 \(number) 笔", rows: [row])) {
+                        item.date = d
+                        item.dateRecognized = true
+                    }
+                case .done:
+                    break
                 }
-            case .category:
-                let list = DataStore.categories(kind: item.kind, in: context).map { CategoryEntity($0) }
-                guard !list.isEmpty else { continue }
-                let c = try await $reviewCategory.requestDisambiguation(among: list, dialog: IntentDialog("选择分类（当前 \(row.categoryName)）"))
-                item.categoryID = c.id
-                item.kind = RecordKind(rawValue: c.kindRaw) ?? item.kind
-                item.categoryEdited = true
-            case .text:
-                let t = try await $reviewText.requestValue(IntentDialog("输入「商户 / 备注」，例如「星巴克 / 下午茶」；只填商户可不写斜杠，输入「-」清空。当前：\(textSummary(item))"))
-                applyText(t, to: &item)
-            case .account:
-                let list = DataStore.accounts(in: context).map { AccountEntity($0) }
-                guard !list.isEmpty else { continue }
-                let a = try await $reviewAccount.requestDisambiguation(among: list, dialog: IntentDialog("选择账户（当前 \(row.accountName)）"))
-                item.accountID = a.id
-                item.accountEdited = true
-            case .date:
-                let d = try await $reviewDate.requestValue(IntentDialog("记账时间（当前 \(DateText.monthDayTime.string(from: item.date))）"))
-                item.date = d
-                item.dateRecognized = true
-            case .done:
-                break
+            } catch {
+                if Self.isUserCancel(error) { throw error }
+                // 输入失败时留在修改菜单，提示原因，不结束整个快捷指令
+                let next = (try? await choose(
+                    [Option(key: "ok", title: "继续修改", icon: "arrow.clockwise"),
+                     Option(key: Action.cancel.rawValue, title: "取消审核", icon: "xmark")],
+                    dialog: "刚才这一步没完成：\(error.localizedDescription)",
+                    view: ReviewSnippetView(title: "第 \(number) 笔", rows: [row], footnote: error.localizedDescription)
+                )) ?? "ok"
+                if next == Action.cancel.rawValue { throw ReviewCancelled() }
             }
             // 改了金额 / 商户 / 时间后重新判断是否重复
             if !item.isManual {
@@ -408,16 +448,18 @@ struct RecognizeReceiptIntent: AppIntent {
     @MainActor
     private func addItem(steps: inout Int, context: ModelContext) async throws -> ReviewItem? {
         steps += 1
-        let amount = try await $reviewAmount.requestValue(IntentDialog("添加一笔：金额是多少？"))
-        guard amount > 0, amount < 100_000_000 else { return nil }
+        let rawAmount = try await askText(IntentDialog("添加一笔：输入金额，例如 35 或 35.50"))
+        guard let amount = Self.parseAmount(rawAmount) else { throw LedgerIntentError.invalidAmount }
         steps += 1
+        reviewKind = nil
         let k = try await $reviewKind.requestDisambiguation(among: [.expense, .income], dialog: "支出还是收入？").kind
-        var item = ReviewItem(amount: (amount * 100).rounded() / 100, kind: k, categoryID: nil, merchant: "",
+        var item = ReviewItem(amount: amount, kind: k, categoryID: nil, merchant: "",
                               note: note ?? "", accountID: nil, date: Date(), dateRecognized: true)
         item.isManual = true
         let cats = DataStore.categories(kind: k, in: context).map { CategoryEntity($0) }
         if !cats.isEmpty {
             steps += 1
+            reviewCategory = nil
             let c = try await $reviewCategory.requestDisambiguation(among: cats, dialog: "选择分类")
             item.categoryID = c.id
             item.categoryEdited = true
@@ -429,7 +471,7 @@ struct RecognizeReceiptIntent: AppIntent {
         ], dialog: "商户 / 备注（可选）", view: ReviewSnippetView(title: "新增一笔", rows: [ReviewFormatter.row(item, index: 1, in: context)]))
         if wantText == "text" {
             steps += 1
-            let t = try await $reviewText.requestValue(IntentDialog("输入「商户 / 备注」，例如「便利店 / 早餐」"))
+            let t = try await askText(IntentDialog("输入「商户 / 备注」，例如「便利店 / 早餐」"))
             applyText(t, to: &item)
         }
         let category = item.categoryID.flatMap { DataStore.category(id: $0, in: context) }
@@ -456,25 +498,188 @@ struct RecognizeReceiptIntent: AppIntent {
     @MainActor
     private func choose<V: View>(_ options: [Option], dialog: String, view: V) async throws -> String {
         if #available(iOS 26.0, *), options.count <= 8 {
-            var map: [(IntentChoiceOption, String)] = []
+            // 用稳定 title 做映射：iOS 27 上 IntentChoiceOption 的 == 不一定能匹配到我们创建时的实例
+            var map: [(title: String, key: String, option: IntentChoiceOption)] = []
             for o in options where o.key != Action.cancel.rawValue {
-                let choice = IntentChoiceOption(title: LocalizedStringResource(stringLiteral: o.title),
+                let title = o.title
+                let choice = IntentChoiceOption(title: LocalizedStringResource(stringLiteral: title),
                                                 style: o.destructive ? .destructive : .default)
-                map.append((choice, o.key))
+                map.append((title, o.key, choice))
             }
-            let all = map.map(\.0) + [IntentChoiceOption.cancel]
-            // 选择「取消」或系统取消手势会抛出错误，快捷指令随即停止，不会保存任何记录
+            let all = map.map(\.option) + [IntentChoiceOption.cancel]
             let picked = try await requestChoice(between: all, dialog: IntentDialog("\(dialog)"), view: view)
-            guard let key = map.first(where: { $0.0 == picked })?.1 else { throw ReviewCancelled() }
-            return key
+            if let key = map.first(where: { $0.option == picked })?.key { return key }
+            // 回退：按标题字符串比对（LocalizedStringResource 的 debug/description 不稳定时仍尽量匹配）
+            let pickedTitle = String(describing: picked.title)
+            if let key = map.first(where: { String(describing: $0.option.title) == pickedTitle || $0.title == pickedTitle })?.key {
+                return key
+            }
+            throw ReviewCancelled()
         }
+        reviewChoice = nil
         let entities = options.enumerated().map { i, o in
             ReviewChoiceEntity(id: "\(i)|\(o.key)", title: o.title, subtitle: o.subtitle, icon: o.icon)
         }
         ReviewChoiceRegistry.current = entities
         let picked = try await $reviewChoice.requestDisambiguation(among: entities, dialog: IntentDialog("\(dialog)"))
         let key = String(picked.id.split(separator: "|", maxSplits: 1).last ?? "")
+        if key == Action.cancel.rawValue { throw ReviewCancelled() }
         return key
+    }
+
+    // MARK: - 自由输入（String）与解析
+
+    /// 用户明确取消（含 requestChoice 的 cancel、系统手势）；其它错误要提示，不能当取消吞掉
+    static func isUserCancel(_ error: Error) -> Bool {
+        if error is ReviewCancelled { return true }
+        if error is CancellationError { return true }
+        let ns = error as NSError
+        if ns.domain == NSURLErrorDomain && ns.code == NSURLErrorCancelled { return true }
+        let text = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+        let lower = text.lowercased()
+        if lower.contains("cancel") || text.contains("取消") { return true }
+        return false
+    }
+
+    /// 弹出文本框。先清空参数；失败时换备用参数再试一次。
+    @MainActor
+    private func askText(_ dialog: IntentDialog) async throws -> String {
+        reviewInput = nil
+        do {
+            return try await $reviewInput.requestValue(dialog)
+        } catch {
+            if Self.isUserCancel(error) { throw error }
+            reviewInputAlt = nil
+            return try await $reviewInputAlt.requestValue(dialog)
+        }
+    }
+
+    /// 金额：先给快捷调整按钮（仍走 requestChoice），需要任意数字时再弹文本框并自行解析。
+    /// 避免在 requestChoice 之后对 Double 调 requestValue（iOS 26/27 真机会直接结束弹窗）。
+    @MainActor
+    private func askAmount<V: View>(current: Double?, steps: inout Int, snippet: V) async throws -> Double? {
+        let cur = current ?? 0
+        var options: [Option] = []
+        if let current {
+            options.append(Option(key: "keep", title: "保持 \(Money.format(current))", icon: "equal.circle"))
+            for delta in [1.0, -1.0, 10.0] {
+                let v = max(0.01, ((current + delta) * 100).rounded() / 100)
+                let sign = delta > 0 ? "+\(Int(delta))" : "\(Int(delta))"
+                options.append(Option(key: "set:\(v)", title: "改为 \(Money.format(v))（\(sign)）",
+                                      icon: delta > 0 ? "plus.circle" : "minus.circle"))
+            }
+        }
+        options.append(Option(key: "type", title: "⌨️ 输入金额…", subtitle: "支持 35、35.5、¥35", icon: "keyboard"))
+        if current != nil {
+            options.append(Option(key: "back", title: "返回", icon: "chevron.backward"))
+        }
+        let key = try await choose(options,
+                                   dialog: current == nil ? "金额是多少？" : "怎么改金额？（当前 \(Money.format(cur))）",
+                                   view: snippet)
+        if key == "back" || key == "keep" { return current }
+        if key.hasPrefix("set:"), let v = Double(key.dropFirst(4)), v > 0 { return v }
+        if key == "type" {
+            steps += 1
+            let raw = try await askText(IntentDialog(current == nil
+                ? "输入金额，例如 35 或 35.50"
+                : "输入新金额（当前 \(Money.format(cur))），例如 35、35.5、¥18.00"))
+            guard let v = Self.parseAmount(raw) else {
+                throw LedgerIntentError.invalidAmount
+            }
+            return v
+        }
+        return current
+    }
+
+    @MainActor
+    private func askDate<V: View>(current: Date, steps: inout Int, snippet: V) async throws -> Date? {
+        let options = [
+            Option(key: "keep", title: "保持 \(DateText.monthDayTime.string(from: current))", icon: "equal.circle"),
+            Option(key: "now", title: "改为现在", icon: "clock"),
+            Option(key: "type", title: "⌨️ 输入时间…", subtitle: "例如 10月19日 12:30 或 12:30", icon: "keyboard"),
+            Option(key: "back", title: "返回", icon: "chevron.backward"),
+        ]
+        let key = try await choose(options, dialog: "记账时间", view: snippet)
+        switch key {
+        case "back", "keep": return nil
+        case "now": return Date()
+        case "type":
+            steps += 1
+            let raw = try await askText(IntentDialog("输入时间，例如「10月19日 12:30」「今天 8:00」「12:30」（当前 \(DateText.monthDayTime.string(from: current))）"))
+            guard let d = Self.parseDate(raw, reference: current) else {
+                throw ReviewInputError("无法识别时间「\(raw)」。请用「10月19日 12:30」或「12:30」。")
+            }
+            return d
+        default:
+            return nil
+        }
+    }
+
+    static func parseAmount(_ raw: String) -> Double? {
+        var s = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !s.isEmpty else { return nil }
+        for token in ["¥", "￥", "元", "人民币", "RMB", "CNY", ","] {
+            s = s.replacingOccurrences(of: token, with: "")
+        }
+        s = s.trimmingCharacters(in: .whitespaces)
+        // 全角数字 → 半角
+        s = String(s.map { ch -> Character in
+            guard let v = ch.unicodeScalars.first?.value, (0xFF10...0xFF19).contains(v) else { return ch }
+            return Character(UnicodeScalar(v - 0xFF10 + 0x30)!)
+        })
+        let negative = s.hasPrefix("-") || s.hasPrefix("－")
+        s = s.trimmingCharacters(in: CharacterSet(charactersIn: "-－+＋"))
+        guard let v = Double(s), v > 0, v < 100_000_000 else { return nil }
+        let rounded = (v * 100).rounded() / 100
+        return negative ? nil : rounded   // 记账金额用正数，收支类型另选
+    }
+
+    static func parseDate(_ raw: String, reference: Date) -> Date? {
+        let s = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !s.isEmpty else { return nil }
+        let cal = DateText.calendar
+        let lower = s.replacingOccurrences(of: "：", with: ":")
+        if ["现在", "此刻", "当前"].contains(lower) { return Date() }
+        // 今天 / 昨天 + 时间
+        let timePart: String
+        var dayOffset = 0
+        if lower.hasPrefix("今天") {
+            timePart = String(lower.dropFirst(2)).trimmingCharacters(in: .whitespaces)
+        } else if lower.hasPrefix("昨天") {
+            dayOffset = -1
+            timePart = String(lower.dropFirst(2)).trimmingCharacters(in: .whitespaces)
+        } else {
+            timePart = lower
+        }
+        let formats = ["M月d日 HH:mm", "M月d日 H:mm", "MM-dd HH:mm", "yyyy-MM-dd HH:mm", "yyyy/MM/dd HH:mm", "HH:mm", "H:mm"]
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "zh_CN")
+        f.calendar = cal
+        f.timeZone = .current
+        for fmt in formats {
+            f.dateFormat = fmt
+            if let d = f.date(from: timePart) {
+                var comp = cal.dateComponents([.year, .month, .day, .hour, .minute], from: d)
+                let ref = cal.dateComponents([.year, .month, .day], from: reference)
+                if fmt.hasPrefix("HH") || fmt.hasPrefix("H:") {
+                    comp.year = ref.year; comp.month = ref.month; comp.day = ref.day
+                } else if !fmt.contains("yyyy") && (fmt.contains("月") || fmt.contains("MM")) {
+                    comp.year = ref.year
+                }
+                if let base = cal.date(from: comp) {
+                    return cal.date(byAdding: .day, value: dayOffset, to: base) ?? base
+                }
+            }
+        }
+        // 今天/昨天且没写时间 → 保留原来的时分
+        if dayOffset != 0 || lower.hasPrefix("今天") {
+            var comp = cal.dateComponents([.year, .month, .day, .hour, .minute], from: reference)
+            let day = cal.date(byAdding: .day, value: dayOffset, to: cal.startOfDay(for: reference)) ?? reference
+            let dc = cal.dateComponents([.year, .month, .day], from: day)
+            comp.year = dc.year; comp.month = dc.month; comp.day = dc.day
+            return cal.date(from: comp)
+        }
+        return nil
     }
 }
 
