@@ -5,9 +5,7 @@ import Charts
 struct StatsView: View {
     @Query(sort: \LedgerRecord.date, order: .reverse) private var allRecords: [LedgerRecord]
     @Query(sort: \LedgerCategory.sortOrder) private var categories: [LedgerCategory]
-    @AppStorage(SettingsKey.monthlyBudget) private var budget: Double = 0
-    @AppStorage(BudgetKey.yearly) private var yearlyBudget: Double = 0
-    @AppStorage(BudgetKey.rollover) private var rollover = false
+    @AppStorage(BudgetKey.yearly, store: ModeDefaults.store) private var yearlyBudget: Double = 0
 
     @State private var period: Period = .month
     @State private var anchor: Date = Date()

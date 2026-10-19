@@ -8,10 +8,10 @@ struct SettingsView: View {
     @Query(sort: \LedgerRecord.date, order: .reverse) private var records: [LedgerRecord]
     @Query(sort: \LedgerAccount.sortOrder) private var accounts: [LedgerAccount]
 
-    @AppStorage(SettingsKey.monthlyBudget) private var budget: Double = 0
-    @AppStorage(SettingsKey.currencySymbol) private var currencySymbol = "¥"
+    @AppStorage(SettingsKey.monthlyBudget, store: ModeDefaults.store) private var budget: Double = 0
+    @AppStorage(SettingsKey.currencySymbol, store: ModeDefaults.store) private var currencySymbol = "¥"
     @AppStorage(SettingsKey.appearance) private var appearance = 0
-    @AppStorage(SettingsKey.defaultAccount) private var defaultAccount = ""
+    @AppStorage(SettingsKey.defaultAccount, store: ModeDefaults.store) private var defaultAccount = ""
     @AppStorage(SettingsKey.hideInAppSwitcher) private var hideInAppSwitcher = true
     @AppStorage(SettingsKey.lastBackupAt) private var lastBackupAt: Double = 0
     @State private var showDemoBackup = false
@@ -200,7 +200,7 @@ struct SettingsView: View {
             if session.isDecoy {
                 Text("密码以加盐哈希保存在本机钥匙串。")
             } else {
-                Text("密码以加盐哈希保存在本机钥匙串。面容 ID / 触控 ID 始终进入真实账本；只有输入防窥密码才会进入防窥账本。防窥数据存在独立文件中，不会同步到 iCloud，也不会写入真实备份。快捷指令记账始终写入真实账本。")
+                Text("密码以加盐哈希保存在本机钥匙串。面容 ID / 触控 ID 始终进入真实账本；只有输入防窥密码才会进入防窥账本。防窥账本使用独立数据库与独立偏好（预算、默认账户、分类记忆等），不会同步到 iCloud，也不会写入真实备份。进入防窥时会撤掉真实账本的本地通知。快捷指令记账始终写入真实账本。")
             }
         }
         .onAppear { decoyEnabled = DecoyPasscodeStore.isEnabled }

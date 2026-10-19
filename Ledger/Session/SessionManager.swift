@@ -20,6 +20,7 @@ final class SessionManager: ObservableObject {
     private var decoyContainer: ModelContainer?
 
     private init() {
+        ModeDefaults.setDecoyMode(false)
         if ScreenshotDemo.screen == "decoyhome" {
             // 截图模式：启动即进入防窥库，避免 RootView.onAppear 里改 epoch 把界面拆掉
             forceDecoyForDemo()
@@ -41,23 +42,35 @@ final class SessionManager: ObservableObject {
     func enterReal() {
         guard mode != .real else { return }
         mode = .real
+        ModeDefaults.setDecoyMode(false)
         epoch += 1
+        // 回到真实账本后，按真实库重排周期提醒
+        Task { await NotificationManager.shared.rescheduleRecurring(in: DataStore.shared.mainContext) }
     }
 
     func enterDecoy() {
         if decoyContainer == nil {
             decoyContainer = DataStore.makeDecoyContainer(inMemory: ScreenshotDemo.isActive)
         }
+        ModeDefaults.seedDecoyDefaultsIfNeeded()
         // 进入防窥后清掉「跳到 App 修改」的待办，避免真实记录编辑页漏出来
         PendingAppEdit.clear()
-        guard mode != .decoy else { return }
+        // 撤掉真实账本的待发/已送达通知，避免锁屏通知栏泄露真实金额
+        NotificationManager.shared.removeAllLedgerNotifications()
+        guard mode != .decoy else {
+            ModeDefaults.setDecoyMode(true)
+            return
+        }
         mode = .decoy
+        ModeDefaults.setDecoyMode(true)
         epoch += 1
     }
 
     func forceDecoyForDemo() {
         decoyContainer = DataStore.makeDecoyContainer(inMemory: true)
+        ModeDefaults.seedDecoyDefaultsIfNeeded()
         mode = .decoy
+        ModeDefaults.setDecoyMode(true)
         epoch += 1
     }
 
@@ -65,6 +78,7 @@ final class SessionManager: ObservableObject {
     func resetDecoyStore() {
         decoyContainer = nil
         DataStore.deleteDecoyStoreFiles()
+        ModeDefaults.resetDecoyPrefs()
         decoyContainer = DataStore.makeDecoyContainer(inMemory: false)
         if mode == .decoy { epoch += 1 }
     }

@@ -300,8 +300,8 @@ struct AccountEditorView: View {
 
     private func delete() {
         guard let account else { return }
-        if UserDefaults.standard.string(forKey: SettingsKey.defaultAccount) == account.name {
-            UserDefaults.standard.set("", forKey: SettingsKey.defaultAccount)
+        if ModeDefaults.string(forKey: SettingsKey.defaultAccount) == account.name {
+            ModeDefaults.set("", forKey: SettingsKey.defaultAccount)
         }
         context.delete(account)
         try? context.save()

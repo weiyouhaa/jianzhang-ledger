@@ -73,7 +73,8 @@ enum DecoySeeder {
             context.insert(r)
         }
 
-        UserDefaults.standard.set(3000.0, forKey: "decoy.monthlyBudget")
+        ModeDefaults.seedDecoyDefaultsIfNeeded()
+        ModeDefaults.decoy.set(3000.0, forKey: SettingsKey.monthlyBudget)
         try? context.save()
         UserDefaults.standard.set(true, forKey: seededKey)
     }

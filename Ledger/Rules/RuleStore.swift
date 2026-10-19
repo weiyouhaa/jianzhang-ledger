@@ -15,8 +15,8 @@ enum RuleStore {
     static let learnKey = "rules.learnEnabled"
 
     static var learnEnabled: Bool {
-        get { UserDefaults.standard.object(forKey: learnKey) as? Bool ?? true }
-        set { UserDefaults.standard.set(newValue, forKey: learnKey) }
+        get { ModeDefaults.object(forKey: learnKey) as? Bool ?? true }
+        set { ModeDefaults.set(newValue, forKey: learnKey) }
     }
 
     static func allRules(in context: ModelContext) -> [CategoryRule] {
@@ -83,7 +83,7 @@ enum RuleStore {
     }
 
     static func defaultAccount(in context: ModelContext) -> LedgerAccount? {
-        let name = UserDefaults.standard.string(forKey: SettingsKey.defaultAccount) ?? ""
+        let name = ModeDefaults.string(forKey: SettingsKey.defaultAccount) ?? ""
         return DataStore.account(named: name, in: context)
     }
 }

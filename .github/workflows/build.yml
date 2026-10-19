@@ -61,6 +61,11 @@ jobs:
           swiftc Tools/PasscodeRouteCheck/main.swift -o "$RUNNER_TEMP/passcoderoute"
           "$RUNNER_TEMP/passcoderoute"
 
+      - name: Mode defaults isolation tests (real vs decoy UserDefaults suite)
+        run: |
+          swiftc Tools/ModeDefaultsCheck/main.swift -o "$RUNNER_TEMP/modedefaults"
+          "$RUNNER_TEMP/modedefaults"
+
       - name: Backup crypto tests (AES-GCM round-trip, wrong password, tampering, plain v1/v3)
         run: |
           swiftc Ledger/Backup/BackupCrypto.swift Ledger/Backup/BackupFormat.swift Tools/BackupCryptoCheck/main.swift \

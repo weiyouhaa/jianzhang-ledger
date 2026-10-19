@@ -3,7 +3,7 @@ import SwiftUI
 import UIKit
 
 enum Money {
-    static var symbol: String { UserDefaults.standard.string(forKey: SettingsKey.currencySymbol) ?? "¥" }
+    static var symbol: String { ModeDefaults.string(forKey: SettingsKey.currencySymbol) ?? "¥" }
 
     private static let formatter: NumberFormatter = {
         let f = NumberFormatter()

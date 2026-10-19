@@ -39,9 +39,9 @@ struct BudgetStatus {
 enum BudgetService {
     static var calendar: Calendar { DateText.calendar }
 
-    static var monthlyBase: Double { max(0, UserDefaults.standard.double(forKey: SettingsKey.monthlyBudget)) }
-    static var yearlyBudget: Double { max(0, UserDefaults.standard.double(forKey: BudgetKey.yearly)) }
-    static var rolloverEnabled: Bool { UserDefaults.standard.bool(forKey: BudgetKey.rollover) }
+    static var monthlyBase: Double { max(0, ModeDefaults.double(forKey: SettingsKey.monthlyBudget)) }
+    static var yearlyBudget: Double { max(0, ModeDefaults.double(forKey: BudgetKey.yearly)) }
+    static var rolloverEnabled: Bool { ModeDefaults.bool(forKey: BudgetKey.rollover) }
 
     static func monthRange(_ month: Date) -> (Date, Date) {
         let start = calendar.startOfMonth(for: month)
@@ -116,19 +116,19 @@ enum BudgetService {
 /// 预算提醒：保存记录 / 导入 / 快捷指令 / 周期记账后检查，达到阈值时发本地通知（每期每档只提醒一次）
 @MainActor
 enum BudgetMonitor {
-    static var alertsEnabled: Bool { UserDefaults.standard.bool(forKey: BudgetKey.alertsEnabled) }
+    static var alertsEnabled: Bool { ModeDefaults.bool(forKey: BudgetKey.alertsEnabled) }
     static var warnPercent: Int {
-        let v = UserDefaults.standard.integer(forKey: BudgetKey.warnPercent)
+        let v = ModeDefaults.integer(forKey: BudgetKey.warnPercent)
         return v == 0 ? 80 : v
     }
-    static var alertOver: Bool { UserDefaults.standard.object(forKey: BudgetKey.alertOver) as? Bool ?? true }
+    static var alertOver: Bool { ModeDefaults.object(forKey: BudgetKey.alertOver) as? Bool ?? true }
 
     static func check(in context: ModelContext) {
         guard alertsEnabled, !ScreenshotDemo.isActive, !SessionManager.shared.isDecoy else { return }
         let status = BudgetService.currentStatus(in: context)
         let monthKey = DayKey.formatter.string(from: status.month).prefix(7)
         let yearKey = monthKey.prefix(4)
-        var sent = UserDefaults.standard.dictionary(forKey: BudgetKey.sentAlerts) as? [String: Bool] ?? [:]
+        var sent = ModeDefaults.dictionary(forKey: BudgetKey.sentAlerts) as? [String: Bool] ?? [:]
         // 只保留本月 / 本年的记录
         sent = sent.filter { $0.key.hasPrefix(String(monthKey)) || $0.key.hasPrefix("Y" + yearKey) }
 
@@ -153,6 +153,6 @@ enum BudgetMonitor {
                 : "预算 \(Money.format(line.budget))，已花 \(Money.format(line.spent))，还剩 \(Money.format(line.remaining))。"
             NotificationManager.shared.postNow(id: "budget.\(key)", title: title, body: body)
         }
-        UserDefaults.standard.set(sent, forKey: BudgetKey.sentAlerts)
+        ModeDefaults.set(sent, forKey: BudgetKey.sentAlerts)
     }
 }

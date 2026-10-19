@@ -59,8 +59,15 @@ final class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
         return s == .authorized || s == .provisional || s == .ephemeral
     }
 
+    /// 进入防窥时调用：清掉所有待发与已送达的账本通知（周期账单 / 预算）
+    func removeAllLedgerNotifications() {
+        center.removeAllPendingNotificationRequests()
+        center.removeAllDeliveredNotifications()
+    }
+
     func postNow(id: String, title: String, body: String) {
-        Task {
+        Task { @MainActor in
+            guard !SessionManager.shared.isDecoy else { return }
             guard await isAuthorized() else { return }
             let content = UNMutableNotificationContent()
             content.title = title
@@ -75,7 +82,7 @@ final class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
     /// 重新安排周期账单提醒（启动、回到前台、编辑规则后调用）
     @MainActor
     func rescheduleRecurring(in context: ModelContext) async {
-        guard !ScreenshotDemo.isActive else { return }
+        guard !ScreenshotDemo.isActive, !SessionManager.shared.isDecoy else { return }
         let pending = await center.pendingNotificationRequests()
         let old = pending.map(\.identifier).filter { $0.hasPrefix(Self.recurringPrefix) }
         center.removePendingNotificationRequests(withIdentifiers: old)
@@ -126,7 +133,12 @@ final class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
 
     func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification,
                                 withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void) {
-        completionHandler([.banner, .list, .sound])
+        // 防窥会话中不展示任何横幅（避免真实账本通知内容闪出）
+        if ModeDefaults.isDecoyMode {
+            completionHandler([])
+        } else {
+            completionHandler([.banner, .list, .sound])
+        }
     }
 
     func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse,

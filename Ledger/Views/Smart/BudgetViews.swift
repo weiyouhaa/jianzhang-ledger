@@ -56,12 +56,12 @@ struct BudgetView: View {
     @Query(sort: \LedgerRecord.date, order: .reverse) private var records: [LedgerRecord]
     @Query(sort: \LedgerCategory.sortOrder) private var categories: [LedgerCategory]
 
-    @AppStorage(SettingsKey.monthlyBudget) private var monthly: Double = 0
-    @AppStorage(BudgetKey.yearly) private var yearly: Double = 0
-    @AppStorage(BudgetKey.rollover) private var rollover = false
-    @AppStorage(BudgetKey.alertsEnabled) private var alertsEnabled = false
-    @AppStorage(BudgetKey.warnPercent) private var warnPercent = 80
-    @AppStorage(BudgetKey.alertOver) private var alertOver = true
+    @AppStorage(SettingsKey.monthlyBudget, store: ModeDefaults.store) private var monthly: Double = 0
+    @AppStorage(BudgetKey.yearly, store: ModeDefaults.store) private var yearly: Double = 0
+    @AppStorage(BudgetKey.rollover, store: ModeDefaults.store) private var rollover = false
+    @AppStorage(BudgetKey.alertsEnabled, store: ModeDefaults.store) private var alertsEnabled = false
+    @AppStorage(BudgetKey.warnPercent, store: ModeDefaults.store) private var warnPercent = 80
+    @AppStorage(BudgetKey.alertOver, store: ModeDefaults.store) private var alertOver = true
 
     @State private var monthlyText = ""
     @State private var yearlyText = ""

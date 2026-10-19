@@ -52,7 +52,9 @@ enum ScreenshotDemo {
         UserDefaults.standard.set("¥", forKey: SettingsKey.currencySymbol)
         if screen == "decoysettings" || screen == "decoyhome" {
             UserDefaults.standard.set(true, forKey: "lock.decoyEnabled")
-            UserDefaults.standard.set(3000.0, forKey: "decoy.monthlyBudget")
+            ModeDefaults.setDecoyMode(true)
+            ModeDefaults.seedDecoyDefaultsIfNeeded()
+            ModeDefaults.decoy.set(3000.0, forKey: SettingsKey.monthlyBudget)
         }
         if screen == "backup" || screen == "backupencrypt" {
             UserDefaults.standard.set(true, forKey: SettingsKey.autoBackupEnabled)
