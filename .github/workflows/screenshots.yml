@@ -99,6 +99,8 @@ jobs:
           shoot recurring   light 16-recurring
           shoot budgets     light 17-budgets
           shoot statsbudget light 18-stats-budget
+          shoot assetssocial light 19-assets-social
+          shoot quickbalance light 20-quick-balance
           shoot home     dark  07-home-dark
           shoot stats    dark  08-stats-dark
           ls -l screenshots

@@ -12,6 +12,14 @@ struct AssetsView: View {
     @State private var showTransfer = false
     @State private var demoAccount: LedgerAccount?
     @State private var showDemoAccount = false
+    @State private var quickBalanceAccount: LedgerAccount?
+    @State private var recordTarget: AccountRecordTarget?
+
+    struct AccountRecordTarget: Identifiable {
+        let account: LedgerAccount
+        let kind: RecordKind
+        var id: String { account.id.uuidString + kind.rawValue }
+    }
 
     struct NetWorthPoint: Identifiable {
         let date: Date
@@ -36,12 +44,21 @@ struct AssetsView: View {
         let totalLiabilities = -included.filter { $0.type.isLiability }.reduce(0) { $0 + (balances[$1.id] ?? 0) }
         let assetGroups = groups(active, liability: false)
         let liabilityGroups = groups(active, liability: true)
+        let social = active.filter { $0.type.isSocialSecurity }.sorted {
+            let a = AccountType.socialTypes.firstIndex(of: $0.type) ?? 0, b = AccountType.socialTypes.firstIndex(of: $1.type) ?? 0
+            return a == b ? $0.sortOrder < $1.sortOrder : a < b
+        }
+        // 可支配资产：不含公积金与社保类账户
+        let socialIncluded = included.filter { $0.type.isSocialSecurity }.reduce(0) { $0 + (balances[$1.id] ?? 0) }
 
         NavigationStack {
+          ScrollViewReader { proxy in
             List {
                 Section {
                     NetWorthCard(netWorth: totalAssets - totalLiabilities, assets: totalAssets,
-                                 liabilities: totalLiabilities, hidden: $hideAmounts)
+                                 liabilities: totalLiabilities,
+                                 disposable: social.isEmpty ? nil : totalAssets - socialIncluded,
+                                 hidden: $hideAmounts)
                         .listRowInsets(EdgeInsets())
                         .listRowBackground(Color.clear)
                 }
@@ -61,6 +78,10 @@ struct AssetsView: View {
                 } else {
                     ForEach(assetGroups) { group in
                         accountSection(group, balances: balances)
+                    }
+                    if !social.isEmpty {
+                        socialSection(social, balances: balances)
+                            .id("social")
                     }
                     ForEach(liabilityGroups) { group in
                         accountSection(group, balances: balances)
@@ -89,6 +110,14 @@ struct AssetsView: View {
                 }
             }
             .listStyle(.insetGrouped)
+            .task {
+                // 截图模式：滚动到「公积金与社保」
+                if ScreenshotDemo.screen == "assetssocial" {
+                    try? await Task.sleep(nanoseconds: 600_000_000)
+                    proxy.scrollTo("social", anchor: .top)
+                }
+            }
+          }
             .navigationTitle("资产")
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
@@ -125,11 +154,22 @@ struct AssetsView: View {
             .sheet(isPresented: $showTransfer) {
                 RecordEditorView(record: nil, initialKind: .transfer)
             }
+            .sheet(item: $quickBalanceAccount) { a in
+                QuickBalanceSheet(account: a)
+                    .presentationDetents([.height(270)])
+                    .presentationDragIndicator(.visible)
+            }
+            .sheet(item: $recordTarget) { t in
+                RecordEditorView(record: nil, initialKind: t.kind, presetAccountID: t.account.id)
+            }
             .navigationDestination(isPresented: $showDemoAccount) {
                 if let demoAccount { AccountDetailView(account: demoAccount) }
             }
             .task {
                 // 截图模式：直接打开账户详情
+                if ScreenshotDemo.screen == "quickbalance", quickBalanceAccount == nil {
+                    quickBalanceAccount = activeAccounts.first(where: { $0.type == .debit }) ?? activeAccounts.first
+                }
                 if ScreenshotDemo.screen == "account", !showDemoAccount,
                    let target = activeAccounts.first(where: { $0.type == .credit }) ?? activeAccounts.first {
                     demoAccount = target
@@ -145,15 +185,7 @@ struct AssetsView: View {
         let total = group.accounts.reduce(0) { $0 + (balances[$1.id] ?? 0) }
         return Section {
             ForEach(group.accounts) { a in
-                NavigationLink {
-                    AccountDetailView(account: a)
-                } label: {
-                    AccountRow(account: a, balance: balances[a.id] ?? 0, hidden: hideAmounts)
-                }
-                .swipeActions {
-                    Button { editorTarget = .edit(a) } label: { Label("编辑", systemImage: "pencil") }
-                        .tint(.blue)
-                }
+                accountRow(a, balances: balances)
             }
         } header: {
             HStack {
@@ -168,8 +200,71 @@ struct AssetsView: View {
         }
     }
 
+    /// 公积金与社保：多种类型合在一个分组
+    private func socialSection(_ list: [LedgerAccount], balances: [UUID: Double]) -> some View {
+        let total = list.reduce(0) { $0 + (balances[$1.id] ?? 0) }
+        return Section {
+            ForEach(list) { a in
+                accountRow(a, balances: balances)
+            }
+        } header: {
+            HStack {
+                Label("公积金与社保", systemImage: "building.columns")
+                Spacer()
+                Text(Money.masked(total, hidden: hideAmounts))
+            }
+            .font(.caption)
+            .textCase(nil)
+        } footer: {
+            if list.contains(where: { !$0.includeInNetWorth }) {
+                Text("标 ⊖ 的账户（如养老保险个人账户）退休前不能领取，不计入净资产。")
+            }
+        }
+    }
+
+    /// 账户行：点按进入详情，左滑编辑，长按快捷菜单
+    private func accountRow(_ a: LedgerAccount, balances: [UUID: Double]) -> some View {
+        let balance = balances[a.id] ?? 0
+        return NavigationLink {
+            AccountDetailView(account: a)
+        } label: {
+            AccountRow(account: a, balance: balance, hidden: hideAmounts)
+        }
+        .swipeActions {
+            Button { editorTarget = .edit(a) } label: { Label("编辑", systemImage: "pencil") }
+                .tint(.blue)
+        }
+        .contextMenu {
+            Button {
+                UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                quickBalanceAccount = a
+            } label: {
+                Label(a.type.isLiability ? "修改欠款" : "修改余额", systemImage: "pencil.circle")
+            }
+            Divider()
+            if a.type.isSocialSecurity {
+                Button { recordTarget = AccountRecordTarget(account: a, kind: .contribution) } label: {
+                    Label("缴存", systemImage: "tray.and.arrow.down")
+                }
+            } else {
+                Button { recordTarget = AccountRecordTarget(account: a, kind: .expense) } label: {
+                    Label("记一笔", systemImage: "square.and.pencil")
+                }
+            }
+            Button { recordTarget = AccountRecordTarget(account: a, kind: .transfer) } label: {
+                Label(a.type.isLiability ? "还款 / 转账" : (a.type == .housingFund ? "提取 / 转账" : "转账"),
+                      systemImage: "arrow.left.arrow.right")
+            }
+            Button { editorTarget = .edit(a) } label: {
+                Label("编辑账户", systemImage: "slider.horizontal.3")
+            }
+        } preview: {
+            AccountPreviewCard(account: a, balance: balance, hidden: hideAmounts)
+        }
+    }
+
     private func groups(_ list: [LedgerAccount], liability: Bool) -> [TypeGroup] {
-        let types = liability ? AccountType.liabilityTypes : AccountType.assetTypes
+        let types = (liability ? AccountType.liabilityTypes : AccountType.assetTypes).filter { !$0.isSocialSecurity }
         return types.compactMap { t in
             let items = list.filter { $0.type == t }
             return items.isEmpty ? nil : TypeGroup(type: t, accounts: items)
@@ -214,6 +309,8 @@ struct NetWorthCard: View {
     let netWorth: Double
     let assets: Double
     let liabilities: Double
+    /// 可支配资产（不含公积金与社保）；没有这类账户时为 nil
+    var disposable: Double? = nil
     @Binding var hidden: Bool
 
     var body: some View {
@@ -243,6 +340,16 @@ struct NetWorthCard: View {
                 StatBlock(title: "总资产", value: Money.masked(assets, hidden: hidden), light: true)
                 Spacer()
                 StatBlock(title: "总负债", value: Money.masked(liabilities, hidden: hidden), alignment: .trailing, light: true)
+            }
+            if let disposable {
+                HStack(spacing: 6) {
+                    Image(systemName: "banknote")
+                    Text("可支配资产 " + Money.masked(disposable, hidden: hidden))
+                    Text("· 不含公积金与社保").opacity(0.75)
+                    Spacer()
+                }
+                .font(.caption)
+                .foregroundStyle(.white.opacity(0.9))
             }
             if assets > 0 && !hidden {
                 let ratio = min(max(liabilities / assets, 0), 1)
@@ -382,5 +489,38 @@ struct CreditUsageBar: View {
                 Capsule().fill(ratio > 0.8 ? Color.red : Color.orange).frame(width: geo.size.width * ratio)
             }
         }
+    }
+}
+
+/// 长按账户行时的预览卡片
+struct AccountPreviewCard: View {
+    let account: LedgerAccount
+    let balance: Double
+    let hidden: Bool
+
+    var body: some View {
+        let liability = account.type.isLiability
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 10) {
+                CategoryIcon(icon: account.iconName, color: .white, size: 34)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(account.name).font(.headline)
+                    Text(account.type.title + (account.includeInNetWorth ? "" : " · 不计入净资产"))
+                        .font(.caption).opacity(0.85)
+                }
+            }
+            Text(liability ? (balance <= 0 ? "当前欠款" : "溢缴款") : "当前余额")
+                .font(.caption).opacity(0.85)
+            Text(Money.masked(liability ? abs(balance) : balance, hidden: hidden))
+                .font(.system(size: 30, weight: .bold, design: .rounded))
+            if !account.note.isEmpty {
+                Text(account.note).font(.caption).opacity(0.85).lineLimit(2)
+            }
+        }
+        .foregroundStyle(.white)
+        .padding(20)
+        .frame(width: 300, alignment: .leading)
+        .background(LinearGradient(colors: [account.color, account.color.opacity(0.7)],
+                                   startPoint: .topLeading, endPoint: .bottomTrailing))
     }
 }

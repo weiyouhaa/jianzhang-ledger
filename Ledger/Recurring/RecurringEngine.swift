@@ -77,9 +77,12 @@ enum RecurringEngine {
         if kind == .transfer {
             toAccount = DataStore.account(idString: rule.toAccountID, in: context)
             guard account != nil, toAccount != nil, account?.id != toAccount?.id else { return nil }
-        } else {
+        } else if kind.countsInStats {
             category = DataStore.category(idString: rule.categoryID, in: context)
                 ?? DataStore.category(named: nil, kind: kind, in: context)
+        } else {
+            // 缴存：只需要账户
+            guard account != nil else { return nil }
         }
         let note = rule.note.isEmpty ? rule.name : rule.note
         let record = LedgerRecord(amount: (rule.amount * 100).rounded() / 100, kind: kind, category: category, note: note,
@@ -122,6 +125,12 @@ enum RecurringEngine {
         return rule.spec.next(after: today.addingTimeInterval(-1), calendar: calendar).flatMap { d in
             rule.autoCreate && d <= now ? rule.spec.next(after: now, calendar: calendar) : d
         }
+    }
+
+    /// 某账户的每月缴存规则
+    static func contributionRule(for account: LedgerAccount, in context: ModelContext) -> RecurringRule? {
+        let id = account.id.uuidString
+        return allRules(in: context).first { $0.kind == .contribution && $0.accountID == id }
     }
 
     /// 本月共发生几次

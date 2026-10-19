@@ -2,12 +2,14 @@ import Foundation
 import SwiftData
 import SwiftUI
 
-/// 记录类型（以字符串存储，便于 #Predicate 过滤）。转账与余额校准不计入收支统计和预算。
+/// 记录类型（以字符串存储，便于 #Predicate 过滤）。转账、余额校准、缴存不计入收支统计和预算。
 enum RecordKind: String, CaseIterable, Identifiable, Codable {
     case expense
     case income
     case transfer
     case adjustment
+    /// 公积金 / 社保 / 年金缴存：只增加该账户余额，不计入收入
+    case contribution
 
     var id: String { rawValue }
     var title: String {
@@ -16,12 +18,13 @@ enum RecordKind: String, CaseIterable, Identifiable, Codable {
         case .income: return "收入"
         case .transfer: return "转账"
         case .adjustment: return "余额校准"
+        case .contribution: return "缴存"
         }
     }
     var sign: String {
         switch self {
         case .expense: return "-"
-        case .income: return "+"
+        case .income, .contribution: return "+"
         case .transfer, .adjustment: return ""
         }
     }
@@ -121,6 +124,7 @@ final class LedgerRecord {
         switch kind {
         case .transfer: return isCreditRepayment ? "还款" : "转账"
         case .adjustment: return "余额校准"
+        case .contribution: return "缴存"
         default: return category?.name ?? "未分类"
         }
     }
@@ -128,6 +132,7 @@ final class LedgerRecord {
         switch kind {
         case .transfer: return isCreditRepayment ? "creditcard.and.123" : "arrow.left.arrow.right"
         case .adjustment: return "slider.horizontal.3"
+        case .contribution: return "tray.and.arrow.down.fill"
         default: return category?.icon ?? "questionmark.circle.fill"
         }
     }
@@ -135,6 +140,7 @@ final class LedgerRecord {
         switch kind {
         case .transfer: return Color(hex: "#30B0C7")
         case .adjustment: return .gray
+        case .contribution: return accountRef?.color ?? Color(hex: "#E8A33D")
         default: return category?.color ?? .gray
         }
     }
@@ -144,6 +150,7 @@ final class LedgerRecord {
         if !note.isEmpty { return note }
         if !merchant.isEmpty { return merchant }
         if kind == .transfer { return (accountRef?.name ?? "?") + " → " + (toAccount?.name ?? "?") }
+        if kind == .contribution { return (accountRef?.name ?? "") + "缴存" }
         return categoryName
     }
 
@@ -158,7 +165,7 @@ final class LedgerRecord {
     var amountText: String {
         switch kind {
         case .expense: return "-" + Money.format(amount)
-        case .income: return "+" + Money.format(amount)
+        case .income, .contribution: return "+" + Money.format(amount)
         case .transfer: return Money.format(amount)
         case .adjustment: return (amount >= 0 ? "+" : "") + Money.format(amount)
         }
@@ -172,7 +179,7 @@ final class LedgerRecord {
             case .expense: delta -= amount
             case .income: delta += amount
             case .transfer: delta -= amount + fee
-            case .adjustment: delta += amount
+            case .adjustment, .contribution: delta += amount
             }
         }
         if kind == .transfer, toAccount?.id == account.id {
@@ -185,7 +192,12 @@ final class LedgerRecord {
 /// 账户类型
 enum AccountType: String, CaseIterable, Identifiable, Codable {
     case debit, alipay, wechat, cash, investment, receivable, otherAsset
-    case credit, consumerCredit, loan, otherLiability
+    /// 公积金与社保（个人账户）、年金
+    case housingFund, medicalAccount, pensionAccount, privatePension, enterpriseAnnuity
+    case credit, consumerCredit
+    /// 房贷（商业贷款 / 公积金贷款）、车贷
+    case mortgage, fundLoan, carLoan
+    case loan, otherLiability
 
     var id: String { rawValue }
 
@@ -198,8 +210,16 @@ enum AccountType: String, CaseIterable, Identifiable, Codable {
         case .investment: return "投资理财"
         case .receivable: return "借出 / 应收"
         case .otherAsset: return "其他资产"
+        case .housingFund: return "住房公积金"
+        case .medicalAccount: return "医保个人账户"
+        case .pensionAccount: return "养老保险个人账户"
+        case .privatePension: return "个人养老金"
+        case .enterpriseAnnuity: return "企业年金"
         case .credit: return "信用卡"
         case .consumerCredit: return "花呗 / 白条"
+        case .mortgage: return "房贷（商贷）"
+        case .fundLoan: return "房贷（公积金贷款）"
+        case .carLoan: return "车贷"
         case .loan: return "借入 / 贷款"
         case .otherLiability: return "其他负债"
         }
@@ -207,7 +227,7 @@ enum AccountType: String, CaseIterable, Identifiable, Codable {
 
     var isLiability: Bool {
         switch self {
-        case .credit, .consumerCredit, .loan, .otherLiability: return true
+        case .credit, .consumerCredit, .mortgage, .fundLoan, .carLoan, .loan, .otherLiability: return true
         default: return false
         }
     }
@@ -215,6 +235,21 @@ enum AccountType: String, CaseIterable, Identifiable, Codable {
     /// 有额度与还款日
     var hasCreditLimit: Bool { self == .credit || self == .consumerCredit }
 
+    /// 公积金与社保类（资产页单独分组，可设每月缴存，「可支配资产」中不含）
+    var isSocialSecurity: Bool { Self.socialTypes.contains(self) }
+
+    /// 分期贷款：可设还款日
+    var isInstallmentLoan: Bool { self == .mortgage || self == .fundLoan || self == .carLoan || self == .loan }
+
+    /// 新建账户时「计入净资产」的默认值：养老金类到退休才能领取，默认不计入
+    var defaultIncludeInNetWorth: Bool {
+        switch self {
+        case .pensionAccount, .privatePension, .enterpriseAnnuity: return false
+        default: return true
+        }
+    }
+
+    static let socialTypes: [AccountType] = [.housingFund, .medicalAccount, .pensionAccount, .privatePension, .enterpriseAnnuity]
     var defaultIcon: String {
         switch self {
         case .cash: return "banknote.fill"
@@ -224,8 +259,16 @@ enum AccountType: String, CaseIterable, Identifiable, Codable {
         case .investment: return "chart.line.uptrend.xyaxis"
         case .receivable: return "person.crop.circle.badge.clock"
         case .otherAsset: return "archivebox.fill"
+        case .housingFund: return "building.columns.circle.fill"
+        case .medicalAccount: return "cross.case.fill"
+        case .pensionAccount: return "shield.lefthalf.filled"
+        case .privatePension: return "leaf.fill"
+        case .enterpriseAnnuity: return "building.2.fill"
         case .credit: return "creditcard.fill"
         case .consumerCredit: return "cart.badge.clock"
+        case .mortgage: return "house.fill"
+        case .fundLoan: return "house.and.flag.fill"
+        case .carLoan: return "car.fill"
         case .loan: return "house.circle.fill"
         case .otherLiability: return "exclamationmark.circle.fill"
         }
@@ -240,8 +283,16 @@ enum AccountType: String, CaseIterable, Identifiable, Codable {
         case .investment: return "#AF52DE"
         case .receivable: return "#30B0C7"
         case .otherAsset: return "#8E8E93"
+        case .housingFund: return "#E8A33D"
+        case .medicalAccount: return "#FF6B6B"
+        case .pensionAccount: return "#5856D6"
+        case .privatePension: return "#2FA46C"
+        case .enterpriseAnnuity: return "#0A84FF"
         case .credit: return "#C8102E"
         case .consumerCredit: return "#00A3FF"
+        case .mortgage: return "#A2845E"
+        case .fundLoan: return "#C69C6D"
+        case .carLoan: return "#7D6B5D"
         case .loan: return "#A2845E"
         case .otherLiability: return "#636366"
         }
@@ -254,7 +305,15 @@ enum AccountType: String, CaseIterable, Identifiable, Codable {
     static func guess(from name: String) -> AccountType {
         if name.contains("信用卡") { return .credit }
         if ["花呗", "白条", "月付", "分期"].contains(where: { name.contains($0) }) { return .consumerCredit }
-        if ["贷款", "借入", "房贷", "车贷"].contains(where: { name.contains($0) }) { return .loan }
+        if name.contains("公积金贷") { return .fundLoan }
+        if name.contains("房贷") || name.contains("商贷") { return .mortgage }
+        if name.contains("车贷") { return .carLoan }
+        if ["贷款", "借入"].contains(where: { name.contains($0) }) { return .loan }
+        if name.contains("公积金") { return .housingFund }
+        if name.contains("医保") { return .medicalAccount }
+        if name.contains("个人养老金") { return .privatePension }
+        if name.contains("年金") { return .enterpriseAnnuity }
+        if name.contains("养老") || name.contains("社保") { return .pensionAccount }
         if ["借出", "借给", "应收"].contains(where: { name.contains($0) }) { return .receivable }
         if name.contains("支付宝") || name.contains("余额宝") { return .alipay }
         if name.contains("微信") || name.contains("零钱") { return .wechat }

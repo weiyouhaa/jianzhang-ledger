@@ -37,9 +37,16 @@ struct AccountDetailView: View {
 
             Section {
                 HStack(spacing: 10) {
-                    actionButton("记一笔", icon: "square.and.pencil") { newRecordKind = .expense }
-                    actionButton(account.type.isLiability ? "还款" : "转账", icon: "arrow.left.arrow.right") {
-                        newRecordKind = .transfer
+                    if account.type.isSocialSecurity {
+                        actionButton("缴存", icon: "tray.and.arrow.down") { newRecordKind = .contribution }
+                        actionButton(account.type == .housingFund ? "提取" : "转出", icon: "arrow.up.forward.square") {
+                            newRecordKind = .transfer
+                        }
+                    } else {
+                        actionButton("记一笔", icon: "square.and.pencil") { newRecordKind = .expense }
+                        actionButton(account.type.isLiability ? "还款" : "转账", icon: "arrow.left.arrow.right") {
+                            newRecordKind = .transfer
+                        }
                     }
                     actionButton("余额校准", icon: "scope") { showAdjust = true }
                 }
@@ -68,7 +75,7 @@ struct AccountDetailView: View {
                     }
                 }
             } header: {
-                Text("收支与转账（\(entries.count)）")
+                Text(account.type.isSocialSecurity ? "缴存与提取（\(entries.count)）" : "收支与转账（\(entries.count)）")
             }
 
             if !account.note.isEmpty {
@@ -146,6 +153,10 @@ struct AccountDetailView: View {
                                   alignment: .trailing, light: true)
                     }
                 }
+            }
+            if account.type.isSocialSecurity, let rule = RecurringEngine.contributionRule(for: account, in: context), !rule.isPaused {
+                Label("每月 \(rule.monthDay) 日缴存 \(Money.masked(rule.amount, hidden: hideAmounts))", systemImage: "arrow.triangle.2.circlepath")
+                    .font(.caption)
             }
             if account.billingDay > 0 || account.repaymentDay > 0 {
                 HStack(spacing: 14) {

@@ -82,6 +82,9 @@ struct RecurringListView: View {
         return HStack(spacing: 12) {
             if rule.kind == .transfer {
                 CategoryIcon(icon: "arrow.left.arrow.right", color: Color(hex: "#30B0C7"), size: 38)
+            } else if rule.kind == .contribution {
+                let a = accounts.first(where: { $0.id.uuidString == rule.accountID })
+                CategoryIcon(icon: a?.iconName ?? "tray.and.arrow.down.fill", color: a?.color ?? Color(hex: "#E8A33D"), size: 38)
             } else {
                 CategoryIcon(icon: category?.icon ?? "arrow.triangle.2.circlepath", color: category?.color ?? .gray, size: 38)
             }
@@ -100,9 +103,11 @@ struct RecurringListView: View {
                     .foregroundStyle(overdue ? Color.orange : Color.secondary)
             }
             Spacer()
-            Text((rule.kind == .income ? "+" : (rule.kind == .expense ? "-" : "")) + Money.format(rule.amount))
+            Text(rule.kind.sign + Money.format(rule.amount))
                 .font(.callout.weight(.semibold).monospacedDigit())
-                .foregroundStyle(rule.kind == .income ? Color.green : (rule.kind == .transfer ? Color.secondary : Color.primary))
+                .foregroundStyle(rule.kind == .income ? Color.green
+                                 : (rule.kind == .contribution ? Color(hex: "#E8A33D")
+                                    : (rule.kind == .transfer ? Color.secondary : Color.primary)))
         }
         .opacity(rule.isPaused ? 0.5 : 1)
     }
@@ -164,6 +169,7 @@ struct RecurringEditorView: View {
     private var canSave: Bool {
         guard let a = amount, a > 0, !name.trimmingCharacters(in: .whitespaces).isEmpty else { return false }
         if kind == .transfer { return accountID != nil && toAccountID != nil && accountID != toAccountID }
+        if kind == .contribution { return accountID != nil }
         return true
     }
 
@@ -177,7 +183,7 @@ struct RecurringEditorView: View {
             Section {
                 TextField("名称，如：房租、视频会员", text: $name)
                 Picker("类型", selection: $kind) {
-                    ForEach(RecordKind.editorKinds) { Text($0.title).tag($0) }
+                    ForEach(RecordKind.editorKinds + [.contribution]) { Text($0.title).tag($0) }
                 }
                 .pickerStyle(.segmented)
                 HStack {
@@ -192,6 +198,8 @@ struct RecurringEditorView: View {
                 if kind == .transfer {
                     accountPicker("转出账户", $accountID, allowNone: false)
                     accountPicker("转入账户", $toAccountID, allowNone: false)
+                } else if kind == .contribution {
+                    accountPicker("缴存账户", $accountID, allowNone: false)
                 } else {
                     Picker("分类", selection: $categoryID) {
                         ForEach(categories.filter { $0.kind == kind }) { c in

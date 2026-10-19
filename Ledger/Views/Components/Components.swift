@@ -72,6 +72,7 @@ struct RecordRow: View {
     private var amountColor: Color {
         switch record.kind {
         case .income: return .green
+        case .contribution: return Color(hex: "#E8A33D")
         case .expense: return .primary
         case .transfer, .adjustment: return .secondary
         }

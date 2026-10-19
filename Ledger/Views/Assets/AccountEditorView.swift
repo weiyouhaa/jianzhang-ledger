@@ -24,6 +24,11 @@ struct AccountEditorView: View {
     @State private var didLoad = false
     @State private var showDeleteConfirm = false
     @State private var errorMessage: String?
+    @State private var includeTouched = false
+    // 每月缴存（公积金与社保）
+    @State private var contributionOn = false
+    @State private var contributionText = ""
+    @State private var contributionDay = 15
 
     static let iconOptions: [String] = {
         var list = AccountType.allCases.map(\.defaultIcon)
@@ -58,6 +63,7 @@ struct AccountEditorView: View {
                         // 图标 / 颜色仍是旧类型默认值时，跟随新类型
                         if icon == oldValue.defaultIcon { icon = newValue.defaultIcon }
                         if colorHex == oldValue.defaultColor { colorHex = newValue.defaultColor }
+                        if account == nil && !includeTouched { includeInNetWorth = newValue.defaultIncludeInNetWorth }
                     }
                 }
 
@@ -83,11 +89,37 @@ struct AccountEditorView: View {
                             Text("未设置").tag(0)
                             ForEach(1...28, id: \.self) { Text("每月 \($0) 日").tag($0) }
                         }
+                    } else if type.isInstallmentLoan {
+                        Picker("每月还款日", selection: $repaymentDay) {
+                            Text("未设置").tag(0)
+                            ForEach(1...28, id: \.self) { Text("每月 \($0) 日").tag($0) }
+                        }
                     }
                 } footer: {
                     Text(type.isLiability
                          ? "记账之前已有的欠款。之后用这张卡消费会增加欠款，转账还款会减少欠款。"
                          : "记账之前账户里已有的金额。余额 = 初始余额 + 收入 − 支出 ± 转账。与实际不符时可在账户详情中「余额校准」。")
+                }
+
+                if type.isSocialSecurity {
+                    Section {
+                        Toggle("每月缴存", isOn: $contributionOn)
+                        if contributionOn {
+                            HStack {
+                                Text("每月金额")
+                                TextField("单位 + 个人合计", text: $contributionText)
+                                    .multilineTextAlignment(.trailing)
+                                    .keyboardType(.decimalPad)
+                            }
+                            Picker("缴存日", selection: $contributionDay) {
+                                ForEach(1...28, id: \.self) { Text("每月 \($0) 日").tag($0) }
+                            }
+                        }
+                    } header: {
+                        Text("缴存")
+                    } footer: {
+                        Text("到期自动记一笔「缴存」，只增加这个账户的余额，不计入收入和预算；可在「周期账单」中修改或暂停。公积金提取请在账户详情中点「提取」转到银行卡。")
+                    }
                 }
 
                 Section("图标") {
@@ -119,9 +151,14 @@ struct AccountEditorView: View {
 
                 Section {
                     TextField("备注（卡号尾号、用途等）", text: $note, axis: .vertical)
-                    Toggle("计入净资产", isOn: $includeInNetWorth)
+                    Toggle("计入净资产", isOn: Binding(get: { includeInNetWorth },
+                                                    set: { includeInNetWorth = $0; includeTouched = true }))
                     if account != nil {
                         Toggle("归档（隐藏，不再出现在选择列表）", isOn: $isArchived)
+                    }
+                } footer: {
+                    if type.isSocialSecurity {
+                        Text("养老保险个人账户、个人养老金、企业年金要到退休才能领取，默认不计入净资产。资产页另外显示不含公积金与社保的「可支配资产」。")
                     }
                 }
 
@@ -180,6 +217,11 @@ struct AccountEditorView: View {
         note = a.note
         includeInNetWorth = a.includeInNetWorth
         isArchived = a.isArchived
+        if let rule = RecurringEngine.contributionRule(for: a, in: context) {
+            contributionOn = !rule.isPaused
+            contributionText = Money.plain(rule.amount)
+            contributionDay = min(28, max(1, rule.monthDay))
+        }
     }
 
     private func save() {
@@ -207,14 +249,53 @@ struct AccountEditorView: View {
         target.initialBalance = initial
         target.creditLimit = type.hasCreditLimit ? max(0, Money.parse(limitText) ?? 0) : 0
         target.billingDay = type.hasCreditLimit ? billingDay : 0
-        target.repaymentDay = type.hasCreditLimit ? repaymentDay : 0
+        target.repaymentDay = (type.hasCreditLimit || type.isInstallmentLoan) ? repaymentDay : 0
         target.icon = icon
         target.colorHex = colorHex
         target.note = note
         target.includeInNetWorth = includeInNetWorth
         target.isArchived = isArchived
+        syncContributionRule(for: target)
         try? context.save()
+        RecurringEngine.run(in: context)
+        Task { await NotificationManager.shared.rescheduleRecurring(in: context) }
         dismiss()
+    }
+
+    /// 「每月缴存」对应一个自动记账的周期账单（类型：缴存）
+    private func syncContributionRule(for target: LedgerAccount) {
+        let existing = RecurringEngine.contributionRule(for: target, in: context)
+        let amount = Money.parse(contributionText) ?? 0
+        guard type.isSocialSecurity, contributionOn, amount > 0 else {
+            if let existing, type.isSocialSecurity { existing.isPaused = true }
+            if let existing, !type.isSocialSecurity { context.delete(existing) }
+            return
+        }
+        let cal = DateText.calendar
+        let rule: RecurringRule
+        if let existing {
+            rule = existing
+            if rule.monthDay != contributionDay {
+                // 改了缴存日：从现在起按新日期，不补记
+                rule.lastProcessedAt = Date()
+            }
+        } else {
+            let start = cal.date(bySettingHour: 9, minute: 0, second: 0, of: Date()) ?? Date()
+            rule = RecurringRule(name: target.name + "缴存", amount: amount, kind: .contribution, frequency: .monthly, startDate: start)
+            // 从下一次缴存日开始记账，之前的余额请填在「初始余额」中
+            rule.lastProcessedAt = Date()
+            context.insert(rule)
+        }
+        rule.name = target.name + "缴存"
+        rule.amount = (amount * 100).rounded() / 100
+        rule.kind = .contribution
+        rule.accountID = target.id.uuidString
+        rule.frequency = .monthly
+        rule.interval = 1
+        rule.monthDay = contributionDay
+        rule.lastDayOfMonth = false
+        rule.autoCreate = true
+        rule.isPaused = false
     }
 
     private func delete() {

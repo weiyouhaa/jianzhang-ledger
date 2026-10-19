@@ -63,6 +63,7 @@ struct RecordEditorView: View {
         if kind == .transfer {
             return accountID != nil && toAccountID != nil && accountID != toAccountID
         }
+        if kind == .contribution || kind == .adjustment { return accountID != nil }
         return true
     }
 
@@ -72,6 +73,10 @@ struct RecordEditorView: View {
                 Section {
                     if kind == .adjustment {
                         Label("余额校准（不计入收支统计）", systemImage: "slider.horizontal.3")
+                            .foregroundStyle(.secondary)
+                            .listRowSeparator(.hidden)
+                    } else if kind == .contribution {
+                        Label("缴存（增加账户余额，不计入收入）", systemImage: "tray.and.arrow.down.fill")
                             .foregroundStyle(.secondary)
                             .listRowSeparator(.hidden)
                     } else {
@@ -99,6 +104,12 @@ struct RecordEditorView: View {
 
                 if kind == .transfer {
                     transferSection
+                } else if kind == .contribution {
+                    Section {
+                        accountPicker(title: "缴存账户", selection: $accountID, allowNone: false)
+                    } footer: {
+                        Text("公积金、医保、养老保险等每月缴存。单位和个人缴纳部分都可以记在这里；提取请用「转账」转到银行卡。")
+                    }
                 } else if kind == .adjustment {
                     Section {
                         accountPicker(title: "账户", selection: $accountID, allowNone: false)
@@ -214,6 +225,7 @@ struct RecordEditorView: View {
     // MARK: - Sections
 
     private var navTitle: String {
+        if kind == .contribution { return record == nil ? "缴存" : "编辑缴存" }
         if record == nil { return kind == .transfer ? "转账" : "记一笔" }
         return kind == .adjustment ? "余额校准" : "编辑记录"
     }
@@ -221,6 +233,7 @@ struct RecordEditorView: View {
     private var amountColor: Color {
         switch kind {
         case .income: return .green
+        case .contribution: return Color(hex: "#E8A33D")
         case .expense: return .primary
         case .transfer, .adjustment: return Color(hex: "#30B0C7")
         }

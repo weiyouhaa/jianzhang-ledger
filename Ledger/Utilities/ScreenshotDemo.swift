@@ -1,7 +1,7 @@
 import Foundation
 import SwiftData
 
-/// 仅用于自动截图：Debug 构建下传入启动参数 `-UIScreenshotDemo <screen>`（home、add、stats、statsbudget、assets、account、settings、backup、lock、search、delete、rules、import、recurring、budgets）时，
+/// 仅用于自动截图：Debug 构建下传入启动参数 `-UIScreenshotDemo <screen>`（home、add、assetssocial、quickbalance、stats、statsbudget、assets、account、settings、backup、lock、search、delete、rules、import、recurring、budgets）时，
 /// 使用内存数据库并写入示例数据，直接打开对应页面。正常启动（或 Release 构建）完全不受影响。
 enum ScreenshotDemo {
     static let screen: String? = {
@@ -19,7 +19,7 @@ enum ScreenshotDemo {
     static var initialTab: Int {
         switch screen {
         case "stats", "statsbudget": return 1
-        case "assets", "account": return 2
+        case "assets", "account", "assetssocial", "quickbalance": return 2
         case "settings", "backup", "rules", "import", "recurring", "budgets": return 3
         default: return 0
         }
@@ -97,6 +97,9 @@ enum ScreenshotDemo {
             .init(name: "借给朋友", type: .receivable, initial: 5000, note: "小王，年底还"),
             .init(name: "招行信用卡", type: .credit, initial: -3200, limit: 50000, billing: 5, repayment: 23, note: "尾号 1024"),
             .init(name: "花呗", type: .consumerCredit, initial: -860, limit: 8000, billing: 1, repayment: 10),
+            .init(name: "住房公积金", type: .housingFund, initial: 41400, note: "单位 + 个人各 12%"),
+            .init(name: "医保个人账户", type: .medicalAccount, initial: 2420, note: "可在定点药店使用"),
+            .init(name: "养老保险个人账户", type: .pensionAccount, initial: 58600, note: "退休后按月领取"),
         ]
         var accountByName: [String: LedgerAccount] = [:]
         for (i, d) in demoAccounts.enumerated() {
@@ -105,6 +108,7 @@ enum ScreenshotDemo {
             a.billingDay = d.billing
             a.repaymentDay = d.repayment
             a.note = d.note
+            a.includeInNetWorth = d.type.defaultIncludeInNetWorth
             a.createdAt = cal.date(byAdding: .month, value: -10, to: now) ?? now
             context.insert(a)
             accountByName[d.name] = a
@@ -175,6 +179,30 @@ enum ScreenshotDemo {
             transfer(2000, from: "招商银行储蓄卡", to: "微信", date: mid, note: "零钱充值")
             transfer(800, from: "招商银行储蓄卡", to: "支付宝", date: mid, note: "充值")
         }
+
+        // 公积金 / 医保每月缴存：过去几个月的缴存记录 + 每月自动缴存规则
+        let contributions: [(String, Double)] = [("住房公积金", 2400), ("医保个人账户", 280), ("养老保险个人账户", 960)]
+        for (name, amount) in contributions {
+            guard let acc = accountByName[name] else { continue }
+            for back in 0...5 {
+                guard let m = cal.date(byAdding: .month, value: -back, to: cal.startOfMonth(for: now)),
+                      let d = cal.date(byAdding: .day, value: 14, to: m),
+                      let date = cal.date(bySettingHour: 9, minute: 0, second: 0, of: d), date < now else { continue }
+                let r = LedgerRecord(amount: amount, kind: .contribution, category: nil, note: "",
+                                     account: name, date: date, source: "recurring")
+                r.accountRef = acc
+                context.insert(r)
+            }
+            let rule = RecurringRule(name: name + "缴存", amount: amount, kind: .contribution, frequency: .monthly,
+                                     startDate: cal.date(byAdding: .month, value: -6, to: now) ?? now)
+            rule.accountID = acc.id.uuidString
+            rule.monthDay = 15
+            rule.autoCreate = true
+            rule.lastProcessedAt = now
+            context.insert(rule)
+        }
+        // 公积金提取（转到储蓄卡）
+        transfer(6000, from: "住房公积金", to: "招商银行储蓄卡", date: dayDate(12, 10, 30), note: "公积金提取（租房）")
 
         seedSmart(context: context, accounts: accountByName, now: now)
         try? context.save()
