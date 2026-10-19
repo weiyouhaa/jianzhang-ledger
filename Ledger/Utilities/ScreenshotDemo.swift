@@ -1,7 +1,7 @@
 import Foundation
 import SwiftData
 
-/// 仅用于自动截图：Debug 构建下传入启动参数 `-UIScreenshotDemo <screen>`（home、add、assetssocial、quickbalance、backupencrypt、stats、statsbudget、assets、account、settings、backup、lock、search、delete、rules、import、recurring、budgets）时，
+/// 仅用于自动截图：Debug 构建下传入启动参数 `-UIScreenshotDemo <screen>`（home、add、assetssocial、quickbalance、backupencrypt、reviewsnippet、stats、statsbudget、assets、account、settings、backup、lock、search、delete、rules、import、recurring、budgets）时，
 /// 使用内存数据库并写入示例数据，直接打开对应页面。正常启动（或 Release 构建）完全不受影响。
 enum ScreenshotDemo {
     static let screen: String? = {

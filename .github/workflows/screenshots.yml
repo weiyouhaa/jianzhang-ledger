@@ -102,6 +102,7 @@ jobs:
           shoot assetssocial light 19-assets-social
           shoot quickbalance light 20-quick-balance
           shoot backupencrypt light 21-encrypted-backup
+          shoot reviewsnippet light 22-review-snippet
           shoot home     dark  07-home-dark
           shoot stats    dark  08-stats-dark
           ls -l screenshots

@@ -178,6 +178,23 @@ enum IntentRecorder {
         return record
     }
 
+    /// 审核预览：按与 save 相同的优先级解析分类和账户（不累计规则命中次数）
+    @MainActor
+    static func resolve(kind: RecordKind, merchant: String, note: String, categoryID: UUID?, categoryName: String?,
+                        accountID: UUID?, accountHint: AccountHint?) -> (category: LedgerCategory?, account: LedgerAccount?) {
+        let context = DataStore.shared.mainContext
+        let hit = categoryID == nil ? RuleStore.match(merchant: merchant, text: note, kind: kind, in: context, countHit: false) : nil
+        let category = categoryID.flatMap { DataStore.category(id: $0, in: context) }
+            ?? hit?.category
+            ?? DataStore.category(named: categoryName, kind: kind, in: context)
+        let account: LedgerAccount? = accountID.flatMap { DataStore.account(id: $0, in: context) }
+            ?? DataStore.account(matching: accountHint, in: context)
+            ?? hit?.account
+            ?? RuleStore.lastAccount(for: category, in: context)
+            ?? RuleStore.defaultAccount(in: context)
+        return (category, account)
+    }
+
     /// 预览用：规则命中时显示规则分类
     @MainActor
     static func previewCategoryName(kind: RecordKind, merchant: String, guessed: String?) -> String {

@@ -12,6 +12,10 @@ struct RootView: View {
         ZStack {
             MainTabView()
 
+            if ScreenshotDemo.screen == "reviewsnippet" {
+                ReviewSnippetDemoView().zIndex(3)
+            }
+
             // 兜底：如果无法创建独立锁屏窗口，则在视图层级内显示锁屏
             if lock.isLocked && !lockWindowShown {
                 LockScreenView()
