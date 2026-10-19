@@ -19,6 +19,13 @@ final class SessionManager: ObservableObject {
 
     private var decoyContainer: ModelContainer?
 
+    private init() {
+        if ScreenshotDemo.screen == "decoyhome" {
+            // 截图模式：启动即进入防窥库，避免 RootView.onAppear 里改 epoch 把界面拆掉
+            forceDecoyForDemo()
+        }
+    }
+
     var isDecoy: Bool { mode == .decoy }
 
     var container: ModelContainer {

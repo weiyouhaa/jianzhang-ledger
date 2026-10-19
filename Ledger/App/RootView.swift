@@ -31,11 +31,7 @@ struct RootView: View {
         }
         .onAppear {
             syncLockWindow(lock.isLocked)
-            if ScreenshotDemo.screen == "decoyhome" {
-                SessionManager.shared.forceDecoyForDemo()
-            }
             if ScreenshotDemo.screen == "decoysettings" {
-                // 截图设置页：真实模式，但防窥开关显示为开
                 DecoyPasscodeStore.isEnabled = true
             }
         }
