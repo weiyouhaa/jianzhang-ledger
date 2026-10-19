@@ -135,12 +135,8 @@ struct RecognizeReceiptIntent: AppIntent {
                 if Self.isUserCancel(error) {
                     return try finish([], cancelled: true, context: context)
                 }
-                // 非取消错误：弹窗说明原因，避免快捷指令弹窗直接消失、看起来像闪退
-                let msg = error.localizedDescription
-                return .result(value: Double(0),
-                               dialog: IntentDialog("审核出错，没有保存任何记录。\n\(msg)"),
-                               view: ReviewSnippetView(title: "出错了", rows: rowsFor(items, context: context),
-                                                       footnote: msg))
+                // 非取消错误：走同一个 finish，避免 opaque return 类型不一致；并提示原因，避免弹窗静默消失
+                return try finish(items, cancelled: false, errorMessage: error.localizedDescription, context: context)
             }
         }
 
@@ -150,7 +146,12 @@ struct RecognizeReceiptIntent: AppIntent {
     // MARK: - 保存
 
     @MainActor
-    private func finish(_ items: [ReviewItem], cancelled: Bool, context: ModelContext) throws -> some IntentResult & ProvidesDialog & ShowsSnippetView & ReturnsValue<Double> {
+    private func finish(_ items: [ReviewItem], cancelled: Bool, errorMessage: String? = nil, context: ModelContext) throws -> some IntentResult & ProvidesDialog & ShowsSnippetView & ReturnsValue<Double> {
+        if let errorMessage {
+            return .result(value: Double(0),
+                           dialog: IntentDialog("审核出错，没有保存任何记录。\n\(errorMessage)"),
+                           view: ReviewSnippetView(title: "出错了", rows: rowsFor(items, context: context), footnote: errorMessage))
+        }
         if cancelled {
             return .result(value: Double(0), dialog: IntentDialog("已取消，未保存任何记录。"),
                            view: ReviewSnippetView(title: "已取消", rows: []))
