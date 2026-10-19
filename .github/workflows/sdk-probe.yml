@@ -15,8 +15,8 @@ jobs:
       - name: Grep AppIntents SwiftUI overlay
         run: |
           SDK=$(xcrun --sdk iphoneos --show-sdk-path)
-          find "$SDK" -iname "*AppIntents*" -maxdepth 6 | head -40
-          for F in $(find "$SDK" -ipath "*appintents*" -name "*.swiftinterface" | grep -v "private" ); do
+          find -L "$SDK/" -maxdepth 6 -iname "*AppIntents*" | head -40
+          for F in $(find -L "$SDK/" -ipath "*appintents*" -name "*.swiftinterface" | grep -v "private" ); do
             echo "##### $F"
             grep -n "func requestChoice\|func requestConfirmation\|func requestDisambiguation\|func requestValue\|static func result.*view\|static func result.*content" "$F" \
               | cut -c1-420 | head -60
