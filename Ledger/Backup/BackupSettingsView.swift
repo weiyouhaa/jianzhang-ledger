@@ -262,7 +262,7 @@ struct BackupSettingsView: View {
             Text("备份加密")
         } footer: {
             if encryptionEnabled {
-                Text("导出和自动备份使用 AES-256-GCM 加密（.jzbackup），只有输入备份密码才能恢复。**忘记密码将无法恢复备份，简账无法帮你找回。**备份密码可保存在本机钥匙串（仅此设备），查看或修改需要验证\(lock.passcodeEnabled ? "App 密码" : "设备密码")或\(lock.biometryName)。")
+                Text("导出和自动备份使用 AES-256-GCM 加密（.jzbackup），只有输入备份密码才能恢复。**忘记密码将无法恢复备份，简账无法帮你找回**。备份密码可保存在本机钥匙串（仅此设备），查看或修改需要验证\(lock.passcodeEnabled ? "App 密码" : "设备密码")或\(lock.biometryName)。")
             } else {
                 Text("关闭后备份为**明文 JSON**，任何拿到文件的人都能查看你的全部账目。")
                     .foregroundStyle(.orange)
