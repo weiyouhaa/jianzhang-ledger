@@ -1,0 +1,27 @@
+name: SDK probe (AppIntents API)
+
+# 手动触发：打印 iOS SDK 中 AppIntents 相关 API 的声明，用来确认可用的交互接口
+on:
+  workflow_dispatch:
+
+jobs:
+  probe:
+    runs-on: macos-15
+    timeout-minutes: 10
+    steps:
+      - uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest-stable
+      - name: Grep AppIntents swiftinterface
+        run: |
+          SDK=$(xcrun --sdk iphoneos --show-sdk-path)
+          echo "SDK=$SDK"
+          F=$(find "$SDK/System/Library/Frameworks/AppIntents.framework" -name "arm64e-apple-ios.swiftinterface" | head -1)
+          [ -n "$F" ] || F=$(find "$SDK/System/Library/Frameworks/AppIntents.framework" -name "*.swiftinterface" | head -1)
+          echo "FILE=$F"
+          for pat in "func requestChoice" "struct IntentChoiceOption" "IntentChoiceOption {" "static var cancel" "public init(title" "func requestDisambiguation" "func requestValue" "func requestConfirmation" "func needsValueError" "func needsDisambiguationError" "ConfirmationActionName" "struct ConfirmationConditions" "ShowsSnippetView" "SnippetIntent" "requestChoice"; do
+            echo "===== $pat"
+            grep -n -B2 -A1 "$pat" "$F" | grep -v "^--$" | head -60
+          done
+          echo "===== IntentChoiceOption block"
+          awk '/struct IntentChoiceOption/{p=1} p{print; n++} n>80{exit}' "$F"
