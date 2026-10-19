@@ -1,0 +1,14 @@
+name: SDK foreground probe
+on: workflow_dispatch
+jobs:
+  probe:
+    runs-on: macos-15
+    steps:
+      - uses: maxim-lobanov/setup-xcode@v1
+        with: { xcode-version: latest-stable }
+      - run: |
+          SDK=$(xcrun --sdk iphoneos --show-sdk-path)
+          F=$(find -L "$SDK/" -path "*AppIntents.framework*" -name "arm64e-apple-ios.swiftinterface" | head -1)
+          for pat in "ForegroundContinuable" "continueInForeground" "needsToContinueInForeground" "OpenIntent" "opensIntent" "func openApp"; do
+            echo "===== $pat"; grep -n -A5 "$pat" "$F" | head -25
+          done
