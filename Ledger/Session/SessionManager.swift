@@ -75,6 +75,14 @@ final class SessionManager: ObservableObject {
         epoch += 1
     }
 
+    /// 真实模式下「编辑防窥数据」/ 设置防窥密码时用：与防窥会话共用同一个容器实例
+    func decoyContainerForEditing() -> ModelContainer {
+        if let decoyContainer { return decoyContainer }
+        let c = DataStore.makeDecoyContainer(inMemory: ScreenshotDemo.isActive)
+        decoyContainer = c
+        return c
+    }
+
     /// 重置防窥库为预设数据（真实模式下调用）
     func resetDecoyStore() {
         decoyContainer = nil

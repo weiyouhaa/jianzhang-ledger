@@ -133,6 +133,34 @@ struct SettingsView: View {
                 Text(biometricError ?? "")
             }
         }
+        // 防窥相关的弹窗挂在 NavigationStack 上，而不是 Form 里的 Section：
+        // 挂在列表 Section 上的 presentation 会随单元格重建 / 复用被系统收起（「弹一下就消失」）
+        .onAppear { decoyEnabled = DecoyPasscodeStore.isEnabled }
+        .sheet(isPresented: $showDecoySetup, onDismiss: { decoyEnabled = DecoyPasscodeStore.isEnabled }) {
+            DecoyPasscodeSetupView {
+                decoyEnabled = true
+                // 开防窥时回到默认：输密码解锁、锁屏不显示面容按钮（锁屏看起来始终一样）
+                lock.unlockMethod = .passcode
+                lock.showBiometricButton = false
+            }
+                .environmentObject(lock)
+        }
+        .fullScreenCover(isPresented: $showDecoyEditor) {
+            DecoyDataEditorHost()
+                .environmentObject(lock)
+        }
+        .confirmationDialog("重置防窥数据？", isPresented: $showDecoyResetConfirm, titleVisibility: .visible) {
+            Button("恢复为预设数据", role: .destructive) {
+                session.resetDecoyStore()
+                decoyMessage = "已恢复为预设的防窥账本数据。"
+            }
+            Button("取消", role: .cancel) {}
+        } message: {
+            Text("当前防窥账本里的账户和记录会被替换成一套普通的小额示例数据。")
+        }
+        .alert("提示", isPresented: Binding(get: { decoyMessage != nil }, set: { if !$0 { decoyMessage = nil } })) {
+            Button("好", role: .cancel) {}
+        } message: { Text(decoyMessage ?? "") }
     }
 
     // MARK: - Sections
@@ -218,32 +246,6 @@ struct SettingsView: View {
                 Text("密码以加盐哈希保存在本机钥匙串。解锁方式默认「密码」：锁屏不会自动识别面容；选「自动面容 ID」才会在打开时自动识别。面容 ID / 触控 ID 始终进入真实账本；只有输入防窥密码才会进入防窥账本。防窥账本使用独立数据库与独立偏好（预算、默认账户、分类记忆等），不会同步到 iCloud，也不会写入真实备份。进入防窥时会撤掉真实账本的本地通知。快捷指令记账始终写入真实账本。")
             }
         }
-        .onAppear { decoyEnabled = DecoyPasscodeStore.isEnabled }
-        .sheet(isPresented: $showDecoySetup, onDismiss: { decoyEnabled = DecoyPasscodeStore.isEnabled }) {
-            DecoyPasscodeSetupView {
-                decoyEnabled = true
-                // 开防窥时回到默认：输密码解锁、锁屏不显示面容按钮（锁屏看起来始终一样）
-                lock.unlockMethod = .passcode
-                lock.showBiometricButton = false
-            }
-                .environmentObject(lock)
-        }
-        .fullScreenCover(isPresented: $showDecoyEditor) {
-            DecoyDataEditorHost()
-                .environmentObject(lock)
-        }
-        .confirmationDialog("重置防窥数据？", isPresented: $showDecoyResetConfirm, titleVisibility: .visible) {
-            Button("恢复为预设数据", role: .destructive) {
-                session.resetDecoyStore()
-                decoyMessage = "已恢复为预设的防窥账本数据。"
-            }
-            Button("取消", role: .cancel) {}
-        } message: {
-            Text("当前防窥账本里的账户和记录会被替换成一套普通的小额示例数据。")
-        }
-        .alert("提示", isPresented: Binding(get: { decoyMessage != nil }, set: { if !$0 { decoyMessage = nil } })) {
-            Button("好", role: .cancel) {}
-        } message: { Text(decoyMessage ?? "") }
     }
 
     private var bookkeepingSection: some View {

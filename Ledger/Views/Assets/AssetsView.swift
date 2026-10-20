@@ -12,8 +12,13 @@ struct AssetsView: View {
     @State private var showTransfer = false
     @State private var demoAccount: LedgerAccount?
     @State private var showDemoAccount = false
-    @State private var quickBalanceAccount: LedgerAccount?
+    /// 长按「修改余额」：只存账户 UUID（不持有 SwiftData 对象），sheet 内再按 ID 取账户
+    @State private var quickBalanceTarget: QuickBalanceTarget?
     @State private var recordTarget: AccountRecordTarget?
+
+    struct QuickBalanceTarget: Identifiable, Equatable {
+        let id: UUID
+    }
 
     struct AccountRecordTarget: Identifiable {
         let account: LedgerAccount
@@ -154,10 +159,12 @@ struct AssetsView: View {
             .sheet(isPresented: $showTransfer) {
                 RecordEditorView(record: nil, initialKind: .transfer)
             }
-            .sheet(item: $quickBalanceAccount) { a in
-                QuickBalanceSheet(account: a)
-                    .presentationDetents([.height(270)])
-                    .presentationDragIndicator(.visible)
+            .sheet(item: $quickBalanceTarget) { t in
+                if let a = accounts.first(where: { $0.id == t.id }) {
+                    QuickBalanceSheet(account: a)
+                        .presentationDetents([.height(270)])
+                        .presentationDragIndicator(.visible)
+                }
             }
             .sheet(item: $recordTarget) { t in
                 RecordEditorView(record: nil, initialKind: t.kind, presetAccountID: t.account.id)
@@ -167,8 +174,9 @@ struct AssetsView: View {
             }
             .task {
                 // 截图模式：直接打开账户详情
-                if ScreenshotDemo.screen == "quickbalance", quickBalanceAccount == nil {
-                    quickBalanceAccount = activeAccounts.first(where: { $0.type == .debit }) ?? activeAccounts.first
+                if ScreenshotDemo.screen == "quickbalance", quickBalanceTarget == nil,
+                   let a = activeAccounts.first(where: { $0.type == .debit }) ?? activeAccounts.first {
+                    quickBalanceTarget = QuickBalanceTarget(id: a.id)
                 }
                 if ScreenshotDemo.screen == "account", !showDemoAccount,
                    let target = activeAccounts.first(where: { $0.type == .credit }) ?? activeAccounts.first {
@@ -238,30 +246,36 @@ struct AssetsView: View {
         .contextMenu {
             Button {
                 UIImpactFeedbackGenerator(style: .light).impactOccurred()
-                quickBalanceAccount = a
+                present { quickBalanceTarget = QuickBalanceTarget(id: a.id) }
             } label: {
                 Label(a.type.isLiability ? "修改欠款" : "修改余额", systemImage: "pencil.circle")
             }
             Divider()
             if a.type.isSocialSecurity {
-                Button { recordTarget = AccountRecordTarget(account: a, kind: .contribution) } label: {
+                Button { present { recordTarget = AccountRecordTarget(account: a, kind: .contribution) } } label: {
                     Label("缴存", systemImage: "tray.and.arrow.down")
                 }
             } else {
-                Button { recordTarget = AccountRecordTarget(account: a, kind: .expense) } label: {
+                Button { present { recordTarget = AccountRecordTarget(account: a, kind: .expense) } } label: {
                     Label("记一笔", systemImage: "square.and.pencil")
                 }
             }
-            Button { recordTarget = AccountRecordTarget(account: a, kind: .transfer) } label: {
+            Button { present { recordTarget = AccountRecordTarget(account: a, kind: .transfer) } } label: {
                 Label(a.type.isLiability ? "还款 / 转账" : (a.type == .housingFund ? "提取 / 转账" : "转账"),
                       systemImage: "arrow.left.arrow.right")
             }
-            Button { editorTarget = .edit(a) } label: {
+            Button { present { editorTarget = .edit(a) } } label: {
                 Label("编辑账户", systemImage: "slider.horizontal.3")
             }
         } preview: {
             AccountPreviewCard(account: a, balance: balance, hidden: hideAmounts)
         }
+    }
+
+    /// 从长按菜单里弹 sheet：等菜单（带预览）收起动画结束再设状态。
+    /// 菜单还在收起时就 present，iOS 26/27 上 sheet 会被菜单的退场转场一起带走（闪一下就消失）。
+    private func present(_ action: @escaping () -> Void) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.45, execute: action)
     }
 
     private func groups(_ list: [LedgerAccount], liability: Bool) -> [TypeGroup] {

@@ -39,7 +39,8 @@ enum ModeDefaults {
         "pending.appEdit.v1",
     ]
 
-    static var decoy: UserDefaults { UserDefaults(suiteName: decoySuiteName) ?? .standard }
+    /// 单例：@AppStorage(store:) 每次视图重建拿到同一个实例，避免反复重新订阅
+    static let decoy: UserDefaults = UserDefaults(suiteName: decoySuiteName) ?? .standard
 
     /// 当前模式（可在任意线程读）
     nonisolated static var isDecoyMode: Bool { _isDecoy }

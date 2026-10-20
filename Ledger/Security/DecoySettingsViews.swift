@@ -40,7 +40,7 @@ struct DecoyPasscodeSetupView: View {
                             return false
                         }
                         if DecoyPasscodeStore.save(code) {
-                            _ = DataStore.makeDecoyContainer(inMemory: false)
+                            _ = SessionManager.shared.decoyContainerForEditing()
                             onSaved()
                             dismiss()
                             return true
@@ -62,47 +62,55 @@ struct DecoyPasscodeSetupView: View {
     }
 }
 
-/// 真实模式下编辑防窥数据：独立 modelContainer，不切换全局 SessionMode
+/// 真实模式下编辑防窥数据：独立 modelContainer，不切换全局 SessionMode。
+/// 不再外包一层 NavigationStack（HomeView / AssetsView 自带 NavigationStack，嵌套会让内部弹窗不稳定），
+/// 「完成」按钮放在底部安全区。容器复用 SessionManager 里同一个防窥容器，避免同一个库文件被多个容器同时打开。
 struct DecoyDataEditorHost: View {
     @Environment(\.dismiss) private var dismiss
     @State private var container: ModelContainer?
     @State private var tab = ScreenshotDemo.screen == "decoyeditor" ? 1 : 0
 
     var body: some View {
-        NavigationStack {
-            Group {
-                if let container {
-                    TabView(selection: $tab) {
-                        HomeView()
-                            .tabItem { Label("明细", systemImage: "list.bullet.rectangle.portrait") }
-                            .tag(0)
-                        AssetsView()
-                            .tabItem { Label("资产", systemImage: "wallet.pass.fill") }
-                            .tag(1)
+        Group {
+            if let container {
+                TabView(selection: $tab) {
+                    HomeView()
+                        .tabItem { Label("明细", systemImage: "list.bullet.rectangle.portrait") }
+                        .tag(0)
+                    AssetsView()
+                        .tabItem { Label("资产", systemImage: "wallet.pass.fill") }
+                        .tag(1)
+                    NavigationStack {
                         Form {
-                            Text("这里改的是防窥账本里的账户和流水，不影响真实数据。改完点右上角「完成」。")
+                            Text("这里改的是防窥账本里的账户和流水，不影响真实数据。改完点「完成」。")
                                 .font(.subheadline)
                                 .foregroundStyle(.secondary)
                         }
-                        .tabItem { Label("说明", systemImage: "info.circle") }
-                        .tag(2)
+                        .navigationTitle("编辑防窥数据")
                     }
-                    .modelContainer(container)
-                } else {
-                    ProgressView("正在打开…")
+                    .tabItem { Label("说明", systemImage: "info.circle") }
+                    .tag(2)
                 }
+                .modelContainer(container)
+            } else {
+                ProgressView("正在打开…")
             }
-            .navigationTitle("编辑防窥数据")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button("完成") { dismiss() }
-                }
+        }
+        .safeAreaInset(edge: .top, spacing: 0) {
+            HStack {
+                Text("编辑防窥数据").font(.subheadline.weight(.semibold))
+                Spacer()
+                Button("完成") { dismiss() }
+                    .fontWeight(.semibold)
+                    .accessibilityIdentifier("decoy-editor-done")
             }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 8)
+            .background(.bar)
         }
         .onAppear {
             if container == nil {
-                container = DataStore.makeDecoyContainer(inMemory: ScreenshotDemo.isActive)
+                container = SessionManager.shared.decoyContainerForEditing()
             }
         }
     }

@@ -16,9 +16,9 @@ enum DecoySeeder {
             for x in (try? context.fetch(FetchDescriptor<RecurringRule>())) ?? [] { context.delete(x) }
             for x in (try? context.fetch(FetchDescriptor<ImportBatch>())) ?? [] { context.delete(x) }
             try? context.save()
-            UserDefaults.standard.set(false, forKey: seededKey)
         }
         let existing = (try? context.fetch(FetchDescriptor<LedgerRecord>())) ?? []
+        let isMemory = container.configurations.first?.isStoredInMemoryOnly ?? false
         guard force || (!UserDefaults.standard.bool(forKey: seededKey) && existing.isEmpty) else { return }
 
         DataStore.seedIfNeeded(container: container)   // 默认分类
@@ -76,6 +76,7 @@ enum DecoySeeder {
         ModeDefaults.seedDecoyDefaultsIfNeeded()
         ModeDefaults.decoy.set(3000.0, forKey: SettingsKey.monthlyBudget)
         try? context.save()
-        UserDefaults.standard.set(true, forKey: seededKey)
+        // 内存库（截图 / 测试）不改持久标记，否则之后的文件库永远不会写入预设数据
+        if !isMemory { UserDefaults.standard.set(true, forKey: seededKey) }
     }
 }
