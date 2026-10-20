@@ -3,6 +3,12 @@ name: UI tests (Simulator)
 on:
   push:
     branches: ["main"]
+    # 只在 App / UI 测试 / 工程配置变动时跑（其余情况手动 workflow_dispatch）
+    paths:
+      - "Ledger/**"
+      - "LedgerUITests/**"
+      - "project.yml"
+      - ".github/workflows/ui-tests.yml"
   workflow_dispatch:
 
 permissions:

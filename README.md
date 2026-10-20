@@ -136,7 +136,7 @@ Siri 短语示例：「用简账识图记账」「简账记一笔」「简账本
 - 账户：`使用零钱支付` → 微信；`交通银行信用卡 (7316)` → 名称 / 备注含 7316 或「交通银行 / 交行」的信用卡，否则第一张信用卡，再否则默认账户（不会自动新建账户）
 - 分类：按关键词猜测（美团 / 星巴克 → 餐饮，滴滴 / 加油 / 12306 → 交通，淘宝 / 京东 / 超市 → 购物，电影 / 游戏 → 娱乐，电费 / 水费 / 燃气 → 生活缴费，高速 / ETC / 通行费 → 交通……），找不到则归入「其他」
 
-解析器测试：`Tools/ParserCheck`（纯文本样例，Linux / macOS 均可运行）；`Tools/VisionCheck` 在 CI 的 macOS 上对 `Tests/Fixtures/*.png` 真实截图跑 Vision OCR 并打印识别结果。
+解析器测试：`Tools/ParserCheck`（纯文本样例，Linux / macOS 均可运行）；`Tools/VisionCheck` 在 CI 的 macOS 上对 `Tests/Fixtures/*.png` 合成截图（`Tools/make_wechat_fixture.py` 渲染，商户 / 金额 / 卡尾号均为虚构）跑 Vision OCR 并打印识别结果。
 
 ---
 
@@ -256,7 +256,8 @@ ledger-app/
     ├── make_icon.py                # 重新生成占位图标
     ├── ParserCheck/main.swift      # 解析器自检（可在 Linux / macOS 运行）
     ├── ImportCheck/main.swift      # 账单导入 / 规则 / 周期自检
-    └── make_import_fixtures.py     # 生成 Tests/Fixtures/import 下的合成账单样例（含 GBK CSV、openpyxl XLSX）
+    ├── make_import_fixtures.py     # 生成 Tests/Fixtures/import 下的合成账单样例（含 GBK CSV、openpyxl XLSX）
+    └── make_wechat_fixture.py      # 渲染 Tests/Fixtures/wechat-two-payments.png（虚构的微信两笔付款截图）
 ```
 
 解析器自检：

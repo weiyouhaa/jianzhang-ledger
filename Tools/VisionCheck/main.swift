@@ -1,11 +1,11 @@
-// macOS 上用真实截图跑一遍 Vision OCR + 解析器（CI 中执行）：
+// macOS 上用合成截图（Tools/make_wechat_fixture.py 渲染，虚构数据）跑一遍 Vision OCR + 解析器（CI 中执行）：
 // swiftc Ledger/OCR/ReceiptParser.swift Ledger/OCR/TextRecognizer.swift Tools/VisionCheck/main.swift -o /tmp/visioncheck
 // /tmp/visioncheck Tests/Fixtures/wechat-two-payments.png
 import Foundation
 
 var cal = Calendar(identifier: .gregorian)
 cal.timeZone = TimeZone(identifier: "Asia/Shanghai")!
-// 该截图拍摄于 2026-10-18 08:50（北京时间）
+// 截图状态栏时间设定为 2026-10-18 08:50（北京时间）
 let now = cal.date(from: DateComponents(year: 2026, month: 10, day: 18, hour: 8, minute: 50))!
 
 func fmt(_ d: Date?) -> String {
