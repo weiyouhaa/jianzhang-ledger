@@ -106,7 +106,8 @@ enum BackupService {
                                         creditLimit: $0.creditLimit, billingDay: $0.billingDay, repaymentDay: $0.repaymentDay,
                                         icon: $0.icon, colorHex: $0.colorHex, note: $0.note,
                                         includeInNetWorth: $0.includeInNetWorth, isArchived: $0.isArchived,
-                                        sortOrder: $0.sortOrder, createdAt: $0.createdAt)
+                                        sortOrder: $0.sortOrder, createdAt: $0.createdAt,
+                                        cardTail: $0.cardTail.isEmpty ? nil : $0.cardTail)
             },
             rules: rules.map {
                 LedgerBackup.RuleDTO(id: $0.id, keyword: $0.keyword, displayName: $0.displayName, isLearned: $0.isLearned,
@@ -220,6 +221,7 @@ enum BackupService {
             a.note = dto.note
             a.includeInNetWorth = dto.includeInNetWorth
             a.isArchived = dto.isArchived
+            a.cardTail = dto.cardTail ?? ""
             a.createdAt = dto.createdAt
             context.insert(a)
             accountMap[dto.id] = a

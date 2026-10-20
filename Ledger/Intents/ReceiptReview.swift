@@ -75,8 +75,14 @@ struct ReviewItem: Identifiable {
     var categoryEdited = false
     var accountEdited = false
     var isManual = false
+    /// 截图上的卡号尾号（保存时学习「尾号 → 账户」；不显示、不记日志）
+    var accountTail: String? = nil
+    var payerTail: String? = nil
+    var cardTail: String? = nil
 
-    var willSave: Bool { !isDuplicate || saveDuplicate }
+    /// 还款 / 转账必须两个账户都已选定
+    var isComplete: Bool { kind != .transfer || (accountID != nil && toAccountID != nil) }
+    var willSave: Bool { (!isDuplicate || saveDuplicate) && isComplete }
 }
 
 /// 快照视图用的一行（纯值，可在 SwiftUI 片段中渲染）
@@ -103,17 +109,22 @@ enum ReviewFormatter {
     static func row(_ item: ReviewItem, index: Int, in context: ModelContext) -> ReviewRow {
         let category = item.categoryID.flatMap { DataStore.category(id: $0, in: context) }
         let account = item.accountID.flatMap { DataStore.account(id: $0, in: context) }
-        let repayCard = item.kind == .transfer ? item.toAccountID.flatMap { DataStore.account(id: $0, in: context) } : nil
+        let isTransfer = item.kind == .transfer
+        let toAccount = isTransfer ? item.toAccountID.flatMap { DataStore.account(id: $0, in: context) } : nil
+        // 还没选卡的还款也按「信用卡还款」显示
+        let isRepay = isTransfer && (toAccount == nil || toAccount?.type.isLiability == true)
         return ReviewRow(
             index: index,
             isIncome: item.kind == .income,
-            amountText: (item.kind == .income ? "+" : (item.kind == .transfer ? " " : "-")) + Money.format(item.amount),
-            categoryName: repayCard != nil ? "信用卡还款" : (category?.name ?? (item.kind == .income ? "其他收入" : "其他")),
-            icon: repayCard != nil ? LedgerRecord.repaymentIcon : (category?.icon ?? "tag.fill"),
-            colorHex: repayCard != nil ? "#30B0C7" : (category?.colorHex ?? "#8E8E93"),
+            amountText: (item.kind == .income ? "+" : (isTransfer ? " " : "-")) + Money.format(item.amount),
+            categoryName: isTransfer ? (isRepay ? "信用卡还款" : "转账") : (category?.name ?? (item.kind == .income ? "其他收入" : "其他")),
+            icon: isTransfer ? (isRepay ? LedgerRecord.repaymentIcon : "arrow.left.arrow.right") : (category?.icon ?? "tag.fill"),
+            colorHex: isTransfer ? "#30B0C7" : (category?.colorHex ?? "#8E8E93"),
             merchant: item.merchant,
             note: item.note,
-            accountName: repayCard.map { "\(account?.name ?? "未指定账户") → \($0.name)" } ?? (account?.name ?? "未指定账户"),
+            accountName: isTransfer
+                ? "\(account?.name ?? "未选付款账户") → \(toAccount?.name ?? (isRepay ? "未选信用卡" : "未选账户"))"
+                : (account?.name ?? "未指定账户"),
             timeText: item.dateRecognized || item.isManual ? DateText.monthDayTime.string(from: item.date) : "时间未识别（按现在）",
             duplicate: item.isDuplicate ? (item.saveDuplicate ? .saveAnyway : .skip) : .none,
             isManual: item.isManual
@@ -122,7 +133,7 @@ enum ReviewFormatter {
 
     /// 一行文字摘要（选项标题 / 对话框）
     static func line(_ row: ReviewRow) -> String {
-        let kindText = row.categoryName == "信用卡还款" ? "还款" : (row.isIncome ? "收入" : "支出")
+        let kindText = row.categoryName == "信用卡还款" ? "还款" : (row.categoryName == "转账" ? "转账" : (row.isIncome ? "收入" : "支出"))
         var parts = ["\(kindText) \(row.amountText.dropFirst())", row.categoryName]
         if !row.merchant.isEmpty { parts.append(row.merchant) }
         parts.append(row.accountName)

@@ -137,6 +137,8 @@ struct LedgerBackup: Codable {
         var isArchived: Bool
         var sortOrder: Int
         var createdAt: Date
+        /// 2.0 (3) 起：卡号尾号（旧备份没有此字段）
+        var cardTail: String? = nil
     }
 
     struct SettingsDTO: Codable {

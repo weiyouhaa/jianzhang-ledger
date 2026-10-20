@@ -13,6 +13,16 @@ struct ModelTransaction: Equatable, Sendable {
     /// 截图上看到的日期时间原文
     var dateText: String = ""
     var isRefund: Bool = false
+    /// 还款 / 转账：付款账户（用户账户名之一或「未知」）与收款 / 被还款账户
+    var fromAccountHint: String = ""
+    var toAccountHint: String = ""
+    /// 截图上看到的 4 位尾号（付款卡 / 被还款的卡）
+    var fromCardTail: String = ""
+    var toCardTail: String = ""
+    /// 截图中出现的银行（中文全称或英文缩写，如 CMB）
+    var bankNames: [String] = []
+    /// 模型给出的简短判断理由（只用于调试，日志里只记长度）
+    var reason: String = ""
 }
 
 /// 模型抽取结果的校验与合并（纯 Foundation，见 Tools/ModelMergeCheck）
@@ -124,7 +134,14 @@ enum ModelMerge {
         r.amount = isValidAmount(t.amount) ? (t.amount * 100).rounded() / 100 : nil
         r.score = 100
         r.rawText = ctx.lines.joined(separator: "\n")
-        let kind = t.kind.lowercased()
+        var kind = t.kind.lowercased()
+        let localizedText = EnglishBankTerms.localize(ctx.lines.joined(separator: " "))
+        // 原文明确是信用卡还款（还款 + 信用卡 / 银行），模型却判为普通支出：按还款处理（截图证据优先于模型的分类）
+        if kind == "expense", !t.isRefund,
+           ruleMatch?.isCardRepayment == true || RepaymentDetector.isCardRepayment(text: localizedText) {
+            kind = "cardrepayment"
+            trace("model-kind", "模型判为支出，原文是信用卡还款 → 改为还款")
+        }
         r.isIncome = kind == "income" || t.isRefund
         r.isCardRepayment = kind == "cardrepayment" && !t.isRefund
         // 模型给的文字字段限长，避免异常长输出进入后续处理
@@ -139,11 +156,29 @@ enum ModelMerge {
         }
         let account = align(t.accountHint, to: ctx.accounts)
         if r.isCardRepayment {
+            // 模型的语义判断优先：付款方 / 被还款卡的账户名、尾号、银行；规则结果只补缺
             r.categoryName = "信用卡还款"
-            r.repaymentCardName = account
-            let split = RepaymentDetector.split(text: EnglishBankTerms.localize(ctx.lines.joined(separator: " ")))
-            r.repaymentCard = ruleMatch?.repaymentCard ?? split.card
-            r.accountHint = ruleMatch?.isCardRepayment == true ? ruleMatch?.accountHint : split.payer
+            r.merchant = nil
+            let toName = align(t.toAccountHint, to: ctx.accounts) ?? account
+            let fromName = align(t.fromAccountHint, to: ctx.accounts)
+            r.repaymentCardName = toName
+            r.accountName = fromName
+            let split = RepaymentDetector.split(text: localizedText)
+            let ruleCard = ruleMatch?.isCardRepayment == true ? ruleMatch?.repaymentCard : nil
+            let rulePayer = ruleMatch?.isCardRepayment == true ? ruleMatch?.accountHint : nil
+            let banks = t.bankNames.map { EnglishBankTerms.localize($0).trimmingCharacters(in: .whitespaces) }.filter { $0.hasSuffix("银行") }
+            var card = AccountHint(type: "credit")
+            card.cardTail = verifiedTail(t.toCardTail, ctx: ctx) ?? ruleCard?.cardTail ?? split.card?.cardTail
+            // 银行以原文证据为准，其次才是模型选的账户名
+            card.bankName = ruleCard?.bankName ?? split.card?.bankName ?? bank(in: t.toAccountHint) ?? (banks.count == 1 ? banks[0] : nil)
+            if let ty = ruleCard?.type ?? split.card?.type { card.type = ty }
+            r.repaymentCard = card
+            var payer = rulePayer ?? split.payer ?? AccountHint()
+            if let tail = verifiedTail(t.fromCardTail, ctx: ctx) { payer.cardTail = tail }
+            if payer.bankName == nil, let b = bank(in: t.fromAccountHint) { payer.bankName = b }
+            if payer.bankName == nil, banks.count == 1 { payer.bankName = banks[0] }
+            if payer.type == nil, payer.bankName != nil { payer.type = "debit" }
+            r.accountHint = (payer.type == nil && payer.bankName == nil && payer.cardTail == nil) ? nil : payer
         } else {
             r.accountName = account
             r.accountHint = ruleMatch?.accountHint
@@ -158,6 +193,19 @@ enum ModelMerge {
             }
         }
         return r
+    }
+
+    /// 模型给的尾号：必须是 4 位数字且在原文中出现过（防止编造）
+    static func verifiedTail(_ raw: String, ctx: Context) -> String? {
+        guard let tail = AccountResolver.normalizeTail(raw), raw.filter(\.isNumber).count == 4 else { return nil }
+        return ctx.lines.contains(where: { $0.contains(tail) }) ? tail : nil
+    }
+
+    /// 文字里的银行名（英文缩写先转中文）
+    static func bank(in text: String) -> String? {
+        let t = text.trimmingCharacters(in: .whitespaces)
+        guard !t.isEmpty, t != "未知" else { return nil }
+        return AccountHintParser.parse(text: EnglishBankTerms.localize(t))?.bankName
     }
 
     // MARK: 校验 + 合并
@@ -179,6 +227,9 @@ enum ModelMerge {
         var seen = Set<String>()
         var usedRules = Set<Int>()
         for (i, t) in model.enumerated() {
+            trace("model-item", "第 \(i + 1) 笔：类型 \(t.kind.prefix(16))，付款账户\(t.fromAccountHint.isEmpty || t.fromAccountHint == "未知" ? "无" : "有")"
+                  + "，收款账户\(t.toAccountHint.isEmpty || t.toAccountHint == "未知" ? "无" : "有")，尾号 \(t.fromCardTail.isEmpty ? 0 : 1)+\(t.toCardTail.isEmpty ? 0 : 1)"
+                  + "，银行 \(t.bankNames.count) 个，理由 \(t.reason.count) 字")
             guard isValidAmount(t.amount), let c = cents(t.amount) else {
                 trace("model-validate", "第 \(i + 1) 笔：金额无效，丢弃"); dropped += 1; continue
             }
@@ -263,20 +314,27 @@ enum ModelMerge {
     你是记账助手：从支付截图的 OCR 文字中提取交易，只输出结构化结果。
     """
 
-    static func instructions(categories: [String], incomeCategories: [String], accounts: [String]) -> String {
+    static func instructions(categories: [String], incomeCategories: [String], accounts: [String],
+                             accountDetails: [String] = []) -> String {
         let expense = Array(categories.filter { !incomeCategories.contains($0) }.prefix(30))
         let income = Array(incomeCategories.prefix(15))
-        let accts = Array(accounts.prefix(20))
+        let accts = Array((accountDetails.count == accounts.count && !accountDetails.isEmpty ? accountDetails : accounts).prefix(20))
         return compactInstructionsHeader + """
 
         规则：
-        1. 金额必须是原文里出现的数字，不得编造或计算；忽略余额、可用额度、优惠说明、积分、广告、状态栏时间、订单号、卡号。
-        2. 对方已收款/支付成功/付款/消费 = expense；收款/到账/收入 = income；退款 = income 且 isRefund=true；信用卡还款/还信用卡/花呗还款/Repay/Repayment = cardRepayment；余额宝/零钱通转入转出、充值、提现、自己账户互转 = transfer；转账给他人 = expense。
-        3. 银行短信：支出/消费/扣款 = expense，存入/收入 = income。
-        4. 多笔按从上到下分别输出，不要重复。
-        5. categoryName 只能选：支出 \(expense.joined(separator: "、"))；收入 \(income.joined(separator: "、"))。
-        6. accountHint 只能选：\(accts.isEmpty ? "（无）" : accts.joined(separator: "、"))，或「未知」；信用卡还款时填被还款的卡。
-        7. dateText 原样抄写日期时间文字，没有留空。
+        1. 先理解截图语义再填写。金额必须是原文里出现的数字，不得编造或计算；忽略余额、可用额度、优惠、积分、广告、状态栏时间、订单号 / 流水号 / 卡号。
+        2. 类型：对方已收款/支付成功/付款/消费 = expense；收款/到账/收入 = income；退款 = income 且 isRefund=true；信用卡还款/还信用卡/花呗还款/Repay/Repayment = cardRepayment；余额宝/零钱通转入转出、充值、提现、自己账户互转 = transfer；转账给他人 = expense。
+        3. 英文界面（云闪付 / 银行 App）：Repay、Repayment = 还款；Payment Method / Payment Card / Paid with = 付款账户；Credit Card Number / Repay card = 被还款的信用卡；Order Amount / Amount = 金额；Order Time / Transaction Time = 时间；Debit / Savings card = 储蓄卡；Credit card = 信用卡。银行缩写：CMB 招商银行，CMBC 民生银行，ICBC 工商银行，CCB 建设银行，ABC 农业银行，BOC 中国银行，BOCOM/BCM 交通银行，CIB 兴业银行，CEB 光大银行，SPDB 浦发银行，CITIC 中信银行，PSBC 邮储银行，GDB/CGB 广发银行，PAB 平安银行。
+        4. 还款 / 转账：fromAccountHint 填付款账户，toAccountHint 填被还款的卡或收款账户；fromCardTail / toCardTail 填截图上对应卡号的最后 4 位；bankNames 填截图中出现的银行。必须选同一家银行、同一卡种的账户；不确定填「未知」，不要选别家银行的卡。
+        5. 银行短信：支出/消费/扣款 = expense，存入/收入 = income。多笔按从上到下分别输出，不要重复。
+        6. categoryName 只能选：支出 \(expense.joined(separator: "、"))；收入 \(income.joined(separator: "、"))。还款不用填分类。
+        7. 账户名只能从下列选择（〔〕内是说明，只填〔〕前的名字），或「未知」：\(accts.isEmpty ? "（无）" : accts.joined(separator: "、"))
+        8. dateText 原样抄写日期时间文字，没有留空。reason 用不超过 15 个字说明判断依据。
+
+        示例（虚构）：
+        「Repay:CCB Credit card / ¥88.00 / Payment Method CCB Debit card[1111] / Credit Card Number CCB Credit card[2222] / Order Time 2026.01.02 10:00:00」→ kind=cardRepayment amount=88 fromCardTail=1111 toCardTail=2222 bankNames=[建设银行] dateText=2026.01.02 10:00:00
+        「微信支付 / 示例面馆 / -26.00 / 支付成功 / 支付方式 零钱」→ kind=expense amount=26 merchant=示例面馆 categoryName=餐饮
+        「支付宝 / 账单详情 / 信用卡还款 / -500.00 / 还款到 工商银行信用卡(3333) / 付款方式 余额宝」→ kind=cardRepayment amount=500 toCardTail=3333 bankNames=[工商银行]
         """
     }
 }

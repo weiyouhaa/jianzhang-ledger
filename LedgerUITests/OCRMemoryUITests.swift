@@ -55,6 +55,6 @@ final class OCRMemoryUITests: XCTestCase {
         while !(row.exists && row.isHittable) && tries < 15 { app.swipeUp(); tries += 1 }
         XCTAssertTrue(row.exists, "关于里没有版本行")
         print("VERSION-TEST " + row.label)
-        XCTAssertTrue(row.label.contains("2.0 (2)"), "版本：\(row.label)")
+        XCTAssertTrue(row.label.contains("2.0 (3)"), "版本：\(row.label)")
     }
 }

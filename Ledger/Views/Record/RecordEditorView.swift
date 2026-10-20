@@ -30,6 +30,9 @@ struct RecordEditorView: View {
     @State private var feeText = ""
     @State private var date = Date()
     @State private var source = "manual"
+    /// 识图得到的卡号尾号（保存时学习「尾号 → 账户」，仅真实模式）
+    @State private var ocrAccountTail: String?
+    @State private var ocrCardTail: String?
     @State private var didLoad = false
     @State private var recurringKey = ""
     /// 用户是否手动改过账户 / 分类（自动带出时不覆盖用户的选择）
@@ -563,6 +566,10 @@ struct RecordEditorView: View {
 
         do {
             try context.save()
+            if source == "ocr" {
+                CardTailMemory.learn(tail: ocrAccountTail, accountID: fromAccount?.id)
+                if kind == .transfer { CardTailMemory.learn(tail: ocrCardTail, accountID: toAccount?.id) }
+            }
             UINotificationFeedbackGenerator().notificationOccurred(.success)
             BudgetMonitor.check(in: context)
             dismiss()
@@ -629,12 +636,15 @@ struct RecordEditorView: View {
             kind = .expense
             amountText = String(format: "%.2f", amount)
             if let d = parsed.date { date = d }
-            let card = account(named: parsed.repaymentCardName) ?? DataStore.account(matching: parsed.repaymentCard, in: context)
-            if let payer = DataStore.account(matching: parsed.accountHint, in: context), !payer.type.isLiability {
+            let card = DataStore.account(matching: parsed.repaymentCard ?? AccountHint(type: "credit"),
+                                         modelName: parsed.repaymentCardName, role: .card, in: context)
+            if let payer = DataStore.account(matching: parsed.accountHint, modelName: parsed.accountName, role: .payer,
+                                             excluding: card?.id, in: context) {
                 accountID = payer.id
             }
             enterRepayMode(card: card?.type.isLiability == true ? card?.id : nil)
-            if note.isEmpty, let m = parsed.merchant, !m.isEmpty { note = m }
+            ocrAccountTail = parsed.accountHint?.cardTail
+            ocrCardTail = parsed.repaymentCard?.cardTail
             source = "ocr"
             return
         }
@@ -655,7 +665,10 @@ struct RecordEditorView: View {
             selectedCategoryID = list.first?.id
         }
         // Apple 智能选出的账户名 > 付款方式线索 > 记账规则
-        if let a = account(named: parsed.accountName) ?? DataStore.account(matching: parsed.accountHint, in: context) ?? hit?.account {
+        ocrAccountTail = parsed.accountHint?.cardTail
+        ocrCardTail = nil
+        if let a = DataStore.account(matching: parsed.accountHint, modelName: parsed.accountName, role: .single, in: context)
+            ?? account(named: parsed.accountName) ?? hit?.account {
             accountID = a.id
         }
         source = "ocr"

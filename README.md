@@ -123,6 +123,7 @@
   - MetricKit：系统送达的崩溃 / 卡死 / CPU 异常诊断摘要（异常类型、信号、终止原因、前几帧）与每日退出原因统计。
   - 「导出日志」生成 .txt（附 App 版本、构建 commit、iOS 版本、机型和识别诊断），「复制全部」「清空」。不含截图文字、金额、商户和密码。
 - 快捷指令「意外退出」（2.0 (2) 修复）：Apple 智能结果校验时会把 OCR 原文里的所有数字换算成「分」，28 位订单号转 Int 溢出触发 Swift 运行时 trap（SIGTRAP）。现在金额换算全部做范围检查（有限、> 0、< 1 亿，超长数字串忽略），见 `Tools/ModelMergeCheck` 的边界用例。信号崩溃时运行日志会附出错线程回溯，构建产物 `JianZhang-dSYM` 可用于还原函数名。
+- 识图语义与账户匹配（2.0 (3)）：Apple 智能额外输出付款 / 收款账户、两端卡号尾号、银行和简短理由；指令说明英文云闪付 / 银行 App 字段（Repay、Payment Method、Credit Card Number、Order Amount / Time）与银行缩写，并附 3 个虚构示例。模型结果有效时以模型的类型 / 账户为准，规则只补缺；原文明确是还款时不会被判成普通支出。账户匹配顺序：卡号尾号（账户的「卡号尾号」字段、名称 / 备注、保存识图记录时自动学到的尾号）> 同银行同卡种 > 模型账户名 > 兜底；识别出银行却没有该银行的账户时不会选别家银行的卡。规则路径同样理解英文字段标签和「[1234]」尾号。快捷指令审核里「收支类型」可选信用卡还款 / 转账，按钮选择付款账户与还款信用卡（分页）；分类列表首项为信用卡还款。
 - 版本号：`project.yml` 的 MARKETING_VERSION / CURRENT_PROJECT_VERSION，每次发布递增 CURRENT_PROJECT_VERSION；设置 › 关于显示「版本 (构建号) · commit」。
 - 快捷指令识图的内存：图片统一用 CGImageSource 缩略图解码（长边 ≤ 2000 px，不整图解码），解码与 Vision 各自在 autoreleasepool 中；未启用 Apple 智能时不查询模型状态。UI 测试 `OCRMemoryUITests` 用合成 1290×2796 截图测量这条路径的内存峰值（输出 `OCR-MEMORY-TEST`）。
 - 规则识别支持英文界面（云闪付等）：Repay / Repayment / Credit card repayment 识别为信用卡还款；银行缩写 CMB 招商、ICBC 工商、CCB 建设、ABC 农业、BOC 中国银行、BOCOM / BCM 交通、CIB 兴业、SPDB 浦发、CITIC 中信、CEB 光大、CMBC 民生、PAB 平安、GDB / CGB 广发、PSBC 邮储、HXB 华夏；以及「还款成功 / 还款卡 / 付款卡」等中文版式。

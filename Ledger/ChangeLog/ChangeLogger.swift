@@ -417,6 +417,7 @@ enum Describe {
             ("图标", a.icon),
             ("颜色", a.colorHex),
             ("备注", a.note),
+            ("卡号尾号", a.cardTail),
             ("计入净资产", yesNo(a.includeInNetWorth)),
             ("已归档", yesNo(a.isArchived)),
         ])

@@ -183,9 +183,28 @@ enum IntentRecorder {
     static func ocrVocabulary() -> OCRVocabulary {
         let context = DataStore.shared.mainContext
         let cats = (try? context.fetch(FetchDescriptor<LedgerCategory>(sortBy: [SortDescriptor(\LedgerCategory.sortOrder)]))) ?? []
+        let accounts = DataStore.accounts(in: context)
+        let learned = CardTailMemory.all()
         return OCRVocabulary(expenseCategories: cats.filter { $0.kind == .expense }.map(\.name),
                              incomeCategories: cats.filter { $0.kind == .income }.map(\.name),
-                             accounts: DataStore.accounts(in: context).map(\.name))
+                             accounts: accounts.map(\.name),
+                             accountDetails: accounts.map { a in
+                                 var parts = [a.type.title]
+                                 if let bank = CardTailMemory.bankName(of: a) { parts.append(bank) }
+                                 let tails = CardTailMemory.tails(of: a, learned: learned)
+                                 if !tails.isEmpty { parts.append("尾号" + tails.sorted().joined(separator: "/")) }
+                                 return "\(a.name)〔\(parts.joined(separator: "·"))〕"
+                             })
+    }
+
+    /// 按尾号 > 同银行同卡种 > 模型账户名 > 兜底 匹配账户；日志只记匹配方式
+    @MainActor
+    static func resolveAccount(hint: AccountHint?, modelName: String?, role: AccountResolver.Role,
+                               excluding: UUID? = nil, label: String) -> LedgerAccount? {
+        let r = DataStore.accountResolution(matching: hint, modelName: modelName, role: role, excluding: excluding,
+                                            in: DataStore.shared.mainContext)
+        RunLog.shared.log(.info, "account-resolve", "\(label)：\(r.via.title)")
+        return r.account
     }
 
     /// Apple 智能选出的账户名 → 账户 ID
@@ -198,20 +217,20 @@ enum IntentRecorder {
     /// 识图得到的信用卡还款：被还款的负债账户（线索匹配不到时，只有一张信用卡就用它）
     @MainActor
     static func repaymentCard(name: String? = nil, hint: AccountHint?) -> LedgerAccount? {
-        let context = DataStore.shared.mainContext
-        if let id = accountID(named: name), let a = DataStore.account(id: id, in: context), a.type.isLiability { return a }
-        if let a = DataStore.account(matching: hint, in: context), a.type.isLiability { return a }
-        let cards = DataStore.accounts(in: context).filter { $0.type.isLiability && $0.type.rawValue == (hint?.type ?? "credit") }
-        return cards.count == 1 ? cards.first : nil
+        resolveAccount(hint: hint ?? AccountHint(type: "credit"), modelName: name, role: .card, label: "还款信用卡")
     }
 
     /// 还款的付款账户：指定 > 识图线索（非负债）> 默认账户（非负债）> 第一张储蓄卡
     @MainActor
-    static func repaymentPayer(accountID: UUID?, hint: AccountHint?, excluding cardID: UUID) -> LedgerAccount? {
+    static func repaymentPayer(accountID: UUID?, hint: AccountHint?, modelName: String? = nil,
+                               excluding cardID: UUID) -> LedgerAccount? {
         let context = DataStore.shared.mainContext
+        let resolved = accountID == nil
+            ? resolveAccount(hint: hint, modelName: modelName, role: .payer, excluding: cardID, label: "付款账户") : nil
+        if accountID == nil && resolved == nil { RunLog.shared.log(.info, "account-resolve", "付款账户：默认账户") }
         let candidates: [LedgerAccount?] = [
             accountID.flatMap { DataStore.account(id: $0, in: context) },
-            DataStore.account(matching: hint, in: context),
+            resolved,
             RuleStore.defaultAccount(in: context),
             DataStore.accounts(in: context).first(where: { $0.type == .debit }),
         ]
@@ -283,5 +302,53 @@ enum IntentRecorder {
         if let a = record.accountRef { parts.append(a.name) }
         parts.append(DateText.monthDayTime.string(from: record.date))
         return parts.joined(separator: " · ")
+    }
+}
+
+extension AccountResolver.Via {
+    var title: String {
+        switch self {
+        case .tail: return "按尾号"
+        case .bank: return "按银行 + 卡种"
+        case .name: return "按 Apple 智能账户名"
+        case .fallback: return "兜底"
+        case .none: return "未匹配"
+        }
+    }
+}
+
+/// 记住「卡号尾号 → 账户」：用户保存识图记录时学习（仅真实模式；防窥模式不读不写）
+enum CardTailMemory {
+    static let key = "learn.cardTails"
+
+    static func all() -> [String: String] {
+        guard !ModeDefaults.isDecoyMode else { return [:] }
+        return UserDefaults.standard.dictionary(forKey: key) as? [String: String] ?? [:]
+    }
+
+    static func learn(tail: String?, accountID: UUID?) {
+        guard !ModeDefaults.isDecoyMode, let accountID, let tail = AccountResolver.normalizeTail(tail) else { return }
+        var map = all()
+        guard map[tail] != accountID.uuidString else { return }
+        map[tail] = accountID.uuidString
+        if map.count > 60 { map = Dictionary(map.suffix(60), uniquingKeysWith: { a, _ in a }) }
+        UserDefaults.standard.set(map, forKey: key)
+        RunLog.shared.log(.info, "learn-tail", "记住了 1 个卡号尾号")
+    }
+
+    static func tails(of a: LedgerAccount, learned: [String: String]) -> Set<String> {
+        var s = Set(learned.filter { $0.value == a.id.uuidString }.map(\.key))
+        if a.cardTail.count == 4 { s.insert(a.cardTail) }
+        return s
+    }
+
+    /// 账户名 / 备注里的银行（「储蓄卡-招商银行」「招行信用卡」→ 招商银行 / 招行）
+    static func bankName(of a: LedgerAccount) -> String? {
+        let text = EnglishBankTerms.localize(a.name + " " + a.note)
+        if let b = AccountHintParser.parse(text: text)?.bankName { return b }
+        for (_, zh) in EnglishBankTerms.banks {
+            if AccountHint.aliases(forBank: zh).dropFirst().contains(where: { text.contains($0) }) { return zh }
+        }
+        return nil
     }
 }

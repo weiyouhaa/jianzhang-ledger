@@ -159,5 +159,76 @@ check(direct.amount == nil, "receipt(from:) NaN 金额 → nil")
 let edge4 = ModelMerge.merge(model: [ModelTransaction(amount: 144.43, kind: "expense")], rules: [okRule, okRule], ctx: ctx(orderLines))
 check(edge4.receipts.count == 1, "模型 1 笔、规则 2 笔不 trap")
 
+// 13. 英文云闪付还款（合成：卡尾号、金额均为虚构）：储蓄卡 1357 → 信用卡 2468，账户里还有一张交通银行信用卡（排在最前）
+let upLines = ["云闪付交易详情", "Repay:CMB Credit card", "¥268.10", "Current Transaction Successful", "Status",
+               "Order Amount ¥268.10", "Payment CMB Debit card[1357]", "Method", "Credit Card CMB Credit card[2468]", "Number",
+               "Order Time 2026.09.15 09:08:07", "Order No. 2026091500000000000000000042"]
+let idBocom = UUID(), idCmbCredit = UUID(), idCmbDebit = UUID(), idCcbDebit = UUID(), idWechat = UUID()
+let userAccounts = [
+    AccountCandidate(id: idBocom, name: "信用卡-交通银行", type: "credit"),
+    AccountCandidate(id: idWechat, name: "微信", type: "wechat"),
+    AccountCandidate(id: idCcbDebit, name: "储蓄卡-建设银行", type: "debit"),
+    AccountCandidate(id: idCmbCredit, name: "信用卡-招商银行", type: "credit"),
+    AccountCandidate(id: idCmbDebit, name: "储蓄卡-招商银行", type: "debit"),
+]
+func resolveRepay(_ r: ParsedReceipt?, _ accts: [AccountCandidate]) -> (card: AccountResolver.Resolution, payer: AccountResolver.Resolution) {
+    let card = AccountResolver.resolve(hint: r?.repaymentCard ?? AccountHint(type: "credit"), modelName: r?.repaymentCardName, role: .card, accounts: accts)
+    let payer = AccountResolver.resolve(hint: r?.accountHint, modelName: r?.accountName, role: .payer, accounts: accts, excluding: card.id)
+    return (card, payer)
+}
+// 规则路径
+let upRules = ReceiptParser.parseAll(lines: upLines.map { OCRLine($0) })
+let ur = upRules.first
+check(ur?.isCardRepayment == true && ur?.amount == 268.10 && ur?.merchant == nil, "规则：英文云闪付识别为信用卡还款，标题不当商户")
+check(ur?.repaymentCard?.cardTail == "2468" && ur?.repaymentCard?.bankName == "招商银行", "规则：Credit Card Number → 被还款卡（招商 2468）")
+check(ur?.accountHint?.cardTail == "1357" && ur?.accountHint?.type == "debit" && ur?.accountHint?.bankName == "招商银行", "规则：Payment Method → 付款账户（招商储蓄卡 1357）")
+let rr = resolveRepay(ur, userAccounts)
+check(rr.card.id == idCmbCredit && rr.card.via == .bank, "规则：信用卡匹配到招商信用卡（按银行），不是交通银行：\(rr.card)")
+check(rr.payer.id == idCmbDebit && rr.payer.via == .bank, "规则：付款账户匹配到招商储蓄卡：\(rr.payer)")
+
+// 模型路径（模拟输出）：模型把卡选成了交通银行 → 以原文银行为准
+let upCtx = ModelMerge.Context(lines: upLines, categories: expenseCats + incomeCats, incomeCategories: incomeCats,
+                               accounts: userAccounts.map(\.name), now: now, calendar: cal)
+let modelRepay = ModelTransaction(amount: 268.10, kind: "cardRepayment", merchant: "CMB Credit card", categoryName: "其他",
+                                  accountHint: "信用卡-交通银行", dateText: "2026.09.15 09:08:07",
+                                  fromAccountHint: "未知", toAccountHint: "信用卡-交通银行",
+                                  fromCardTail: "1357", toCardTail: "2468", bankNames: ["招商银行"], reason: "Repay 还款")
+let om = ModelMerge.merge(model: [modelRepay], rules: upRules, ctx: upCtx)
+let mr = om.receipts.first
+check(om.engine == .appleIntelligence && mr?.isCardRepayment == true && mr?.categoryName == "信用卡还款" && mr?.merchant == nil, "模型：还款，标题为信用卡还款")
+check(mr?.repaymentCard?.cardTail == "2468" && mr?.accountHint?.cardTail == "1357", "模型：尾号经原文校验后使用")
+let mrr = resolveRepay(mr, userAccounts)
+check(mrr.card.id == idCmbCredit && mrr.payer.id == idCmbDebit, "模型：即使模型选了交通银行，仍解析为招商信用卡 / 招商储蓄卡：\(mrr)")
+// 模型把还款判成「支出」（2.0 (2) 的实际表现）→ 原文是还款，改为还款
+let om2 = ModelMerge.merge(model: [ModelTransaction(amount: 268.10, kind: "expense", merchant: "CMB Credit card", categoryName: "其他",
+                                                    accountHint: "信用卡-交通银行")], rules: upRules, ctx: upCtx)
+let mExp = om2.receipts.first
+check(mExp?.isCardRepayment == true && resolveRepay(mExp, userAccounts).card.id == idCmbCredit, "模型判为支出 → 按原文改为还款并匹配招商")
+// 模型编造的尾号（原文没有）不采用
+let fake = ModelMerge.merge(model: [ModelTransaction(amount: 268.10, kind: "cardRepayment", toCardTail: "9999")], rules: [], ctx: upCtx)
+check(fake.receipts.first?.repaymentCard?.cardTail == "2468", "原文没有的尾号不采用")
+// 尾号优先：两张招商信用卡，填了尾号的那张胜出；学到的尾号同样有效
+let idCmbCredit2 = UUID()
+var withTail = userAccounts + [AccountCandidate(id: idCmbCredit2, name: "招行经典白", type: "credit", cardTail: "2468")]
+check(resolveRepay(mr, withTail).card == .init(id: idCmbCredit2, via: .tail), "尾号字段优先于银行")
+withTail[withTail.count - 1].cardTail = ""
+withTail[withTail.count - 1].learnedTails = ["2468"]
+check(resolveRepay(mr, withTail).card == .init(id: idCmbCredit2, via: .tail), "学到的尾号优先于银行")
+// 识别出招商但没有招商的卡：不选交通银行
+let noCmb = userAccounts.filter { $0.id != idCmbCredit }
+check(resolveRepay(mr, noCmb).card.id == nil, "没有同银行信用卡时不乱选别家银行")
+// 银行未知、只有一张信用卡：兜底选它；有两张：不选
+let single = [AccountCandidate(id: idBocom, name: "信用卡A", type: "credit"), AccountCandidate(id: idWechat, name: "微信", type: "wechat")]
+check(AccountResolver.resolve(hint: AccountHint(type: "credit"), modelName: nil, role: .card, accounts: single).via == .fallback, "银行未知且只有一张卡 → 兜底")
+check(AccountResolver.resolve(hint: AccountHint(type: "credit"), modelName: nil, role: .card, accounts: userAccounts).id == nil, "银行未知且多张卡 → 不自动选")
+// 普通消费：「招商银行信用卡(2468)」→ 招商信用卡，不是第一张交通银行信用卡
+let spend = AccountResolver.resolve(hint: AccountHint(type: "credit", cardTail: "2468", bankName: "招商银行"), modelName: nil, role: .single, accounts: userAccounts)
+check(spend.id == idCmbCredit, "普通消费的信用卡按银行匹配")
+check(AccountResolver.normalizeTail("[2468]") == "2468" && AccountResolver.normalizeTail("12") == nil && AccountResolver.normalizeTail(nil) == nil, "尾号规范化")
+let insUP = ModelMerge.instructions(categories: expenseCats, incomeCategories: incomeCats, accounts: ["储蓄卡-招商银行"],
+                                    accountDetails: ["储蓄卡-招商银行〔储蓄卡·招商银行〕"])
+check(insUP.contains("Payment Method") && insUP.contains("Credit Card Number") && insUP.contains("CMB 招商银行")
+      && insUP.contains("〔储蓄卡·招商银行〕") && insUP.contains("示例"), "指令含英文字段语义、银行缩写、账户说明和示例")
+
 print(failures == 0 ? "ALL PASSED" : "\(failures) FAILED")
 exit(failures == 0 ? 0 : 1)

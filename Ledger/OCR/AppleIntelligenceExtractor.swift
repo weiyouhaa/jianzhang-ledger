@@ -104,6 +104,18 @@ struct AIReceiptTransaction {
     var dateText: String
     @Guide(description: "是否为退款")
     var isRefund: Bool
+    @Guide(description: "还款 / 转账的付款账户名（只能用指令中列出的账户名）；不是还款转账或看不出来填「未知」")
+    var fromAccountHint: String
+    @Guide(description: "还款 / 转账的收款账户或被还款的信用卡账户名（只能用指令中列出的账户名）；看不出来填「未知」")
+    var toAccountHint: String
+    @Guide(description: "付款卡号的最后 4 位数字（截图上原样出现）；没有则为空字符串")
+    var fromCardTail: String
+    @Guide(description: "被还款的卡 / 收款卡号的最后 4 位数字（截图上原样出现）；没有则为空字符串")
+    var toCardTail: String
+    @Guide(description: "截图中出现的银行，用中文全称，如「招商银行」；没有则为空数组")
+    var bankNames: [String]
+    @Guide(description: "不超过 15 个字的判断依据")
+    var reason: String
 }
 
 @available(iOS 26.0, *)
@@ -166,7 +178,8 @@ enum AppleIntelligenceExtractor {
             let prompt = "OCR 文字（行号 y=纵向位置 大字 | 文字）：\n" + ModelMerge.promptText(ModelMerge.relevantLines(lines))
             let instructions = ModelMerge.instructions(
                 categories: vocabulary.expenseCategories + vocabulary.incomeCategories,
-                incomeCategories: vocabulary.incomeCategories, accounts: vocabulary.accounts)
+                incomeCategories: vocabulary.incomeCategories, accounts: vocabulary.accounts,
+                accountDetails: vocabulary.accountDetails)
             let seconds = max(1, timeout)
             return await HardTimeout.run(seconds: seconds, onTimeout: { () -> Result<[ModelTransaction], Failure> in
                 .failure(Failure(reason: "超时（\(Int(seconds)) 秒）"))
@@ -189,11 +202,14 @@ enum AppleIntelligenceExtractor {
         try Task.checkCancellation()
         let session = LanguageModelSession(instructions: instructions)
         let response = try await session.respond(to: prompt, generating: AIReceiptExtraction.self,
-                                                 options: GenerationOptions(sampling: .greedy, maximumResponseTokens: 600))
+                                                 options: GenerationOptions(sampling: .greedy, maximumResponseTokens: 900))
         return response.content.transactions.prefix(12).map {
             ModelTransaction(amount: $0.amount, kind: $0.kind, merchant: $0.merchant, note: $0.note,
                              categoryName: $0.categoryName, accountHint: $0.accountHint,
-                             dateText: $0.dateText, isRefund: $0.isRefund)
+                             dateText: $0.dateText, isRefund: $0.isRefund,
+                             fromAccountHint: $0.fromAccountHint, toAccountHint: $0.toAccountHint,
+                             fromCardTail: $0.fromCardTail, toCardTail: $0.toCardTail,
+                             bankNames: Array($0.bankNames.prefix(3)), reason: String($0.reason.prefix(40)))
         }
     }
 

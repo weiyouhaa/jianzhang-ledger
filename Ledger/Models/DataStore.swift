@@ -167,21 +167,27 @@ enum DataStore {
 
     /// 根据 OCR 得到的付款方式线索匹配已有账户
     static func account(matching hint: AccountHint?, in context: ModelContext) -> LedgerAccount? {
-        guard let hint else { return nil }
+        account(matching: hint, modelName: nil, role: .single, in: context)
+    }
+
+    /// 识图账户匹配：尾号（账户字段 / 名称 / 备注 / 学到的）> 同银行同卡种 > 模型账户名 > 兜底；
+    /// 已识别银行却没有这家银行的账户时返回 nil，不会选到别家银行的卡
+    static func account(matching hint: AccountHint?, modelName: String?, role: AccountResolver.Role,
+                        excluding: UUID? = nil, in context: ModelContext) -> LedgerAccount? {
+        accountResolution(matching: hint, modelName: modelName, role: role, excluding: excluding, in: context).account
+    }
+
+    static func accountResolution(matching hint: AccountHint?, modelName: String?, role: AccountResolver.Role,
+                                  excluding: UUID? = nil, in context: ModelContext) -> (account: LedgerAccount?, via: AccountResolver.Via) {
+        guard hint != nil || !(modelName ?? "").isEmpty else { return (nil, .none) }
         let list = accounts(in: context)
-        var candidates = list
-        if let typeRaw = hint.type, let type = AccountType(rawValue: typeRaw) {
-            candidates = list.filter { $0.type == type }
+        let learned = CardTailMemory.all()
+        let candidates = list.map { a in
+            AccountCandidate(id: a.id, name: a.name, type: a.typeRaw, note: a.note, cardTail: a.cardTail,
+                             learnedTails: Set(learned.filter { $0.value == a.id.uuidString }.map(\.key)))
         }
-        if let tail = hint.cardTail,
-           let hit = (candidates.isEmpty ? list : candidates).first(where: { $0.name.contains(tail) || $0.note.contains(tail) }) {
-            return hit
-        }
-        if let bank = hint.bankName {
-            let aliases = AccountHint.aliases(forBank: bank)
-            if let hit = candidates.first(where: { a in aliases.contains(where: { a.name.contains($0) }) }) { return hit }
-        }
-        return hint.type == nil ? nil : candidates.first
+        let r = AccountResolver.resolve(hint: hint, modelName: modelName, role: role, accounts: candidates, excluding: excluding)
+        return (r.id.flatMap { id in list.first(where: { $0.id == id }) }, r.via)
     }
 
     /// 首次启动写入默认分类（使用独立的 ModelContext，不依赖主线程）

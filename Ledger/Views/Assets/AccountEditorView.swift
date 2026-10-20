@@ -19,6 +19,7 @@ struct AccountEditorView: View {
     @State private var icon = AccountType.debit.defaultIcon
     @State private var colorHex = AccountType.debit.defaultColor
     @State private var note = ""
+    @State private var cardTail = ""
     @State private var includeInNetWorth = true
     @State private var isArchived = false
     @State private var didLoad = false
@@ -149,6 +150,19 @@ struct AccountEditorView: View {
                     .padding(.vertical, 4)
                 }
 
+                if type == .debit || type == .credit {
+                    Section {
+                        TextField("卡号尾号（4 位，可选）", text: $cardTail)
+                            .keyboardType(.numberPad)
+                            .accessibilityIdentifier("account-card-tail")
+                            .onChange(of: cardTail) { _, v in
+                                let digits = String(v.filter(\.isNumber).prefix(4))
+                                if digits != v { cardTail = digits }
+                            }
+                    } footer: {
+                        Text("识图记账时按截图上的卡号尾号匹配这个账户。也会在你保存识图记录时自动记住。")
+                    }
+                }
                 Section {
                     TextField("备注（卡号尾号、用途等）", text: $note, axis: .vertical)
                     Toggle("计入净资产", isOn: Binding(get: { includeInNetWorth },
@@ -215,6 +229,7 @@ struct AccountEditorView: View {
         icon = a.iconName
         colorHex = a.colorHex
         note = a.note
+        cardTail = a.cardTail
         includeInNetWorth = a.includeInNetWorth
         isArchived = a.isArchived
         if let rule = RecurringEngine.contributionRule(for: a, in: context) {
@@ -253,6 +268,7 @@ struct AccountEditorView: View {
         target.icon = icon
         target.colorHex = colorHex
         target.note = note
+        target.cardTail = (type == .debit || type == .credit) && cardTail.count == 4 ? cardTail : ""
         target.includeInNetWorth = includeInNetWorth
         target.isArchived = isArchived
         syncContributionRule(for: target)

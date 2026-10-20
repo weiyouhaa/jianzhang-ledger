@@ -147,24 +147,32 @@ struct RecognizeReceiptIntent: AppIntent {
             } else {
                 k = p.isIncome ? .income : .expense
             }
-            let merchant = p.merchant ?? ""
+            let merchant = p.isCardRepayment ? "" : (p.merchant ?? "")
+            let modelAccount = p.isCardRepayment || account != nil ? nil
+                : IntentRecorder.resolveAccount(hint: p.accountHint, modelName: p.accountName, role: .single, label: "账户")
             let resolved = IntentRecorder.resolve(kind: k, merchant: merchant, note: note ?? "",
                                                   categoryID: category?.id, categoryName: p.categoryName,
-                                                  accountID: account?.id ?? IntentRecorder.accountID(named: p.accountName),
+                                                  accountID: account?.id ?? modelAccount?.id,
                                                   accountHint: p.accountHint)
             var item = ReviewItem(amount: p.amount ?? 0, kind: k, categoryID: resolved.category?.id,
                                   merchant: merchant, note: note ?? "", accountID: resolved.account?.id,
                                   date: p.date ?? Date(), dateRecognized: p.date != nil)
-            // 信用卡还款截图：付款账户 → 信用卡 的转账（未指定类型 / 分类、且匹配到负债账户时）
-            if p.isCardRepayment, kind == nil, category == nil,
-               let card = IntentRecorder.repaymentCard(name: p.repaymentCardName, hint: p.repaymentCard),
-               let payer = IntentRecorder.repaymentPayer(accountID: account?.id, hint: p.accountHint, excluding: card.id) {
+            item.accountTail = p.isCardRepayment ? nil : p.accountHint?.cardTail
+            // 信用卡还款截图：付款账户 → 信用卡 的转账（未指定类型 / 分类时）。
+            // 信用卡没匹配上也保持「还款」，在审核里选卡（不再退回成「支出 · 其他」）
+            if p.isCardRepayment, kind == nil, category == nil {
+                let card = IntentRecorder.repaymentCard(name: p.repaymentCardName, hint: p.repaymentCard)
+                let payer = IntentRecorder.repaymentPayer(accountID: account?.id, hint: p.accountHint,
+                                                          modelName: p.accountName, excluding: card?.id ?? UUID())
                 item.kind = .transfer
                 item.categoryID = nil
-                item.toAccountID = card.id
-                item.accountID = payer.id
-                if item.note.isEmpty { item.note = merchant.isEmpty ? "信用卡还款" : merchant }
+                item.toAccountID = card?.id
+                item.accountID = payer?.id
                 item.merchant = ""
+                item.note = note ?? ""
+                item.payerTail = p.accountHint?.cardTail
+                item.cardTail = p.repaymentCard?.cardTail
+                RunLog.shared.log(.info, "repayment", "第 \(index + 1) 笔：信用卡还款，付款账户\(payer == nil ? "未定" : "已定")，信用卡\(card == nil ? "未定（需选择）" : "已定")")
             }
             // 去重：同金额、同商户、时间相差 2 分钟内的已有记录
             RunLog.shared.log(.info, "dedupe", "第 \(index + 1) 笔：查重")
@@ -348,6 +356,9 @@ struct RecognizeReceiptIntent: AppIntent {
                 dialog = (hint ?? "已没有待保存的记录。") + "可以手动添加一笔。"
             } else {
                 dialog = single ? "识别到 1 笔，确认无误就保存：" : "识别到 \(items.count) 笔，请核对："
+                if items.contains(where: { !$0.isComplete }) {
+                    dialog += "\n还款 / 转账还没选好账户：点「修改」→「账户」选择。"
+                }
                 if #unavailable(iOS 26.0) {
                     // iOS 17 / 18 的选择列表无法附带视图，把明细写进提示文字
                     for r in rows { dialog += "\n\(r.index). " + ReviewFormatter.line(r) }
@@ -434,9 +445,10 @@ struct RecognizeReceiptIntent: AppIntent {
             let options: [Option] = [
                 Option(key: Field.appEdit.rawValue, title: "⌨️ 在 App 里改金额 / 商户 / 时间",
                        subtitle: "先保存当前列表，再打开简账编辑", icon: "arrow.up.forward.app"),
-                Option(key: Field.kind.rawValue, title: "收支类型（\(item.kind == .income ? "收入" : "支出")）", icon: "arrow.left.arrow.right"),
+                Option(key: Field.kind.rawValue, title: "收支类型（\(kindTitle(item, in: context))）", icon: "arrow.left.arrow.right"),
                 Option(key: Field.category.rawValue, title: "分类（\(row.categoryName)）", icon: row.icon),
-                Option(key: Field.account.rawValue, title: "账户（\(row.accountName)）", icon: "creditcard"),
+                Option(key: Field.account.rawValue, title: item.kind == .transfer ? "账户（\(row.accountName)）" : "账户（\(row.accountName)）",
+                       subtitle: item.kind == .transfer ? "付款账户 → 收款 / 信用卡" : "", icon: "creditcard"),
                 Option(key: Field.dateNow.rawValue, title: "时间改为现在",
                        subtitle: DateText.monthDayTime.string(from: item.date), icon: "clock"),
                 Option(key: Field.done.rawValue, title: "✅ 完成", icon: "checkmark"),
@@ -451,24 +463,57 @@ struct RecognizeReceiptIntent: AppIntent {
                 snapshot[index] = item
                 throw JumpToApp(focusRecordIndex: index, items: snapshot)
             case .kind:
-                reviewKind = nil
-                let k = try await $reviewKind.requestDisambiguation(among: [.expense, .income],
-                                                                    dialog: IntentDialog("收支类型（当前\(item.kind == .income ? "收入" : "支出")）"))
-                if k.kind != item.kind {
-                    item.kind = k.kind
-                    let resolved = IntentRecorder.resolve(kind: item.kind, merchant: item.merchant, note: item.note,
-                                                          categoryID: nil, categoryName: nil, accountID: item.accountID, accountHint: nil)
-                    item.categoryID = resolved.category?.id
+                let pickedKind = try await choose([
+                    Option(key: "expense", title: "支出", icon: "arrow.up.circle"),
+                    Option(key: "income", title: "收入", icon: "arrow.down.circle"),
+                    Option(key: "repay", title: "💳 信用卡还款", subtitle: "选择付款账户和还款信用卡", icon: LedgerRecord.repaymentIcon),
+                    Option(key: "transfer", title: "转账", subtitle: "自己的账户之间", icon: "arrow.left.arrow.right"),
+                    Option(key: "back", title: "返回", icon: "chevron.backward"),
+                ], dialog: "收支类型（当前 \(kindTitle(item, in: context))）", view: ReviewSnippetView(title: "第 \(number) 笔", rows: [row]))
+                RunLog.shared.log(.info, "review-kind", "选择类型：\(pickedKind)")
+                switch pickedKind {
+                case "expense", "income":
+                    let newKind: RecordKind = pickedKind == "income" ? .income : .expense
+                    if newKind != item.kind {
+                        let wasTransfer = item.kind == .transfer
+                        item.kind = newKind
+                        item.toAccountID = nil
+                        if wasTransfer, item.accountID.flatMap({ DataStore.account(id: $0, in: context) })?.type.isLiability == true {
+                            item.accountID = nil
+                        }
+                        let resolved = IntentRecorder.resolve(kind: item.kind, merchant: item.merchant, note: item.note,
+                                                              categoryID: nil, categoryName: nil, accountID: item.accountID, accountHint: nil)
+                        item.categoryID = resolved.category?.id
+                        if item.accountID == nil { item.accountID = resolved.account?.id }
+                    }
+                case "repay", "transfer":
+                    if try await chooseTransferAccounts(&item, repayment: pickedKind == "repay", number: number, steps: &steps, context: context) {
+                        item.categoryEdited = true
+                    }
+                default:
+                    break
                 }
             case .category:
-                let list = DataStore.categories(kind: item.kind, in: context).map { CategoryEntity($0) }
-                guard !list.isEmpty else { continue }
-                reviewCategory = nil
-                RunLog.shared.log(.info, "review-category", "选择分类（\(list.count) 个）")
-                let c = try await $reviewCategory.requestDisambiguation(among: list, dialog: IntentDialog("选择分类（当前 \(row.categoryName)）"))
-                item.categoryID = c.id
-                item.kind = RecordKind(rawValue: c.kindRaw) ?? item.kind
-                item.categoryEdited = true
+                let cats = DataStore.categories(kind: item.kind == .transfer ? .expense : item.kind, in: context)
+                var entries: [Option] = []
+                if item.kind != .income {
+                    entries.append(Option(key: "repay", title: "💳 信用卡还款", subtitle: "付款账户 → 信用卡，不计入支出", icon: LedgerRecord.repaymentIcon))
+                }
+                entries += cats.map { Option(key: $0.id.uuidString, title: $0.name, icon: $0.icon) }
+                RunLog.shared.log(.info, "review-category", "选择分类（\(cats.count) 个）")
+                guard let key = try await pickPaged(entries, dialog: "选择分类（当前 \(row.categoryName)）",
+                                                    view: ReviewSnippetView(title: "第 \(number) 笔", rows: [row]), steps: &steps) else { continue }
+                if key == "repay" {
+                    _ = try await chooseTransferAccounts(&item, repayment: true, number: number, steps: &steps, context: context)
+                } else if let id = UUID(uuidString: key), let c = DataStore.category(id: id, in: context) {
+                    if item.kind == .transfer { item.toAccountID = nil }
+                    item.categoryID = c.id
+                    item.kind = c.kind
+                    item.categoryEdited = true
+                }
+            case .account where item.kind == .transfer:
+                let isRepay = item.toAccountID.flatMap { DataStore.account(id: $0, in: context) }?.type.isLiability ?? true
+                _ = try await chooseTransferAccounts(&item, repayment: isRepay, number: number, steps: &steps, context: context)
             case .account:
                 let list = DataStore.accounts(in: context).map { AccountEntity($0) }
                 guard !list.isEmpty else { continue }
@@ -489,6 +534,74 @@ struct RecognizeReceiptIntent: AppIntent {
             }
         }
         return item
+    }
+
+    private func kindTitle(_ item: ReviewItem, in context: ModelContext) -> String {
+        switch item.kind {
+        case .income: return "收入"
+        case .transfer:
+            let to = item.toAccountID.flatMap { DataStore.account(id: $0, in: context) }
+            return to == nil || to?.type.isLiability == true ? "信用卡还款" : "转账"
+        default: return "支出"
+        }
+    }
+
+    /// 还款 / 转账：用按钮依次选付款账户与收款账户（还款时只列负债账户），不需要输入文字。返回是否已修改。
+    @MainActor
+    private func chooseTransferAccounts(_ item: inout ReviewItem, repayment: Bool, number: Int, steps: inout Int,
+                                        context: ModelContext) async throws -> Bool {
+        let all = DataStore.accounts(in: context)
+        let payers = repayment ? all.filter { !$0.type.isLiability } : all
+        func options(_ list: [LedgerAccount], current: UUID?) -> [Option] {
+            list.map { a in
+                Option(key: a.id.uuidString, title: (a.id == current ? "✓ " : "") + a.name, subtitle: a.type.title, icon: a.iconName)
+            }
+        }
+        let snippet = ReviewSnippetView(title: "第 \(number) 笔", rows: [ReviewFormatter.row(item, index: number, in: context)])
+        RunLog.shared.log(.info, "review-transfer", "\(repayment ? "还款" : "转账")：选择付款账户（\(payers.count) 个）")
+        guard let fromKey = try await pickPaged(options(payers, current: item.accountID),
+                                                dialog: repayment ? "付款账户（从哪个账户还款）" : "转出账户",
+                                                view: snippet, steps: &steps),
+              let fromID = UUID(uuidString: fromKey) else { return false }
+        let targets = (repayment ? all.filter(\.type.isLiability) : all).filter { $0.id != fromID }
+        guard !targets.isEmpty else { return false }
+        RunLog.shared.log(.info, "review-transfer", "选择\(repayment ? "还款信用卡" : "转入账户")（\(targets.count) 个）")
+        guard let toKey = try await pickPaged(options(targets, current: item.toAccountID),
+                                              dialog: repayment ? "还款信用卡（还哪张卡）" : "转入账户",
+                                              view: snippet, steps: &steps),
+              let toID = UUID(uuidString: toKey) else { return false }
+        item.kind = .transfer
+        item.categoryID = nil
+        item.accountID = fromID
+        item.toAccountID = toID
+        item.merchant = ""
+        item.accountEdited = true
+        return true
+    }
+
+    /// 按钮列表分页：每页最多 6 项 + 「更多」+「返回」（加系统的取消不超过 9 个按钮）。返回选中的 key，「返回」为 nil
+    @MainActor
+    private func pickPaged<V: View>(_ entries: [Option], dialog: String, view: V, steps: inout Int) async throws -> String? {
+        let pageSize = 6
+        var page = 0
+        let pages = max(1, (entries.count + pageSize - 1) / pageSize)
+        while steps < Self.maxSteps {
+            steps += 1
+            let start = page * pageSize
+            let slice = Array(entries[start..<min(entries.count, start + pageSize)])
+            var options = slice
+            if pages > 1 {
+                options.append(Option(key: "__more", title: "更多…（\(page + 1)/\(pages)）", icon: "ellipsis.circle"))
+            }
+            options.append(Option(key: "__back", title: "返回", icon: "chevron.backward"))
+            let key = try await choose(options, dialog: dialog, view: view)
+            switch key {
+            case "__more": page = (page + 1) % pages
+            case "__back": return nil
+            default: return key
+            }
+        }
+        return nil
     }
 
     // MARK: 添加（改为跳进 App 新建）
@@ -534,11 +647,19 @@ struct RecognizeReceiptIntent: AppIntent {
         RunLog.shared.log(.info, "save-start", "保存 \(items.filter(\.willSave).count) 笔")
         var saved: [LedgerRecord] = []
         for item in items where item.willSave {
-            if item.kind == .transfer, let to = item.toAccountID, let from = item.accountID {
+            if item.kind == .transfer {
+                guard let to = item.toAccountID, let from = item.accountID else {
+                    RunLog.shared.log(.warn, "save-skip", "还款 / 转账缺少账户，跳过")
+                    continue
+                }
                 saved.append(try IntentRecorder.saveRepayment(amount: item.amount, fromID: from, toID: to, note: item.note,
                                                               date: item.date, source: item.isManual ? "shortcut" : "ocr"))
+                // 记住尾号 → 账户（用户确认保存即视为正确）
+                CardTailMemory.learn(tail: item.payerTail, accountID: from)
+                CardTailMemory.learn(tail: item.cardTail, accountID: to)
                 continue
             }
+            CardTailMemory.learn(tail: item.accountTail, accountID: item.accountID)
             let record = try IntentRecorder.save(
                 amount: item.amount, kind: item.kind,
                 categoryID: item.categoryID, categoryName: nil,

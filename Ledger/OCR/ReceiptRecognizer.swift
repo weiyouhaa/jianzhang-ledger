@@ -5,6 +5,8 @@ struct OCRVocabulary: Sendable {
     var expenseCategories: [String]
     var incomeCategories: [String]
     var accounts: [String]
+    /// 账户说明（给模型）：「储蓄卡-招商银行〔储蓄卡·招商银行·尾号1357〕」，与 accounts 一一对应
+    var accountDetails: [String] = []
 }
 
 /// 一次识别的结果：交易列表 + 使用的引擎 + 回退说明

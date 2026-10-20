@@ -71,6 +71,7 @@ enum AccountHintParser {
     private static let tailPatterns: [NSRegularExpression] = [
         #"(?:尾号|末四位|末4位|账户|账号)\s*[*＊]*\s*(\d{4})(?!\d)"#,
         #"\(\s*[*＊]*\s*(\d{4})\s*\)"#,
+        #"[（\[【]\s*[*＊]*\s*(\d{4})\s*[）\]】]"#,
         #"[*＊]{2,}\s*(\d{4})(?!\d)"#,
     ].map { try! NSRegularExpression(pattern: $0) }
 
@@ -128,12 +129,19 @@ enum EnglishBankTerms {
         ("BOC", "中国银行"), ("BCM", "交通银行"), ("CIB", "兴业银行"), ("CEB", "光大银行"), ("PAB", "平安银行"),
         ("GDB", "广发银行"), ("CGB", "广发银行"), ("HXB", "华夏银行"),
     ]
+    private static var bankAlternation: String { banks.map(\.0).joined(separator: "|") }
     private static let bankRegex: NSRegularExpression = {
         let alt = banks.map(\.0).joined(separator: "|")   // 长的在前：CMBC 先于 CMB
         return try! NSRegularExpression(pattern: "(?<![A-Za-z])(\(alt))(?![A-Za-z])")
     }()
     private static let phrases: [(String, String)] = [
         (#"(?i)credit\s*card\s*repayments?"#, "信用卡还款"),
+        // 云闪付 / 银行 App 英文详情页的字段标签（标签可能被换行拆开：「Payment … Method」「Credit Card … Number」）
+        (#"(?i)(?:credit\s*card\s*(?:number|no\.?)|repay(?:ment)?\s*card|card\s*repaid)(?![A-Za-z])"#, "还款卡 "),
+        (#"(?i)(?<![A-Za-z])credit\s*card(?=\s+(?:\#(bankAlternation))(?![A-Za-z]))"#, "还款卡 "),
+        (#"(?i)(?<![A-Za-z])pay(?:ment)?\s*(?:method|card|account)(?![A-Za-z])"#, "付款方式 "),
+        (#"(?i)(?<![A-Za-z])payment(?=\s+(?:\#(bankAlternation))(?![A-Za-z]))"#, "付款方式 "),
+        (#"(?i)(?<![A-Za-z])paid\s*(?:with|by|from)(?![A-Za-z])"#, "付款方式 "),
         (#"(?i)(?<![A-Za-z])repay(?:ment)?s?(?![A-Za-z])"#, "还款"),
         (#"(?i)credit\s*cards?"#, "信用卡"),
         (#"(?i)debit\s*cards?|savings?\s*(?:cards?|account)"#, "储蓄卡"),
@@ -176,7 +184,7 @@ enum RepaymentDetector {
 
     /// 「还款卡 / 还款到 / 还款至 招商银行(1024)」：标签后的银行卡就是被还款的卡
     private static let labelledCard = try! NSRegularExpression(
-        pattern: #"(?:还款卡|还款到|还款至|还款信用卡|还款账户)\s*[:：]?\s*([\p{Han}]{2,8}?银行)\s*(信用卡)?\s*(?:尾号)?\s*[（(]?\s*[*＊]*\s*(\d{4})?\s*[)）]?"#)
+        pattern: #"(?:还款卡|还款到|还款至|还款信用卡|还款账户)\s*[:：]?\s*([\p{Han}]{2,8}?银行)\s*(信用卡)?\s*(?:尾号)?\s*[（(\[【]?\s*[*＊]*\s*(\d{4})?\s*[)）\]】]?"#)
     /// 付款方式标签
     private static let payerLabel = try! NSRegularExpression(pattern: #"(?:付款卡|付款方式|付款账户|扣款卡|扣款账户|支付方式)\s*[:：]?\s*(.{2,30})"#)
 
@@ -189,7 +197,7 @@ enum RepaymentDetector {
     }
 
     private static let cardPattern = try! NSRegularExpression(
-        pattern: #"([\p{Han}]{2,8}?银行)?(信用卡|花呗|白条)\s*(?:尾号|末四位)?\s*[（(]?\s*[*＊]*\s*(\d{4})?\s*[)）]?"#)
+        pattern: #"([\p{Han}]{2,8}?银行)?(信用卡|花呗|白条)\s*(?:尾号|末四位)?\s*[（(\[【]?\s*[*＊]*\s*(\d{4})?\s*[)）\]】]?"#)
 
     /// 拆出被还款的卡与付款账户：带尾号的「xx 信用卡」优先作为卡，其余文字再解析付款方式
     static func split(text: String) -> (card: AccountHint?, payer: AccountHint?) {
@@ -316,6 +324,8 @@ enum ReceiptParser {
             let split = RepaymentDetector.split(text: hintText)
             result.repaymentCard = split.card
             result.accountHint = split.payer
+            // 还款的标题统一为「信用卡还款」（不把「Repay:CMB Credit card」当商户）
+            result.merchant = nil
             return result
         }
 

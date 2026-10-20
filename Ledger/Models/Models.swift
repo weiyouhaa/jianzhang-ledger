@@ -309,6 +309,8 @@ final class LedgerAccount {
     var isArchived: Bool = false
     var sortOrder: Int = 0
     var createdAt: Date = Date()
+    /// 卡号尾号（4 位，可空）：识图时按尾号匹配账户。新增字段带默认值，CloudKit / 旧数据兼容
+    var cardTail: String = ""
 
     @Relationship(deleteRule: .nullify, inverse: \LedgerRecord.accountRef)
     var records: [LedgerRecord]? = []
