@@ -3,6 +3,12 @@ import SwiftUI
 import UIKit
 
 enum Money {
+    /// 比例 → 整数百分比；非有限值 / 超大值不做会 trap 的 Int 转换
+    static func percent(_ ratio: Double) -> Int {
+        guard ratio.isFinite else { return ratio > 0 ? 9999 : 0 }
+        return Int(min(max((ratio * 100).rounded(), -9999), 9999))
+    }
+
     /// 「编辑防窥数据」打开期间由编辑器设置为防窥货币符号（全屏覆盖真实界面，关闭即清除）
     nonisolated(unsafe) static var symbolOverride: String?
     static var symbol: String { symbolOverride ?? ModeDefaults.string(forKey: SettingsKey.currencySymbol) ?? "¥" }

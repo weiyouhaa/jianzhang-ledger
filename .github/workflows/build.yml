@@ -153,6 +153,13 @@ jobs:
             Config/Ledger.entitlements
           if-no-files-found: error
 
+      - name: Upload dSYM (symbolicate crash backtraces from 运行日志)
+        uses: actions/upload-artifact@v4
+        with:
+          name: JianZhang-dSYM
+          path: ${{ runner.temp }}/Ledger.xcarchive/dSYMs
+          if-no-files-found: ignore
+
       - name: Create GitHub Release (tags only)
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2

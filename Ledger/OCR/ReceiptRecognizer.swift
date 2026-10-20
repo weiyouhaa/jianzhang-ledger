@@ -95,16 +95,28 @@ enum ReceiptRecognizer {
         return all.isEmpty ? [ReceiptParser.parse(lines: lines.map(\.text), now: now)] : all
     }
 
+    /// 金额不是有限正数或超过上限（1 亿）的结果视为没有识别到金额
+    static func sanitize(_ list: [ParsedReceipt]) -> [ParsedReceipt] {
+        list.map { r in
+            var r = r
+            if let a = r.amount, !ModelMerge.isValidAmount(a) { r.amount = nil }
+            return r
+        }
+    }
+
     static func seconds(_ ms: Int) -> String { String(format: "%.1f 秒", Double(ms) / 1000) }
 
     static func extract(lines: [OCRLine], now: Date, vocabulary: OCRVocabulary?, context: OCRRunContext,
                         ocrMs: Int = 0) async -> OCRRecognition {
         let tRules = Date()
-        let rules = ruleReceipts(lines, now: now)
+        // 规则结果同样过金额上限（例如把长数字串误识别成金额），后续换算 / 预算计算都不会溢出
+        let rules = sanitize(ruleReceipts(lines, now: now))
         RunLog.shared.log(.info, "rules", "规则解析：\(rules.filter { ($0.amount ?? 0) > 0 }.count) 笔，用时 \(Int(Date().timeIntervalSince(tRules) * 1000)) ms")
         // 只在真正要用 Apple 智能时才查询模型状态：关闭时完全不触碰 FoundationModels
         var checkedStatus: AppleIntelligenceStatus?
-        func finish(_ r: OCRRecognition, modelMs: Int? = nil, dropped: Int = 0, reason: String? = nil) -> OCRRecognition {
+        func finish(_ raw: OCRRecognition, modelMs: Int? = nil, dropped: Int = 0, reason: String? = nil) -> OCRRecognition {
+            var r = raw
+            r.receipts = sanitize(r.receipts)
             let found = r.receipts.filter { ($0.amount ?? 0) > 0 }
             RunLog.shared.log(.info, "engine-result",
                               "引擎：\(r.engine.title)，\(found.count) 笔" + ((reason ?? r.note).map { "（\($0)）" } ?? ""))
@@ -146,13 +158,16 @@ enum ReceiptRecognizer {
         case .success(let txns): RunLog.shared.log(.info, "model-end", "模型完成，用时 \(modelMs) ms，\(txns.count) 笔")
         case .failure(let f): RunLog.shared.log(.warn, "model-end", "模型失败，用时 \(modelMs) ms：\(f.reason)")
         }
+        ModelMerge.trace = { step, message in RunLog.shared.log(.info, step, message) }
         let outcome: ModelMerge.Outcome
+        RunLog.shared.log(.info, "merge-start", "校验 / 合并开始")
         switch result {
         case .success(let txns):
             outcome = ModelMerge.merge(model: txns, rules: rules, ctx: ctx)
         case .failure(let f):
             outcome = ModelMerge.merge(model: nil, rules: rules, ctx: ctx, unavailableReason: "Apple 智能\(f.reason)，已用规则")
         }
+        RunLog.shared.log(.info, "merge-done", "合并完成：\(outcome.receipts.count) 段，引擎 \(outcome.engine.title)，丢弃 \(outcome.dropped)")
         var receipts = outcome.receipts
         if receipts.isEmpty { receipts = rules }
         var note = outcome.fallbackReason

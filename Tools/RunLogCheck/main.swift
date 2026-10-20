@@ -77,7 +77,10 @@ try child.run()
 child.waitUntilExit()
 check(child.terminationReason == .uncaughtSignal && child.terminationStatus == SIGSEGV, "子进程被信号终止")
 let crash = (try? String(contentsOf: childDir.appendingPathComponent("crash.log"), encoding: .utf8)) ?? ""
-check(crash == "signal 11 at step vision-start\n", "信号处理器写出最后步骤：\(crash.debugDescription)")
+check(crash.hasPrefix("signal 11 at step vision-start\ncrashing thread backtrace:\n"), "信号处理器写出最后步骤")
+let frameLines = crash.split(separator: "\n").dropFirst(2)
+check(frameLines.count >= 3, "信号处理器写出出错线程回溯（\(frameLines.count) 帧）")
+print(frameLines.prefix(4).joined(separator: "\n"))
 let childState = (try? String(contentsOf: childDir.appendingPathComponent("state.txt"), encoding: .utf8)) ?? ""
 check(childState.hasPrefix("dirty|vision-start|"), "崩溃后状态仍为 dirty")
 

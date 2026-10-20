@@ -158,7 +158,7 @@ enum BudgetMonitor {
             guard sent[key] != true else { continue }
             sent[key] = true
             if level == "over" { sent["\(period).\(line.id).warn"] = true }
-            let title = level == "over" ? "\(line.name)已超支" : "\(line.name)已用 \(Int((ratio * 100).rounded()))%"
+            let title = level == "over" ? "\(line.name)已超支" : "\(line.name)已用 \(Money.percent(ratio))%"
             let body = level == "over"
                 ? "已花 \(Money.format(line.spent))，超出 \(Money.format(line.spent - line.budget))。"
                 : "预算 \(Money.format(line.budget))，已花 \(Money.format(line.spent))，还剩 \(Money.format(line.remaining))。"

@@ -111,5 +111,53 @@ check(long.count <= 300, "提示词截断（\(long.count) 字）")
 let ins = ModelMerge.instructions(categories: expenseCats + incomeCats, incomeCategories: incomeCats, accounts: accounts)
 check(ins.contains("对方已收款") && ins.contains("招行信用卡") && !ins.contains("支出分类中选：餐饮、交通、购物、娱乐、生活缴费、其他、工资"), "指令包含语义说明与用户列表")
 
+// 12. 不得 trap：长数字串（订单号）、极端金额、重复名称、垃圾日期（全部为合成数据）
+// 曾经：OCR 里 28 位订单号 → Double → ×100 → Int 溢出，Swift 运行时 trap（SIGTRAP），快捷指令「意外退出」
+let orderLines = ["账单详情", "-144.43", "交易成功", "订单号", "2026102022001400000000000001",
+                  "商户单号 9999999999999999999999999999999999", "流水 1234567890123456789.12",
+                  "1,234,567,890,123,456,789.00", String(repeating: "9", count: 400)]
+let edge1 = ModelMerge.merge(model: [ModelTransaction(amount: 144.43000000001, kind: "expense", merchant: "", dateText: "")],
+                             rules: [], ctx: ctx(orderLines))
+check(edge1.engine == .appleIntelligence && edge1.receipts.count == 1 && edge1.receipts.first?.amount == 144.43,
+      "长订单号不 trap，144.43000000001 → 144.43")
+let weird: [Double] = [-144.43, 0, -0.0, .nan, -.nan, .infinity, -.infinity, 1e20, -1e20, .greatestFiniteMagnitude,
+                       .leastNonzeroMagnitude, 99_999_999.99, 100_000_000, 1e15, 9.2e16]
+let edge2 = ModelMerge.merge(model: weird.map { ModelTransaction(amount: $0, kind: "expense") }, rules: [], ctx: ctx(orderLines))
+check(edge2.receipts.allSatisfy { ($0.amount ?? 0).isFinite } && edge2.dropped == weird.count, "异常金额全部丢弃，不 trap（丢弃 \(edge2.dropped)）")
+check(ModelMerge.cents(.nan) == nil && ModelMerge.cents(.infinity) == nil && ModelMerge.cents(1e300) == nil
+      && ModelMerge.cents(-1e300) == nil && ModelMerge.cents(144.43000000001) == 14443, "cents 安全换算")
+check(!ModelMerge.amountAppears(.nan, in: "nan") && !ModelMerge.amountAppears(1e30, in: "1000000000000000000000000000000"),
+      "amountAppears 拒绝异常值")
+check(!ModelMerge.onlyInBalanceLines(.nan, lines: orderLines) && !ModelMerge.onlyInBalanceLines(1e30, lines: ["余额 " + String(repeating: "9", count: 40)]),
+      "onlyInBalanceLines 不 trap")
+let nums = ModelMerge.numbers(in: orderLines.joined(separator: "\n"))
+check(nums.contains(14443) && nums.allSatisfy { abs($0) < 1_000_000_000_000_000 }, "numbers 忽略超长数字串")
+
+// 重复分类 / 账户名、空商户、垃圾日期、未知类型、退款、超长文字
+var dupCtx = ctx(["示例小店", "¥88.00", "9999年99月99日 99:99:99"])
+dupCtx.categories = ["餐饮", "餐饮", "购物", "工资", "工资"]
+dupCtx.incomeCategories = ["工资", "工资"]
+dupCtx.accounts = ["微信", "微信", "招行信用卡", "招行信用卡"]
+let garbage = ["9999年99月99日 99:99:99", "昨天 下午99:99", "😀😀😀", String(repeating: "年月日", count: 400), "0000-00-00", "-1-1-1"]
+for (i, g) in garbage.enumerated() {
+    let o = ModelMerge.merge(model: [ModelTransaction(amount: 88, kind: ["expense", "income", "cardRepayment", "xyz", "", "transfer"][i],
+                                                      merchant: i == 0 ? "" : String(repeating: "店", count: 500),
+                                                      categoryName: "餐饮", accountHint: "微信", dateText: g, isRefund: i == 1)],
+                             rules: [], ctx: dupCtx)
+    check(o.receipts.count <= 1, "垃圾日期 / 重复名称 #\(i + 1) 不 trap")
+}
+// 规则结果里有异常金额：规则匹配时不 trap
+var badRule = ParsedReceipt(); badRule.amount = .infinity
+var badRule2 = ParsedReceipt(); badRule2.amount = .nan
+var okRule = ParsedReceipt(); okRule.amount = 144.43
+let edge3 = ModelMerge.merge(model: [ModelTransaction(amount: 144.43, kind: "expense")], rules: [badRule, badRule2, okRule], ctx: ctx(orderLines))
+check(edge3.receipts.count == 1, "规则结果含 inf / NaN 时匹配不 trap")
+// receipt(from:) 直接喂异常金额
+let direct = ModelMerge.receipt(from: ModelTransaction(amount: .nan, kind: "expense"), ctx: ctx(orderLines), ruleMatch: nil)
+check(direct.amount == nil, "receipt(from:) NaN 金额 → nil")
+// 1 笔 vs 2 笔：结果数不同不影响
+let edge4 = ModelMerge.merge(model: [ModelTransaction(amount: 144.43, kind: "expense")], rules: [okRule, okRule], ctx: ctx(orderLines))
+check(edge4.receipts.count == 1, "模型 1 笔、规则 2 笔不 trap")
+
 print(failures == 0 ? "ALL PASSED" : "\(failures) FAILED")
 exit(failures == 0 ? 0 : 1)

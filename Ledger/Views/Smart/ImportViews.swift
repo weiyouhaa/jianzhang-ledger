@@ -274,7 +274,7 @@ struct ImportPreviewView: View {
 
     /// 选项变化后重新计算，保留用户的修改和勾选
     private func reprepare(_ newOptions: ImportOptions) {
-        let old = Dictionary(uniqueKeysWithValues: items.map { ($0.id, $0) })
+        let old = Dictionary(items.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         var fresh = BillImporter.prepare(session.result, options: newOptions, in: context)
         for i in fresh.indices {
             guard let prev = old[fresh[i].id], prev.edited else { continue }

@@ -19,7 +19,7 @@ struct BudgetLineRow: View {
                 }
                 Spacer()
                 VStack(alignment: .trailing, spacing: 2) {
-                    Text("\(Int((ratio * 100).rounded()))%")
+                    Text("\(Money.percent(ratio))%")
                         .font(.subheadline.weight(.semibold).monospacedDigit())
                         .foregroundStyle(Self.color(ratio))
                     Text("\(Money.format(line.spent)) / \(Money.format(line.budget))")

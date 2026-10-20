@@ -509,6 +509,8 @@ struct SettingsView: View {
                 Spacer()
                 Text(appVersion).foregroundStyle(.secondary)
             }
+            .accessibilityElement(children: .combine)
+            .accessibilityIdentifier("about-version-row")
             Label("数据本地存储 · 识别在本机完成 · 无网络请求", systemImage: "checkmark.shield.fill")
                 .font(.footnote)
                 .foregroundStyle(.secondary)
@@ -538,7 +540,8 @@ struct SettingsView: View {
     private var appVersion: String {
         let v = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "1.0"
         let b = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "1"
-        return "\(v) (\(b))"
+        let commit = Bundle.main.object(forInfoDictionaryKey: "JZBuildCommit") as? String ?? ""
+        return "\(v) (\(b))" + (commit.isEmpty || commit == "dev" ? "" : " · \(commit)")
     }
 
     private var biometricAlertBinding: Binding<Bool> {

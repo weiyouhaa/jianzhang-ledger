@@ -44,4 +44,17 @@ final class OCRMemoryUITests: XCTestCase {
         XCTAssertTrue(launchLine.waitForExistence(timeout: 5), "日志里没有启动记录")
         print("RUNLOG-TEST viewer ok")
     }
+
+    func testAboutShowsVersion() {
+        let app = XCUIApplication()
+        app.launchArguments = ["-UIScreenshotDemo", "settings",
+                               "-AppleLanguages", "(zh-Hans)", "-AppleLocale", "zh_CN"]
+        app.launch()
+        let row = app.descendants(matching: .any).matching(identifier: "about-version-row").firstMatch
+        var tries = 0
+        while !(row.exists && row.isHittable) && tries < 15 { app.swipeUp(); tries += 1 }
+        XCTAssertTrue(row.exists, "关于里没有版本行")
+        print("VERSION-TEST " + row.label)
+        XCTAssertTrue(row.label.contains("2.0 (2)"), "版本：\(row.label)")
+    }
 }

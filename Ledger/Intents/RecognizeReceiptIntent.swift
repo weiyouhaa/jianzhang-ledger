@@ -137,7 +137,8 @@ struct RecognizeReceiptIntent: AppIntent {
             throw LedgerIntentError.noAmount(preview.isEmpty ? "（无）" : preview)
         }
 
-        var items: [ReviewItem] = found.map { p in
+        log.log(.info, "resolve", "匹配分类 / 账户（\(found.count) 笔）")
+        var items: [ReviewItem] = found.enumerated().map { index, p in
             let k: RecordKind
             if let kind {
                 k = kind.kind
@@ -166,6 +167,7 @@ struct RecognizeReceiptIntent: AppIntent {
                 item.merchant = ""
             }
             // 去重：同金额、同商户、时间相差 2 分钟内的已有记录
+            RunLog.shared.log(.info, "dedupe", "第 \(index + 1) 笔：查重")
             item.isDuplicate = item.dateRecognized
                 && IntentRecorder.isDuplicate(amount: item.amount, merchant: item.merchant, date: item.date)
             return item
@@ -310,6 +312,7 @@ struct RecognizeReceiptIntent: AppIntent {
                 return items
             }
             steps += 1
+            RunLog.shared.log(.info, "review-build", "生成审核列表（\(items.count) 笔）")
             let rows = rowsFor(items, context: context)
             let saving = items.filter(\.willSave)
             let single = items.count == 1

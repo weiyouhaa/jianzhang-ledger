@@ -6,6 +6,9 @@ import os
 import Darwin
 #else
 import Glibc
+// glibc 的 execinfo 没有导出到 Swift 模块（仅命令行测试在 Linux 上用到）
+@_silgen_name("backtrace") func backtrace(_ buffer: UnsafeMutablePointer<UnsafeMutableRawPointer?>, _ size: Int32) -> Int32
+@_silgen_name("backtrace_symbols_fd") func backtrace_symbols_fd(_ buffer: UnsafePointer<UnsafeMutableRawPointer?>, _ size: Int32, _ fd: Int32)
 #endif
 
 /// 运行日志（设置 › 智能记账 › 运行日志）：用于排查快捷指令崩溃等问题，用户可导出发送。
@@ -85,6 +88,7 @@ final class RunLog: @unchecked Sendable {
         }
         CrashGuard.install(crashPath: Self.crashURL.path)
         log(.info, "launch", "启动：\(reason) · \(Self.environmentLine())")
+        log(.info, "image", Self.imageLine(), memory: false)
         markClean(step: "launch")
     }
 
@@ -150,8 +154,11 @@ final class RunLog: @unchecked Sendable {
     private func importCrashFile() {
         guard let text = try? String(contentsOf: Self.crashURL, encoding: .utf8),
               !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
-        for line in text.split(separator: "\n") where !line.isEmpty {
-            log(.error, "crash", "上次运行崩溃：" + line, memory: false)
+        var first = true
+        for line in text.split(separator: "\n").prefix(120) where !line.isEmpty {
+            let isHeader = line.hasPrefix("signal ") || line.hasPrefix("exception ")
+            log(.error, "crash", (isHeader || first ? "上次运行崩溃：" : "  ") + line, memory: false)
+            first = false
         }
         try? "".write(to: Self.crashURL, atomically: false, encoding: .utf8)
     }
@@ -230,6 +237,18 @@ final class RunLog: @unchecked Sendable {
         return "\(v) (\(b)) · \(commit)"
     }
 
+    /// 主程序加载地址与 slide：配合构建产物里的 dSYM，可把崩溃回溯里的地址还原成函数名 / 行号
+    static func imageLine() -> String {
+        #if canImport(Darwin)
+        let header = _dyld_get_image_header(0).map { UInt(bitPattern: $0) } ?? 0
+        let slide = _dyld_get_image_vmaddr_slide(0)
+        let name = _dyld_get_image_name(0).map { String(cString: $0) }.map { ($0 as NSString).lastPathComponent } ?? "?"
+        return String(format: "主程序 %@ 加载地址 0x%lx slide 0x%lx", name, header, slide)
+        #else
+        return "主程序加载地址：不适用"
+        #endif
+    }
+
     static func environmentLine() -> String {
         "简账 \(appVersion) · iOS \(ProcessInfo.processInfo.operatingSystemVersionString) · \(deviceModel())"
     }
@@ -269,6 +288,14 @@ enum CrashGuard {
         p.initialize(repeating: 0, count: 16)
         return p
     }()
+    /// 预先分配的回溯缓冲：信号处理器里用 backtrace() 填充，再 backtrace_symbols_fd() 直接写到 fd（不分配内存）
+    static let maxFrames: Int32 = 48
+    nonisolated(unsafe) static var frames: UnsafeMutablePointer<UnsafeMutableRawPointer?> = {
+        let p = UnsafeMutablePointer<UnsafeMutableRawPointer?>.allocate(capacity: Int(CrashGuard.maxFrames))
+        p.initialize(repeating: nil, count: Int(CrashGuard.maxFrames))
+        return p
+    }()
+    nonisolated(unsafe) static var framesHeader: UnsafeMutablePointer<CChar> = strdup("crashing thread backtrace:\n")!
     nonisolated(unsafe) private static var installed = false
     static let signals: [Int32] = [SIGABRT, SIGSEGV, SIGBUS, SIGILL, SIGTRAP, SIGFPE]
 
@@ -276,13 +303,16 @@ enum CrashGuard {
         guard !installed else { return }
         installed = true
         crashFD = open(crashPath, O_WRONLY | O_APPEND | O_CREAT, 0o644)
-        _ = stepBuffer; _ = prefix; _ = middle; _ = digits   // 提前初始化，处理器里不再分配
+        _ = stepBuffer; _ = prefix; _ = middle; _ = digits; _ = frames; _ = framesHeader   // 提前初始化，处理器里不再分配
+        // 先调用一次 backtrace，让它加载所需的库（首次调用可能分配内存，不能发生在信号处理器里）
+        _ = backtrace(frames, maxFrames)
         for s in signals { signal(s, crashSignalHandler) }
         #if canImport(ObjectiveC)
         NSSetUncaughtExceptionHandler { exception in
             // 异常名与原因前 160 字（系统异常，不含用户数据）
             let reason = String((exception.reason ?? "").prefix(160))
-            let line = "exception \(exception.name.rawValue): \(reason) at step \(String(cString: CrashGuard.stepBuffer))\n"
+            var line = "exception \(exception.name.rawValue): \(reason) at step \(String(cString: CrashGuard.stepBuffer))\n"
+            for f in exception.callStackSymbols.prefix(40) { line += "  " + f + "\n" }
             if CrashGuard.crashFD >= 0 { _ = line.withCString { write(CrashGuard.crashFD, $0, strlen($0)) } }
         }
         #endif
@@ -324,6 +354,12 @@ private func crashSignalHandler(_ sig: Int32) {
         _ = write(fd, CrashGuard.stepBuffer, strlen(CrashGuard.stepBuffer))
         var nl: CChar = 10
         _ = write(fd, &nl, 1)
+        // 出错线程（同步信号在出错线程上处理）的回溯
+        let count = backtrace(CrashGuard.frames, CrashGuard.maxFrames)
+        if count > 0 {
+            _ = write(fd, CrashGuard.framesHeader, strlen(CrashGuard.framesHeader))
+            backtrace_symbols_fd(CrashGuard.frames, count, fd)
+        }
     }
     signal(sig, SIG_DFL)
     raise(sig)

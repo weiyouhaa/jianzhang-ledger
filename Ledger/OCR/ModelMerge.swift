@@ -37,26 +37,49 @@ enum ModelMerge {
         var fallbackReason: String?
     }
 
+    /// 运行日志钩子（App 内指向 RunLog；命令行测试为空操作）。只传步骤名和计数，不传文字 / 金额。
+    nonisolated(unsafe) static var trace: (_ step: String, _ message: String) -> Void = { _, _ in }
+
     // MARK: 金额校验
+
+    /// 合理的交易金额上限（1 亿）；模型输出的金额先过这一关再参与任何换算
+    static let maxAmount: Double = 100_000_000
+
+    static func isValidAmount(_ v: Double) -> Bool {
+        v.isFinite && v > 0 && v < maxAmount
+    }
+
+    /// 匹配数字串：长数字串（订单号 / 卡号 / 流水号）不会被当成金额
+    private static let numberPattern = try! NSRegularExpression(pattern: #"\d{1,3}(?:,\d{3})+(?:\.\d{1,2})?|\d+(?:\.\d{1,2})?"#)
+    /// 去掉千分位后超过这个长度的数字串直接忽略（远大于 maxAmount）
+    private static let maxNumberLength = 15
 
     /// 原文里出现过的全部数字（去掉千分位、全角、货币符号），保留两位小数
     static func numbers(in text: String) -> Set<Int> {
         let normalized = ReceiptParser.normalize(text)
-        let re = try! NSRegularExpression(pattern: #"\d{1,3}(?:,\d{3})+(?:\.\d{1,2})?|\d+(?:\.\d{1,2})?"#)
         let ns = normalized as NSString
         var result = Set<Int>()
-        for m in re.matches(in: normalized, range: NSRange(location: 0, length: ns.length)) {
+        for m in numberPattern.matches(in: normalized, range: NSRange(location: 0, length: ns.length)) {
             let raw = ns.substring(with: m.range).replacingOccurrences(of: ",", with: "")
-            if let v = Double(raw) { result.insert(cents(v)) }
+            guard raw.count <= maxNumberLength, let v = Double(raw), let c = cents(v) else { continue }
+            result.insert(c)
         }
         return result
     }
 
-    static func cents(_ v: Double) -> Int { Int((v * 100).rounded()) }
+    /// 金额 → 分。非有限值或超出范围返回 nil（绝不做会溢出的 Int 转换：
+    /// 曾因 OCR 中 28 位订单号转 Int 溢出，Swift 运行时 trap 导致快捷指令「意外退出」）
+    static func cents(_ v: Double) -> Int? {
+        guard v.isFinite else { return nil }
+        let c = (v * 100).rounded()
+        guard abs(c) < 1e15 else { return nil }
+        return Int(c)
+    }
 
     /// 金额必须在 OCR 原文中出现（模型不得编造金额）
     static func amountAppears(_ amount: Double, in text: String) -> Bool {
-        amount > 0 && numbers(in: text).contains(cents(amount))
+        guard isValidAmount(amount), let c = cents(amount) else { return false }
+        return numbers(in: text).contains(c)
     }
 
     private static let balanceWords = ["余额", "可用额度", "可用", "额度", "积分", "剩余"]
@@ -64,14 +87,15 @@ enum ModelMerge {
     /// 该金额的每一次出现都紧跟在「余额 / 可用额度 / 积分」之后：不是交易金额（模型常把余额当成交易）。
     /// 按出现位置判断，所以「消费 46.00 元，余额 2000.00 元」里的 46 仍有效。
     static func onlyInBalanceLines(_ amount: Double, lines: [String]) -> Bool {
-        let target = cents(amount)
-        let re = try! NSRegularExpression(pattern: #"\d{1,3}(?:,\d{3})+(?:\.\d{1,2})?|\d+(?:\.\d{1,2})?"#)
+        guard let target = cents(amount) else { return false }
+        let re = numberPattern
         var occurrences = 0
         for raw in lines {
             let line = ReceiptParser.normalize(raw)
             let ns = line as NSString
             for m in re.matches(in: line, range: NSRange(location: 0, length: ns.length)) {
-                guard let v = Double(ns.substring(with: m.range).replacingOccurrences(of: ",", with: "")), cents(v) == target else { continue }
+                let raw = ns.substring(with: m.range).replacingOccurrences(of: ",", with: "")
+                guard raw.count <= maxNumberLength, let v = Double(raw), cents(v) == target else { continue }
                 occurrences += 1
                 let from = max(0, m.range.location - 8)
                 let before = ns.substring(with: NSRange(location: from, length: m.range.location - from))
@@ -97,15 +121,18 @@ enum ModelMerge {
     static func receipt(from t: ModelTransaction, ctx: Context, ruleMatch: ParsedReceipt?) -> ParsedReceipt {
         var r = ParsedReceipt()
         r.engine = .appleIntelligence
-        r.amount = (t.amount * 100).rounded() / 100
+        r.amount = isValidAmount(t.amount) ? (t.amount * 100).rounded() / 100 : nil
         r.score = 100
         r.rawText = ctx.lines.joined(separator: "\n")
         let kind = t.kind.lowercased()
         r.isIncome = kind == "income" || t.isRefund
         r.isCardRepayment = kind == "cardrepayment" && !t.isRefund
-        let merchant = ReceiptParser.cleanMerchant(t.merchant.trimmingCharacters(in: .whitespacesAndNewlines))
+        // 模型给的文字字段限长，避免异常长输出进入后续处理
+        let merchant = ReceiptParser.cleanMerchant(String(t.merchant.trimmingCharacters(in: .whitespacesAndNewlines).prefix(60)))
         r.merchant = merchant.isEmpty ? ruleMatch?.merchant : merchant
-        if !t.dateText.isEmpty, let d = ReceiptParser.date(lines: [t.dateText], now: ctx.now, calendar: ctx.calendar) {
+        let dateText = String(t.dateText.prefix(60))
+        if !dateText.isEmpty, let d = ReceiptParser.date(lines: [dateText], now: ctx.now, calendar: ctx.calendar),
+           abs(d.timeIntervalSince(ctx.now)) < 20 * 366 * 86_400 {
             r.date = d
         } else {
             r.date = ruleMatch?.date
@@ -142,23 +169,39 @@ enum ModelMerge {
         guard let model else {
             return Outcome(receipts: rules, engine: .rules, dropped: 0, skippedTransfers: 0, fallbackReason: unavailableReason)
         }
+        trace("model-validate", "模型 \(model.count) 笔，规则 \(ruleItems.count) 笔，OCR \(ctx.lines.count) 行")
         let text = ctx.lines.joined(separator: "\n")
+        let textNumbers = numbers(in: text)
+        trace("model-validate", "原文数字 \(textNumbers.count) 个")
         var valid: [ParsedReceipt] = []
         var dropped = 0
         var skipped = 0
         var seen = Set<String>()
         var usedRules = Set<Int>()
-        for t in model {
-            guard t.amount.isFinite, t.amount > 0, amountAppears(t.amount, in: text),
-                  !onlyInBalanceLines(t.amount, lines: ctx.lines) else { dropped += 1; continue }
-            if t.kind.lowercased() == "transfer" { skipped += 1; continue }
-            let key = "\(cents(t.amount))|\(t.merchant)|\(t.dateText)"
-            guard seen.insert(key).inserted else { dropped += 1; continue }
+        for (i, t) in model.enumerated() {
+            guard isValidAmount(t.amount), let c = cents(t.amount) else {
+                trace("model-validate", "第 \(i + 1) 笔：金额无效，丢弃"); dropped += 1; continue
+            }
+            guard textNumbers.contains(c) else {
+                trace("model-validate", "第 \(i + 1) 笔：金额不在原文中，丢弃"); dropped += 1; continue
+            }
+            guard !onlyInBalanceLines(t.amount, lines: ctx.lines) else {
+                trace("model-validate", "第 \(i + 1) 笔：只出现在余额处，丢弃"); dropped += 1; continue
+            }
+            if t.kind.lowercased() == "transfer" { trace("model-validate", "第 \(i + 1) 笔：账户间转账，跳过"); skipped += 1; continue }
+            let key = "\(c)|\(t.merchant)|\(t.dateText)"
+            guard seen.insert(key).inserted else { trace("model-dedupe", "第 \(i + 1) 笔：重复，丢弃"); dropped += 1; continue }
             // 同金额、未被占用的规则结果，用来补充日期和付款方式
-            let idx = ruleItems.indices.first { !usedRules.contains($0) && cents(ruleItems[$0].amount ?? 0) == cents(t.amount) }
+            let idx = ruleItems.indices.first { j in
+                guard !usedRules.contains(j), let a = ruleItems[j].amount, let rc = cents(a) else { return false }
+                return rc == c
+            }
             if let idx { usedRules.insert(idx) }
+            trace("rules-apply", "第 \(i + 1) 笔：\(idx == nil ? "无" : "有")同金额规则结果")
             valid.append(receipt(from: t, ctx: ctx, ruleMatch: idx.map { ruleItems[$0] }))
+            trace("model-convert", "第 \(i + 1) 笔：已转换")
         }
+        trace("merge", "有效 \(valid.count) 笔，丢弃 \(dropped)，转账 \(skipped)")
         if valid.isEmpty {
             let reason = skipped > 0 && dropped == 0 && ruleItems.isEmpty
                 ? "Apple 智能判断为账户间转账，未记账"
