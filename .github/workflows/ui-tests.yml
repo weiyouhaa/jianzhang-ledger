@@ -57,7 +57,7 @@ jobs:
             -destination "id=$UDID" -derivedDataPath build \
             -resultBundlePath "$RUNNER_TEMP/UITests.xcresult" \
             CODE_SIGNING_ALLOWED=NO \
-            | tee "$RUNNER_TEMP/uitest.log" | grep -E "error:|Test Case|passed|failed|TEST|XCTAssert" || true
+            | tee "$RUNNER_TEMP/uitest.log" | grep -E "error:|Test Case|passed|failed|TEST|XCTAssert|UI-DUMP" || true
           grep -q "TEST SUCCEEDED" "$RUNNER_TEMP/uitest.log" || { tail -n 150 "$RUNNER_TEMP/uitest.log"; exit 1; }
 
       - name: Upload results

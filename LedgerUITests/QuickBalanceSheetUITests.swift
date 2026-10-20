@@ -16,7 +16,11 @@ final class QuickBalanceSheetUITests: XCTestCase {
     private func runQuickBalance(screen: String, account: String, file: StaticString = #filePath, line: UInt = #line) {
         let app = launch(screen)
         let row = app.descendants(matching: .any).matching(identifier: "account-" + account).firstMatch
-        XCTAssertTrue(row.waitForExistence(timeout: 15), "找不到账户行 \(account)", file: file, line: line)
+        if !row.waitForExistence(timeout: 15) {
+            print("UI-DUMP-BEGIN\n\(app.debugDescription)\nUI-DUMP-END")
+            XCTFail("找不到账户行 \(account)", file: file, line: line)
+            return
+        }
         row.press(forDuration: 1.2)
         let menuItem = app.buttons["修改余额"].firstMatch
         XCTAssertTrue(menuItem.waitForExistence(timeout: 5), "长按菜单没有「修改余额」", file: file, line: line)
@@ -25,6 +29,7 @@ final class QuickBalanceSheetUITests: XCTestCase {
         XCTAssertTrue(field.waitForExistence(timeout: 5), "修改余额 sheet 没有出现", file: file, line: line)
         // 关键：等 3 秒后 sheet 仍在
         Thread.sleep(forTimeInterval: 3)
+        if !field.exists { print("UI-DUMP-BEGIN\n\(app.debugDescription)\nUI-DUMP-END") }
         let shot = XCTAttachment(screenshot: app.screenshot())
         shot.name = "quickbalance-\(screen)"
         shot.lifetime = .keepAlways

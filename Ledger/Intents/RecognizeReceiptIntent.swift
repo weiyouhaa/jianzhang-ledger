@@ -11,6 +11,9 @@ struct RecognizeReceiptIntent: AppIntent {
     static var title: LocalizedStringResource = "识图记账"
     static var description = IntentDescription("识别支付宝、微信、银行等支付截图中的金额、商户与时间，在弹窗中审核（可修改、删除、添加）后记账，也可直接保存。识别在本机完成，不联网。")
     static var openAppWhenRun: Bool = false
+    /// iOS 26+：默认后台运行；「在 App 里改」时用 continueInForeground 由系统把简账切到前台
+    @available(iOS 26.0, *)
+    static var supportedModes: IntentModes { [.background, .foreground(.dynamic)] }
     static var authenticationPolicy: IntentAuthenticationPolicy = .requiresAuthentication
 
     @Parameter(
@@ -139,10 +142,11 @@ struct RecognizeReceiptIntent: AppIntent {
                     focusID = nil
                 }
                 PendingAppEdit.save(.init(recordID: focusID?.uuidString, isNew: jump.focusRecordIndex == nil, focus: nil))
-                Self.bringAppToForeground()
-                let msg = jump.focusRecordIndex == nil
-                    ? "已保存 \(saved.count) 笔。正在打开简账，请在新建页补上这一笔。"
-                    : "已保存 \(saved.count) 笔。正在打开简账继续修改。"
+                let opened = await continueInApp()
+                let what = jump.focusRecordIndex == nil ? "新建页" : "编辑页"
+                let msg = opened
+                    ? "已保存 \(saved.count) 笔，正在打开简账的\(what)。若没有自动打开，10 分钟内打开简账（解锁后）会自动弹出。"
+                    : "已保存 \(saved.count) 笔。没能自动打开简账：请在 10 分钟内手动打开简账，解锁后会自动弹出\(what)。"
                 return try finish(jump.items, cancelled: false, alreadySaved: saved, jumpMessage: msg, context: context)
             } catch {
                 if Self.isUserCancel(error) {
@@ -434,10 +438,26 @@ struct RecognizeReceiptIntent: AppIntent {
     }
 
 
+    /// 用系统认可的方式把 App 切到前台（iOS 26：continueInForeground；iOS 17–25：requestToContinueInForeground）。
+    /// 返回是否成功切到前台。失败时待编辑标记仍保留 10 分钟，下次打开 App 解锁后消费。
     @MainActor
-    private static func bringAppToForeground() {
-        guard let url = URL(string: "jianzhang://pending-edit") else { return }
-        UIApplication.shared.open(url, options: [:], completionHandler: nil)
+    private func continueInApp() async -> Bool {
+        if #available(iOS 26.0, *) {
+            guard systemContext.currentMode.canContinueInForeground else { return false }
+            do {
+                try await continueInForeground(nil, alwaysConfirm: false)
+                return true
+            } catch {
+                return false
+            }
+        } else {
+            do {
+                try await requestToContinueInForeground(IntentDialog("打开简账继续编辑"))
+                return true
+            } catch {
+                return false
+            }
+        }
     }
 
     @MainActor
@@ -512,3 +532,7 @@ struct RecognizeReceiptIntent: AppIntent {
     }
 
 }
+
+/// iOS 17–25：允许在执行中请求切到前台（iOS 26 起由 supportedModes 取代）
+@available(iOSApplicationExtension, unavailable)
+extension RecognizeReceiptIntent: ForegroundContinuableIntent {}

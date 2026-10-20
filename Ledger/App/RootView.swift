@@ -49,6 +49,8 @@ struct RootView: View {
         }
         .onChange(of: scenePhase) { _, phase in
             lock.handleScenePhase(phase)
+            // 快捷指令 continueInForeground 切到前台：未上锁时直接弹编辑页；上锁则等解锁（真实密码 / 面容）后再弹
+            if phase == .active && !lock.isLocked { PendingAppEdit.consumeIfNeeded() }
             if phase == .active {
                 Task { @MainActor in
                     if !SessionManager.shared.isDecoy {

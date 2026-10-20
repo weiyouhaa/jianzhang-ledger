@@ -67,7 +67,8 @@ final class SessionManager: ObservableObject {
     }
 
     func forceDecoyForDemo() {
-        decoyContainer = DataStore.makeDecoyContainer(inMemory: true)
+        // decoyassets 走真实文件库（与真机进入防窥一致），decoyhome 用内存库保证截图数据固定
+        decoyContainer = DataStore.makeDecoyContainer(inMemory: ScreenshotDemo.screen != "decoyassets")
         ModeDefaults.seedDecoyDefaultsIfNeeded()
         mode = .decoy
         ModeDefaults.setDecoyMode(true)
@@ -88,20 +89,31 @@ final class SessionManager: ObservableObject {
 enum PendingAppEdit {
     private static let key = "pending.appEdit.v1"
 
+    /// 标记有效期：快捷指令没能把 App 切到前台时，用户 10 分钟内打开简账仍会弹出编辑页
+    static let ttl: TimeInterval = 600
+
     struct Payload: Codable, Equatable {
         var recordID: String?
         var isNew: Bool
         var focus: String?
+        var savedAt: Date? = nil
     }
 
     static func save(_ payload: Payload) {
-        guard let data = try? JSONEncoder().encode(payload) else { return }
+        var p = payload
+        p.savedAt = Date()
+        guard let data = try? JSONEncoder().encode(p) else { return }
         UserDefaults.standard.set(data, forKey: key)
     }
 
-    static func load() -> Payload? {
-        guard let data = UserDefaults.standard.data(forKey: key) else { return nil }
-        return try? JSONDecoder().decode(Payload.self, from: data)
+    static func load(now: Date = Date()) -> Payload? {
+        guard let data = UserDefaults.standard.data(forKey: key),
+              let p = try? JSONDecoder().decode(Payload.self, from: data) else { return nil }
+        if let t = p.savedAt, now.timeIntervalSince(t) > ttl {
+            clear()
+            return nil
+        }
+        return p
     }
 
     static func clear() { UserDefaults.standard.removeObject(forKey: key) }
