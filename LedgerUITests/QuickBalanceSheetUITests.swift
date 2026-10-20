@@ -100,7 +100,11 @@ final class QuickBalanceSheetUITests: XCTestCase {
         let app = launch("decoyeditorhome")
         // 编辑器里：防窥预算 ¥3,000，不能出现真实预算 ¥5,000
         XCTAssertTrue(text(app, containing: "3,000.00").waitForExistence(timeout: 15), "编辑防窥数据没有显示防窥预算 ¥3,000")
-        XCTAssertFalse(text(app, containing: "5,000.00").exists, "编辑防窥数据里出现了真实预算 ¥5,000")
+        // 全屏编辑器下面的真实首页可能仍在辅助功能树里，只看屏幕上能点到（可见）的元素
+        let realInEditor = app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "5,000.00")).allElementsBoundByIndex
+            .filter { $0.isHittable }
+        if !realInEditor.isEmpty { print("UI-DUMP-BEGIN\n\(app.debugDescription)\nUI-DUMP-END") }
+        XCTAssertTrue(realInEditor.isEmpty, "编辑防窥数据里出现了真实预算 ¥5,000")
 
         // 关闭编辑器回到真实界面：明细页显示真实预算 ¥5,000
         app.descendants(matching: .any).matching(identifier: "decoy-editor-done").firstMatch.tap()
@@ -108,7 +112,8 @@ final class QuickBalanceSheetUITests: XCTestCase {
         XCTAssertTrue(homeTab.waitForExistence(timeout: 5))
         homeTab.tap()
         XCTAssertTrue(text(app, containing: "5,000.00").waitForExistence(timeout: 10), "真实首页没有显示真实预算 ¥5,000")
-        XCTAssertFalse(text(app, containing: "3,000.00").exists, "真实首页出现了防窥预算 ¥3,000")
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "3,000.00")).allElementsBoundByIndex
+                        .filter { $0.isHittable }.isEmpty, "真实首页出现了防窥预算 ¥3,000")
     }
 
     func testRealHomeShowsRealBudget() {
