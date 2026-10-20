@@ -1,0 +1,19 @@
+name: SDK probe FoundationModels
+on: workflow_dispatch
+jobs:
+  probe:
+    runs-on: macos-15
+    steps:
+      - uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest-stable
+      - name: Grep
+        run: |
+          xcodebuild -version
+          SDK=$(xcrun --sdk iphoneos --show-sdk-path)
+          find -L "$SDK/System/Library/Frameworks/FoundationModels.framework" -name "*.swiftinterface" | grep arm64e | tee /tmp/files
+          F=$(head -1 /tmp/files)
+          for pat in "macro Generable" "macro Guide" "static func anyOf" "enum Availability" "enum UnavailableReason" "case deviceNotEligible" "case appleIntelligenceNotEnabled" "case modelNotReady" "func supportsLocale" "convenience init(model" "public init(model" "func respond<" "struct GenerationOptions" "public init(sampling" "static var greedy" "enum GenerationError" "case rateLimited" "case unsupportedLanguageOrLocale" "extension Swift.Double : FoundationModels.Generable" "Decimal"; do
+            echo "===== $pat"
+            grep -n -A3 "$pat" "$F" | head -24
+          done
