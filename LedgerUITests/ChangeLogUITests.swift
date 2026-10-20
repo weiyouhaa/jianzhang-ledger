@@ -70,7 +70,9 @@ final class ChangeLogUITests: XCTestCase {
         XCTAssertEqual(old.label, "早餐")
         XCTAssertTrue(new.exists, "详情里没有备注的新值")
         XCTAssertTrue(new.label.hasPrefix("早") && new.label.contains("改"), "备注新值不对：\(new.label)")
-        XCTAssertTrue(app.staticTexts["修改"].exists, "操作不是「修改」")
+        // LabeledContent 会把「操作」与值合成一个辅助功能元素
+        XCTAssertTrue(app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", "修改")).firstMatch.exists,
+                      "操作不是「修改」")
         let shot = XCTAttachment(screenshot: app.screenshot())
         shot.name = "changelog-detail"
         shot.lifetime = .keepAlways
