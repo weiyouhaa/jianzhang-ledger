@@ -9,9 +9,10 @@ jobs:
           xcode-version: latest-stable
       - name: Grep
         run: |
+          xcodebuild -version
           SDK=$(xcrun --sdk iphoneos --show-sdk-path)
           F=$(find -L "$SDK/" -path "*AppIntents.framework*" -name "arm64e-apple-ios.swiftinterface" | head -1)
-          for pat in "struct AppIntentError" "static var canceled" "static var cancelled" "userCancelled" "requestValue" "needsValueError" "isCancellationError"; do
+          for pat in "func continueInForeground" "supportedModes" "canContinueInForeground" "struct IntentModes" "var systemContext" "currentMode" "requestToContinueInForeground" "OpensIntent" "opensIntent" "needsToContinueInForegroundError"; do
             echo "===== $pat"
-            grep -n -A8 "$pat" "$F" | head -40
+            grep -n -B2 -A6 "$pat" "$F" | head -50
           done
