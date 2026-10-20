@@ -343,6 +343,14 @@ struct SettingsView: View {
                 Label("识别诊断", systemImage: "stethoscope")
             }
             .accessibilityIdentifier("settings-ocr-diagnostics")
+            if !session.isDecoy {
+                NavigationLink {
+                    RunLogView()
+                } label: {
+                    Label("运行日志", systemImage: "list.bullet.rectangle")
+                }
+                .accessibilityIdentifier("settings-run-log")
+            }
             Button {
                 showFileImporter = true
             } label: {

@@ -77,19 +77,50 @@ struct RecognizeReceiptIntent: AppIntent {
 
     @MainActor
     func perform() async throws -> some IntentResult & ProvidesDialog & ShowsSnippetView & ReturnsValue<Double> {
+        // 运行日志：每一步留痕（不记录截图文字、金额、商户）；进程被系统强制结束时，下次启动可报告最后步骤
+        let log = RunLog.shared
+        log.bootstrap(reason: "快捷指令")
+        log.refreshAppState()
+        log.markDirty(step: "intent-start")
+        let started = Date()
+        defer {
+            // App 仍在前台时保持「运行中」标记，由进入后台时清除
+            if UIApplication.shared.applicationState == .background {
+                log.markClean(step: "intent-end")
+            } else {
+                log.markDirty(step: "foreground")
+            }
+        }
+        log.log(.info, "intent-start", "识图记账开始：审核方式=\(reviewMode == .review || confirmBeforeSaving ? "弹窗审核" : "直接保存")"
+                + "，指定分类=\(category == nil ? "否" : "是")，指定类型=\(kind == nil ? "否" : "是")"
+                + "，指定账户=\(account == nil ? "否" : "是")，备注=\(note?.isEmpty == false ? "有" : "无")"
+                + "，Apple 智能（快捷指令）=\(OCREngineSetting.preferAppleIntelligence && OCREngineSetting.useInShortcuts ? "开" : "关")")
+        if #available(iOS 26.0, *) {
+            log.log(.info, "intent-mode", "运行方式：\(String(describing: systemContext.currentMode).prefix(40))")
+        }
+
         let data = image.data
-        guard !data.isEmpty else { throw LedgerIntentError.unreadableImage }
+        log.log(.info, "intent-input", "输入文件：\(image.type?.identifier ?? "未知类型")，\(data.count / 1024) KB")
+        guard !data.isEmpty else {
+            log.log(.error, "intent-input", "输入为空")
+            throw LedgerIntentError.unreadableImage
+        }
 
         let parsedList: [ParsedReceipt]
         OCRRunInfo.engineLine = nil
         do {
             // 快捷指令可能在后台运行：端侧模型在后台会被限流，失败时自动回退规则并在结果里注明
+            log.log(.info, "vocabulary", "读取分类 / 账户名")
+            let vocabulary = IntentRecorder.ocrVocabulary()
+            log.log(.info, "vocabulary", "分类 \(vocabulary.expenseCategories.count + vocabulary.incomeCategories.count) 个，账户 \(vocabulary.accounts.count) 个")
             let recognition = try await ReceiptRecognizer.recognizeDetailed(imageData: data,
-                                                                            vocabulary: IntentRecorder.ocrVocabulary(),
+                                                                            vocabulary: vocabulary,
                                                                             context: .shortcut)
             parsedList = recognition.receipts
             OCRRunInfo.engineLine = recognition.engineLine
         } catch {
+            let ns = error as NSError
+            log.log(.error, "recognize-failed", "识别失败：\(ns.domain) \(ns.code)")
             throw LedgerIntentError.unreadableImage
         }
 
@@ -97,7 +128,10 @@ struct RecognizeReceiptIntent: AppIntent {
         let context = DataStore.shared.mainContext
         let review = reviewMode == .review || confirmBeforeSaving
 
+        log.log(.info, "parsed", "识别结果 \(parsedList.count) 段，含金额 \(found.count) 笔，"
+                + "还款 \(found.filter(\.isCardRepayment).count) 笔，收入 \(found.filter(\.isIncome).count) 笔，带时间 \(found.filter { $0.date != nil }.count) 笔")
         guard !found.isEmpty || review else {
+            log.log(.warn, "no-amount", "没有识别到金额")
             let raw = parsedList.first?.rawText ?? ""
             let preview = String(raw.replacingOccurrences(of: "\n", with: " ").prefix(60))
             throw LedgerIntentError.noAmount(preview.isEmpty ? "（无）" : preview)
@@ -137,6 +171,7 @@ struct RecognizeReceiptIntent: AppIntent {
             return item
         }
 
+        log.log(.info, "items", "待处理 \(items.count) 笔，重复 \(items.filter(\.isDuplicate).count) 笔，转账 \(items.filter { $0.kind == .transfer }.count) 笔")
         if review {
             var steps = 0
             let rawPreview = String((parsedList.first?.rawText ?? "").replacingOccurrences(of: "\n", with: " ").prefix(40))
@@ -147,6 +182,7 @@ struct RecognizeReceiptIntent: AppIntent {
                 }
                 items = reviewed
             } catch let jump as JumpToApp {
+                log.log(.info, "jump-to-app", "转到 App 继续（\(jump.focusRecordIndex == nil ? "新建" : "编辑")）")
                 let saved = try persist(jump.items, context: context)
                 let focusID: UUID?
                 if let idx = jump.focusRecordIndex, idx < jump.items.count {
@@ -161,6 +197,7 @@ struct RecognizeReceiptIntent: AppIntent {
                 }
                 PendingAppEdit.save(.init(recordID: focusID?.uuidString, isNew: jump.focusRecordIndex == nil, focus: nil))
                 let opened = await continueInApp()
+                log.log(opened ? .info : .warn, "continue-in-app", opened ? "已切到前台" : "未能切到前台")
                 let what = jump.focusRecordIndex == nil ? "新建页" : "编辑页"
                 let msg = opened
                     ? "已保存 \(saved.count) 笔，正在打开简账的\(what)。若没有自动打开，10 分钟内打开简账（解锁后）会自动弹出。"
@@ -168,13 +205,18 @@ struct RecognizeReceiptIntent: AppIntent {
                 return try finish(jump.items, cancelled: false, alreadySaved: saved, jumpMessage: msg, context: context)
             } catch {
                 if Self.isUserCancel(error) {
+                    log.log(.info, "review-cancel", "用户取消")
                     return try finish([], cancelled: true, context: context)
                 }
+                let ns = error as NSError
+                log.log(.error, "review-error", "审核出错：\(ns.domain) \(ns.code)")
                 return try finish(items, cancelled: false, errorMessage: error.localizedDescription, context: context)
             }
         }
 
-        return try finish(items, cancelled: false, context: context)
+        let result = try finish(items, cancelled: false, context: context)
+        log.log(.info, "intent-end", "识图记账结束，总用时 \(Int(Date().timeIntervalSince(started) * 1000)) ms")
+        return result
     }
 
     // MARK: - 保存
@@ -309,8 +351,10 @@ struct RecognizeReceiptIntent: AppIntent {
                 }
             }
             hint = nil
+            RunLog.shared.log(.info, "review-step", "审核第 \(steps) 步：\(items.count) 笔，\(options.count) 个选项")
             let snippet = ReviewSnippetView(title: items.isEmpty ? "识图记账" : "识别结果", rows: rows)
             let key = try await choose(options, dialog: dialog, view: snippet)
+            RunLog.shared.log(.info, "review-choice", "选择：\(key)")
 
             switch Action(rawValue: key) ?? .cancel {
             case .saveAll:
@@ -417,6 +461,7 @@ struct RecognizeReceiptIntent: AppIntent {
                 let list = DataStore.categories(kind: item.kind, in: context).map { CategoryEntity($0) }
                 guard !list.isEmpty else { continue }
                 reviewCategory = nil
+                RunLog.shared.log(.info, "review-category", "选择分类（\(list.count) 个）")
                 let c = try await $reviewCategory.requestDisambiguation(among: list, dialog: IntentDialog("选择分类（当前 \(row.categoryName)）"))
                 item.categoryID = c.id
                 item.kind = RecordKind(rawValue: c.kindRaw) ?? item.kind
@@ -425,6 +470,7 @@ struct RecognizeReceiptIntent: AppIntent {
                 let list = DataStore.accounts(in: context).map { AccountEntity($0) }
                 guard !list.isEmpty else { continue }
                 reviewAccount = nil
+                RunLog.shared.log(.info, "review-account", "选择账户（\(list.count) 个）")
                 let a = try await $reviewAccount.requestDisambiguation(among: list, dialog: IntentDialog("选择账户（当前 \(row.accountName)）"))
                 item.accountID = a.id
                 item.accountEdited = true
@@ -481,6 +527,8 @@ struct RecognizeReceiptIntent: AppIntent {
     @MainActor
     @discardableResult
     private func persist(_ items: [ReviewItem], context: ModelContext) throws -> [LedgerRecord] {
+        let t0 = Date()
+        RunLog.shared.log(.info, "save-start", "保存 \(items.filter(\.willSave).count) 笔")
         var saved: [LedgerRecord] = []
         for item in items where item.willSave {
             if item.kind == .transfer, let to = item.toAccountID, let from = item.accountID {
@@ -501,7 +549,13 @@ struct RecognizeReceiptIntent: AppIntent {
                                 account: item.accountEdited ? record.accountRef : nil, in: context)
             }
         }
-        ChangeLogger.with(.shortcut) { try? context.save() }
+        ChangeLogger.with(.shortcut) {
+            do { try context.save() } catch {
+                let ns = error as NSError
+                RunLog.shared.log(.error, "save-failed", "写入数据库失败：\(ns.domain) \(ns.code)")
+            }
+        }
+        RunLog.shared.log(.info, "save-done", "已保存 \(saved.count) 笔，用时 \(Int(Date().timeIntervalSince(t0) * 1000)) ms")
         if !SessionManager.shared.isDecoy {
             BudgetMonitor.check(in: context)
         }
@@ -512,6 +566,8 @@ struct RecognizeReceiptIntent: AppIntent {
 
     @MainActor
     private func choose<V: View>(_ options: [Option], dialog: String, view: V) async throws -> String {
+        RunLog.shared.log(.info, "review-ask", "弹出选择（\(options.count) 项）")
+        defer { RunLog.shared.log(.info, "review-answer", "选择已返回") }
         if #available(iOS 26.0, *), options.count <= 8 {
             // 用稳定 title 做映射：iOS 27 上 IntentChoiceOption 的 == 不一定能匹配到我们创建时的实例
             var map: [(title: String, key: String, option: IntentChoiceOption)] = []

@@ -15,6 +15,11 @@ final class NotificationRouter: ObservableObject {
 final class AppDelegate: NSObject, UIApplicationDelegate {
     func application(_ application: UIApplication,
                      didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil) -> Bool {
+        // 运行日志 + 崩溃捕获 + MetricKit：越早越好（快捷指令在后台拉起 App 时也会走这里）
+        RunLog.shared.bootstrap(reason: "进程启动")
+        RunLog.shared.log(.info, "did-finish-launching", application.applicationState == .background ? "后台启动（快捷指令 / 系统）" : "前台启动")
+        RunLog.shared.installObservers()
+        MetricsCollector.shared.start()
         UNUserNotificationCenter.current().delegate = NotificationManager.shared
         NotificationManager.shared.registerCategories()
         return true

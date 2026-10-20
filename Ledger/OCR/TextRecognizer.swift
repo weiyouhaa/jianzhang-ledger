@@ -15,56 +15,74 @@ enum TextRecognizer {
     }
 
     /// 带位置信息的行（midY：0 = 顶部，1 = 底部；height：该行最高文本块的高度），用于多笔拆分与大字金额识别
-    static func recognizeOCRLines(in data: Data) async throws -> [OCRLine] {
-        guard let source = CGImageSourceCreateWithData(data as CFData, nil),
-              CGImageSourceGetCount(source) > 0 else {
-            throw RecognizerError.invalidImage
-        }
-        return try await withCheckedThrowingContinuation { continuation in
+    /// 运行日志只记录尺寸、耗时、行数，不记录识别出的文字。
+    static func recognizeOCRLines(in data: Data, maxPixel: Int = TextRecognizer.maxPixel) async throws -> [OCRLine] {
+        try await withCheckedThrowingContinuation { continuation in
             DispatchQueue.global(qos: .userInitiated).async {
                 // 解码 + 识别都放在 autoreleasepool 里：快捷指令在后台运行时内存上限较低，用完立即释放位图
                 let result: Result<[OCRLine], Error> = autoreleasepool {
-                    guard let (cgImage, orientation) = decode(source) else {
+                    let t0 = Date()
+                    // 不缓存原图解码结果；只按需生成缩略图（不做整图解码）
+                    guard let source = CGImageSourceCreateWithData(data as CFData,
+                                                                   [kCGImageSourceShouldCache: false] as CFDictionary),
+                          CGImageSourceGetCount(source) > 0 else {
+                        RunLog.shared.log(.error, "ocr-decode", "无法读取图片")
                         return .failure(RecognizerError.invalidImage)
                     }
-                    let request = VNRecognizeTextRequest()
-                    request.recognitionLevel = .accurate
-                    request.recognitionLanguages = ["zh-Hans", "en-US"]
-                    request.usesLanguageCorrection = true
-                    request.minimumTextHeight = 0.008
-                    let handler = VNImageRequestHandler(cgImage: cgImage, orientation: orientation, options: [:])
-                    do {
-                        try handler.perform([request])
-                        return .success(groupIntoLines(request.results ?? []))
-                    } catch {
-                        return .failure(error)
+                    let props = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any]
+                    let w = (props?[kCGImagePropertyPixelWidth] as? Int) ?? 0
+                    let h = (props?[kCGImagePropertyPixelHeight] as? Int) ?? 0
+                    let type = (CGImageSourceGetType(source) as String?) ?? "?"
+                    RunLog.shared.log(.info, "ocr-input", "图片 \(type) \(w)×\(h)，\(data.count / 1024) KB")
+                    guard let cgImage = thumbnail(source, maxPixel: maxPixel) else {
+                        RunLog.shared.log(.error, "ocr-decode", "缩略图解码失败")
+                        return .failure(RecognizerError.invalidImage)
                     }
+                    RunLog.shared.log(.info, "ocr-decoded",
+                                      "解码为 \(cgImage.width)×\(cgImage.height)，用时 \(Int(Date().timeIntervalSince(t0) * 1000)) ms")
+                    let t1 = Date()
+                    RunLog.shared.log(.info, "vision-start", "Vision 文字识别开始（accurate，zh-Hans / en-US）")
+                    let visionResult: Result<[OCRLine], Error> = autoreleasepool {
+                        let request = VNRecognizeTextRequest()
+                        request.recognitionLevel = .accurate
+                        request.recognitionLanguages = ["zh-Hans", "en-US"]
+                        request.usesLanguageCorrection = true
+                        request.minimumTextHeight = 0.008
+                        let handler = VNImageRequestHandler(cgImage: cgImage, orientation: .up, options: [:])
+                        do {
+                            try handler.perform([request])
+                            return .success(groupIntoLines(request.results ?? []))
+                        } catch {
+                            return .failure(error)
+                        }
+                    }
+                    let ms = Int(Date().timeIntervalSince(t1) * 1000)
+                    switch visionResult {
+                    case .success(let lines):
+                        RunLog.shared.log(.info, "vision-end", "Vision 完成，用时 \(ms) ms，\(lines.count) 行")
+                    case .failure(let error):
+                        let ns = error as NSError
+                        RunLog.shared.log(.error, "vision-end", "Vision 失败，用时 \(ms) ms：\(ns.domain) \(ns.code)")
+                    }
+                    return visionResult
                 }
                 continuation.resume(with: result)
             }
         }
     }
 
-    /// 长边超过 maxPixel 时按比例缩小（截图 2796 px → 2400 px，文字仍清晰），并把方向烘焙进位图
-    static let maxPixel = 2400
+    /// 统一用缩略图解码：长边最多 2000 px（截图 2796 px → 2000 px，文字仍清晰），方向烘焙进位图。
+    /// 不走 CGImageSourceCreateImageAtIndex 整图解码，后台运行时内存峰值更低。
+    static let maxPixel = 2000
 
-    private static func decode(_ source: CGImageSource) -> (CGImage, CGImagePropertyOrientation)? {
-        let props = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any]
-        let w = (props?[kCGImagePropertyPixelWidth] as? Int) ?? 0
-        let h = (props?[kCGImagePropertyPixelHeight] as? Int) ?? 0
-        if max(w, h) > maxPixel {
-            let options: [CFString: Any] = [
-                kCGImageSourceCreateThumbnailFromImageAlways: true,
-                kCGImageSourceCreateThumbnailWithTransform: true,
-                kCGImageSourceThumbnailMaxPixelSize: maxPixel,
-                kCGImageSourceShouldCacheImmediately: true,
-            ]
-            if let thumb = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) {
-                return (thumb, .up)
-            }
-        }
-        guard let image = CGImageSourceCreateImageAtIndex(source, 0, nil) else { return nil }
-        return (image, imageOrientation(source))
+    static func thumbnail(_ source: CGImageSource, maxPixel: Int) -> CGImage? {
+        let options: [CFString: Any] = [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+            kCGImageSourceThumbnailMaxPixelSize: maxPixel,
+            kCGImageSourceShouldCacheImmediately: true,
+        ]
+        return CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary)
     }
 
     private struct Block {
@@ -98,12 +116,5 @@ enum TextRecognizer {
             let height = row.map(\.height).max() ?? 0
             return OCRLine(text, midY: Double(1 - mid), height: Double(height))
         }
-    }
-
-    private static func imageOrientation(_ source: CGImageSource) -> CGImagePropertyOrientation {
-        guard let props = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
-              let raw = props[kCGImagePropertyOrientation] as? UInt32,
-              let o = CGImagePropertyOrientation(rawValue: raw) else { return .up }
-        return o
     }
 }

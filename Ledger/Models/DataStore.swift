@@ -19,6 +19,9 @@ enum DataStore {
 
     /// 存储文件名保持 "Ledger" 不变（Application Support/Ledger.store），本地 / iCloud 模式共用同一个文件，切换不丢数据
     private static func makeContainer() -> (container: ModelContainer, status: SyncStatus) {
+        let started = Date()
+        RunLog.shared.log(.info, "store-open", "打开数据库（\(Thread.isMainThread ? "主线程" : "后台线程")）")
+        defer { RunLog.shared.log(.info, "store-ready", "数据库就绪，用时 \(Int(Date().timeIntervalSince(started) * 1000)) ms") }
         // 变动日志只在真实库（防窥库的 Schema 不含 ChangeLogEntry）
         let schema = Schema([LedgerRecord.self, LedgerCategory.self, LedgerAccount.self,
                              CategoryRule.self, ImportBatch.self, RecurringRule.self, ChangeLogEntry.self])
@@ -39,6 +42,7 @@ enum DataStore {
                     ChangeLogger.shared.install(container: container)
                     return (container, .cloud)
                 } catch {
+                    RunLog.shared.log(.error, "store-cloud-failed", "iCloud 数据库打开失败，回退本地：\((error as NSError).domain) \((error as NSError).code)")
                     status = .failed(error.localizedDescription)
                 }
             }
@@ -56,6 +60,7 @@ enum DataStore {
             ChangeLogger.shared.install(container: container)
             return (container, status)
         } catch {
+            RunLog.shared.log(.error, "store-failed", "本地数据库打开失败：\((error as NSError).domain) \((error as NSError).code)")
             fatalError("无法创建数据存储：\(error)")
         }
     }

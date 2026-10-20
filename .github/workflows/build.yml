@@ -51,7 +51,7 @@ jobs:
         run: |
           swiftc Ledger/OCR/ReceiptParser.swift Tools/ParserCheck/main.swift -o "$RUNNER_TEMP/parsercheck"
           "$RUNNER_TEMP/parsercheck"
-          swiftc Ledger/OCR/ReceiptParser.swift Ledger/OCR/TextRecognizer.swift Tools/VisionCheck/main.swift -o "$RUNNER_TEMP/visioncheck"
+          swiftc Ledger/OCR/ReceiptParser.swift Ledger/OCR/TextRecognizer.swift Ledger/Diagnostics/RunLog.swift Tools/VisionCheck/main.swift -o "$RUNNER_TEMP/visioncheck"
           for f in Tests/Fixtures/*.png; do echo "### $f"; "$RUNNER_TEMP/visioncheck" "$f"; done
 
       - name: Import tests (Alipay GBK/UTF-8 CSV, WeChat CSV/XLSX, rules, recurrence)
@@ -71,6 +71,11 @@ jobs:
         run: |
           swiftc Ledger/OCR/HardTimeout.swift Tools/HardTimeoutCheck/main.swift -o "$RUNNER_TEMP/hardtimeout"
           "$RUNNER_TEMP/hardtimeout"
+
+      - name: Run log tests (sync append, ~1 MB rotation keeps 2, unclean-exit detection, signal handler breadcrumb)
+        run: |
+          swiftc Ledger/Diagnostics/RunLog.swift Tools/RunLogCheck/main.swift -o "$RUNNER_TEMP/runlogcheck"
+          "$RUNNER_TEMP/runlogcheck"
 
       - name: Balance math tests (credit card repayment, edit/delete reversal, stats rules)
         run: |
@@ -116,6 +121,7 @@ jobs:
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGN_IDENTITY="" \
             DEVELOPMENT_TEAM="" \
+            JZ_BUILD_COMMIT="${GITHUB_SHA::7}" \
             "${EXTRA[@]}" \
             | tee "$RUNNER_TEMP/xcodebuild.log" | grep -E "error:|warning: .*deprecated|BUILD|ARCHIVE" || true
           test -d "$RUNNER_TEMP/Ledger.xcarchive/Products/Applications/$APP_NAME.app" || {

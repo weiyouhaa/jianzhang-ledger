@@ -205,11 +205,13 @@ enum AppleIntelligenceExtractor {
             case .unsupportedLanguageOrLocale: return "不支持当前语言"
             case .decodingFailure: return "结果解析失败"
             case .concurrentRequests: return "正忙"
-            default: return "出错：" + String(String(describing: e).prefix(80))
+            // 只取错误种类名（不带附带的上下文描述），避免任何内容进入诊断 / 日志
+            default: return "出错：" + String(String(describing: e).prefix(while: { $0 != "(" }).prefix(60))
             }
         }
         if error is CancellationError { return "已取消" }
-        return "出错：" + String(String(describing: error).prefix(80))
+        let ns = error as NSError
+        return "出错：\(ns.domain) \(ns.code)"
     }
     #endif
 }

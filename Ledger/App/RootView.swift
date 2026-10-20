@@ -17,6 +17,12 @@ struct RootView: View {
                 ReviewSnippetDemoView().zIndex(3)
             }
             #if DEBUG
+            if OCRMemoryProbe.enabled {
+                OCRMemoryProbe()
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
+                    .allowsHitTesting(false)
+                    .zIndex(4)
+            }
             if ChangeLogProbe.enabled {
                 ChangeLogProbe()
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)

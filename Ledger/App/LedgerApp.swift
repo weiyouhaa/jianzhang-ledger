@@ -7,6 +7,11 @@ struct LedgerApp: App {
     @StateObject private var lock = AppLockManager()
     @ObservedObject private var session = SessionManager.shared
 
+    init() {
+        // 最早的时机：在任何数据库 / 设置读取之前打开运行日志并安装崩溃捕获
+        RunLog.shared.bootstrap(reason: "进程启动")
+    }
+
     var body: some Scene {
         WindowGroup {
             RootView()
