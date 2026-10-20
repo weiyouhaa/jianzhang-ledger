@@ -62,6 +62,11 @@ jobs:
             Tools/ImportCheck/main.swift -o "$RUNNER_TEMP/importcheck"
           "$RUNNER_TEMP/importcheck" Tests/Fixtures/import
 
+      - name: Apple Intelligence merge tests (mocked model output validation / fallback)
+        run: |
+          swiftc Ledger/OCR/ReceiptParser.swift Ledger/OCR/ModelMerge.swift Tools/ModelMergeCheck/main.swift -o "$RUNNER_TEMP/modelmerge"
+          "$RUNNER_TEMP/modelmerge"
+
       - name: Balance math tests (credit card repayment, edit/delete reversal, stats rules)
         run: |
           swiftc Ledger/Models/RecordKind.swift Tools/BalanceCheck/main.swift -o "$RUNNER_TEMP/balancecheck"

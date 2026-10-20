@@ -45,6 +45,8 @@ struct RecordEditorView: View {
     @State private var showDeleteConfirm = false
     @State private var detectedReceipts: [ParsedReceipt] = []
     @State private var showReceiptPicker = false
+    /// 上次识图使用的引擎（Apple 智能 / 规则）及回退说明
+    @State private var ocrEngineLine: String?
     @FocusState private var amountFocused: Bool
 
     private var categories: [LedgerCategory] {
@@ -183,10 +185,17 @@ struct RecordEditorView: View {
                             }
                             Button("取消", role: .cancel) {}
                         } message: {
-                            Text("其余几笔可再次识别后选择，或用快捷指令「识图记账」一次全部记入。")
+                            Text("其余几笔可再次识别后选择，或用快捷指令「识图记账」一次全部记入。" + (ocrEngineLine.map { "\n" + $0 } ?? ""))
                         }
                     } footer: {
-                        Text("在本机识别金额、商户、时间与付款账户，图片不会上传。")
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("在本机识别金额、商户、时间与付款账户，图片不会上传。")
+                            if let ocrEngineLine {
+                                Text(ocrEngineLine)
+                                    .font(.caption2)
+                                    .accessibilityIdentifier("ocr-engine-line")
+                            }
+                        }
                     }
                 }
 
@@ -579,7 +588,13 @@ struct RecordEditorView: View {
                 alertMessage = "无法读取这张图片"
                 return
             }
-            let all = try await ReceiptRecognizer.recognizeAll(imageData: data)
+            let vocab = OCRVocabulary(
+                expenseCategories: allCategories.filter { $0.kind == .expense }.map(\.name),
+                incomeCategories: allCategories.filter { $0.kind == .income }.map(\.name),
+                accounts: allAccounts.filter { !$0.isArchived }.map(\.name))
+            let recognition = try await ReceiptRecognizer.recognizeDetailed(imageData: data, vocabulary: vocab)
+            ocrEngineLine = recognition.engineLine
+            let all = recognition.receipts
             let found = all.filter { ($0.amount ?? 0) > 0 }
             if found.count > 1 {
                 // 一张截图里有多笔：让用户选择要填写哪一笔
@@ -610,7 +625,7 @@ struct RecordEditorView: View {
             kind = .expense
             amountText = String(format: "%.2f", amount)
             if let d = parsed.date { date = d }
-            let card = DataStore.account(matching: parsed.repaymentCard, in: context)
+            let card = account(named: parsed.repaymentCardName) ?? DataStore.account(matching: parsed.repaymentCard, in: context)
             if let payer = DataStore.account(matching: parsed.accountHint, in: context), !payer.type.isLiability {
                 accountID = payer.id
             }
@@ -635,9 +650,15 @@ struct RecordEditorView: View {
         } else if !list.contains(where: { $0.id == selectedCategoryID }) {
             selectedCategoryID = list.first?.id
         }
-        if let a = DataStore.account(matching: parsed.accountHint, in: context) ?? hit?.account {
+        // Apple 智能选出的账户名 > 付款方式线索 > 记账规则
+        if let a = account(named: parsed.accountName) ?? DataStore.account(matching: parsed.accountHint, in: context) ?? hit?.account {
             accountID = a.id
         }
         source = "ocr"
+    }
+
+    private func account(named name: String?) -> LedgerAccount? {
+        guard let name, !name.isEmpty else { return nil }
+        return allAccounts.first(where: { $0.name == name && !$0.isArchived })
     }
 }

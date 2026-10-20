@@ -144,6 +144,8 @@ struct ReviewSnippetView: View {
     let rows: [ReviewRow]
     var footnote: String? = nil
     var maxRows = 8
+    /// 识别引擎（Apple 智能 / 规则），创建时取本次识图的结果
+    var engineLine: String? = OCRRunInfo.engineLine
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -178,6 +180,12 @@ struct ReviewSnippetView: View {
                 Text(footnote)
                     .font(.caption)
                     .foregroundStyle(.secondary)
+            }
+            if let engineLine, !rows.isEmpty || footnote != nil {
+                Label(engineLine, systemImage: engineLine.contains("Apple 智能") && !engineLine.contains("已用规则") ? "sparkles" : "text.magnifyingglass")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+                    .lineLimit(2)
             }
         }
         .padding(14)

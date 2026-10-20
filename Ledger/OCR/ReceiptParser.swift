@@ -12,9 +12,22 @@ struct ParsedReceipt: Equatable {
     /// 信用卡 / 花呗还款截图：isCardRepayment 为 true，accountHint 为付款账户线索，repaymentCard 为被还款的卡
     var isCardRepayment: Bool = false
     var repaymentCard: AccountHint?
+    /// Apple 智能识别时：模型从用户账户列表中选出的账户名（还款时为被还款的卡）；规则识别为 nil
+    var accountName: String?
+    var repaymentCardName: String?
+    /// 识别引擎（审核弹窗 / 结果里显示）
+    var engine: RecognitionEngine = .rules
     var rawText: String = ""
     /// 金额候选得分（内部用于多笔拆分时过滤低置信度片段）
     var score: Double = 0
+}
+
+/// 识别引擎：Apple 智能（端侧模型抽取 + 校验）或本地规则
+enum RecognitionEngine: String, Equatable, Sendable {
+    case appleIntelligence
+    case rules
+
+    var title: String { self == .appleIntelligence ? "Apple 智能" : "规则" }
 }
 
 /// OCR 的一行文字及其在图中的位置（归一化坐标，midY 0 = 顶部、1 = 底部）。

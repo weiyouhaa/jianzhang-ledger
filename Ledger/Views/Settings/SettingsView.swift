@@ -13,6 +13,9 @@ struct SettingsView: View {
     @AppStorage(SettingsKey.appearance, store: .standard) private var appearance = 0
     @AppStorage(SettingsKey.defaultAccount) private var defaultAccount = ""
     @AppStorage(RepaymentSetting.key) private var repaymentAsExpense = false
+    /// 识图「识别引擎」：设备级设置
+    @AppStorage(OCREngineSetting.key, store: .standard) private var ocrEngine = OCREngineSetting.auto
+    @State private var aiStatus: AppleIntelligenceStatus = .unavailable
     @AppStorage(SettingsKey.hideInAppSwitcher, store: .standard) private var hideInAppSwitcher = true
     @AppStorage(SettingsKey.lastBackupAt, store: .standard) private var lastBackupAt: Double = 0
     @State private var showDemoBackup = false
@@ -308,6 +311,20 @@ struct SettingsView: View {
             } label: {
                 settingRow("记账规则", icon: "wand.and.stars", detail: rules.isEmpty ? "" : "\(rules.count) 条")
             }
+            Picker(selection: $ocrEngine) {
+                Text("自动（优先 Apple 智能）").tag(OCREngineSetting.auto)
+                Text("仅规则").tag(OCREngineSetting.rulesOnly)
+            } label: {
+                VStack(alignment: .leading, spacing: 2) {
+                    Label("识别引擎", systemImage: "text.viewfinder")
+                    Text(ocrEngine == OCREngineSetting.rulesOnly ? "仅用本地规则 · \(aiStatus.title)" : aiStatus.title)
+                        .font(.caption)
+                        .foregroundStyle(aiStatus.isAvailable && ocrEngine != OCREngineSetting.rulesOnly ? Color.green : Color.secondary)
+                        .accessibilityIdentifier("ai-status")
+                }
+            }
+            .accessibilityIdentifier("ocr-engine-picker")
+            .onAppear { aiStatus = AppleIntelligenceStatus.current }
             Button {
                 showFileImporter = true
             } label: {
@@ -326,7 +343,7 @@ struct SettingsView: View {
         } header: {
             Text("智能记账")
         } footer: {
-            Text("支付宝：我的 › 账单 › 右上角 ··· › 开具交易流水证明 › 用于个人对账；微信：我 › 服务 › 钱包 › 账单 › 常见问题 › 下载账单 › 用于个人对账。收到的 CSV / XLSX 文件（解压后）用「存储到文件」保存，再在这里导入。")
+            Text("识图记账：文字识别始终在本机用 Vision；「自动」时，在支持 Apple 智能的设备（iOS 26+）上再用端侧模型理解交易，结果会与原文核对（金额必须出现在截图中），不可用或出错时自动改用规则。全程不联网。\n\n支付宝：我的 › 账单 › 右上角 ··· › 开具交易流水证明 › 用于个人对账；微信：我 › 服务 › 钱包 › 账单 › 常见问题 › 下载账单 › 用于个人对账。收到的 CSV / XLSX 文件（解压后）用「存储到文件」保存，再在这里导入。")
         }
     }
 

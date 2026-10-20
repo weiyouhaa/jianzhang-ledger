@@ -178,10 +178,28 @@ enum IntentRecorder {
         return record
     }
 
+    /// 识图用词表：真实账本的分类与未归档账户名（提供给 Apple 智能）
+    @MainActor
+    static func ocrVocabulary() -> OCRVocabulary {
+        let context = DataStore.shared.mainContext
+        let cats = (try? context.fetch(FetchDescriptor<LedgerCategory>(sortBy: [SortDescriptor(\LedgerCategory.sortOrder)]))) ?? []
+        return OCRVocabulary(expenseCategories: cats.filter { $0.kind == .expense }.map(\.name),
+                             incomeCategories: cats.filter { $0.kind == .income }.map(\.name),
+                             accounts: DataStore.accounts(in: context).map(\.name))
+    }
+
+    /// Apple 智能选出的账户名 → 账户 ID
+    @MainActor
+    static func accountID(named name: String?) -> UUID? {
+        guard let name, !name.isEmpty else { return nil }
+        return DataStore.accounts(in: DataStore.shared.mainContext).first(where: { $0.name == name })?.id
+    }
+
     /// 识图得到的信用卡还款：被还款的负债账户（线索匹配不到时，只有一张信用卡就用它）
     @MainActor
-    static func repaymentCard(hint: AccountHint?) -> LedgerAccount? {
+    static func repaymentCard(name: String? = nil, hint: AccountHint?) -> LedgerAccount? {
         let context = DataStore.shared.mainContext
+        if let id = accountID(named: name), let a = DataStore.account(id: id, in: context), a.type.isLiability { return a }
         if let a = DataStore.account(matching: hint, in: context), a.type.isLiability { return a }
         let cards = DataStore.accounts(in: context).filter { $0.type.isLiability && $0.type.rawValue == (hint?.type ?? "credit") }
         return cards.count == 1 ? cards.first : nil

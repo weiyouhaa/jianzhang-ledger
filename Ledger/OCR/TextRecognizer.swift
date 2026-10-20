@@ -82,21 +82,3 @@ enum TextRecognizer {
         return o
     }
 }
-
-/// OCR + 解析的组合入口，App 内「从截图识别」和快捷指令共用
-enum ReceiptRecognizer {
-    static func recognize(imageData: Data) async throws -> ParsedReceipt {
-        let all = try await recognizeAll(imageData: imageData)
-        return all.first ?? ParsedReceipt(rawText: "")
-    }
-
-    /// 一张截图里的全部交易（从上到下）。没有识别到金额时返回一个 amount 为 nil 的结果，便于给出原文提示。
-    static func recognizeAll(imageData: Data, now: Date = Date()) async throws -> [ParsedReceipt] {
-        let lines = try await TextRecognizer.recognizeOCRLines(in: imageData)
-        let all = ReceiptParser.parseAll(lines: lines, now: now)
-        if all.isEmpty {
-            return [ReceiptParser.parse(lines: lines.map(\.text), now: now)]
-        }
-        return all
-    }
-}

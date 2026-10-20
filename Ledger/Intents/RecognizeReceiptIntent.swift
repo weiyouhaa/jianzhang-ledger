@@ -81,8 +81,13 @@ struct RecognizeReceiptIntent: AppIntent {
         guard !data.isEmpty else { throw LedgerIntentError.unreadableImage }
 
         let parsedList: [ParsedReceipt]
+        OCRRunInfo.engineLine = nil
         do {
-            parsedList = try await ReceiptRecognizer.recognizeAll(imageData: data)
+            // 快捷指令可能在后台运行：端侧模型在后台会被限流，失败时自动回退规则并在结果里注明
+            let recognition = try await ReceiptRecognizer.recognizeDetailed(imageData: data,
+                                                                            vocabulary: IntentRecorder.ocrVocabulary())
+            parsedList = recognition.receipts
+            OCRRunInfo.engineLine = recognition.engineLine
         } catch {
             throw LedgerIntentError.unreadableImage
         }
@@ -109,13 +114,14 @@ struct RecognizeReceiptIntent: AppIntent {
             let merchant = p.merchant ?? ""
             let resolved = IntentRecorder.resolve(kind: k, merchant: merchant, note: note ?? "",
                                                   categoryID: category?.id, categoryName: p.categoryName,
-                                                  accountID: account?.id, accountHint: p.accountHint)
+                                                  accountID: account?.id ?? IntentRecorder.accountID(named: p.accountName),
+                                                  accountHint: p.accountHint)
             var item = ReviewItem(amount: p.amount ?? 0, kind: k, categoryID: resolved.category?.id,
                                   merchant: merchant, note: note ?? "", accountID: resolved.account?.id,
                                   date: p.date ?? Date(), dateRecognized: p.date != nil)
             // 信用卡还款截图：付款账户 → 信用卡 的转账（未指定类型 / 分类、且匹配到负债账户时）
             if p.isCardRepayment, kind == nil, category == nil,
-               let card = IntentRecorder.repaymentCard(hint: p.repaymentCard),
+               let card = IntentRecorder.repaymentCard(name: p.repaymentCardName, hint: p.repaymentCard),
                let payer = IntentRecorder.repaymentPayer(accountID: account?.id, hint: p.accountHint, excluding: card.id) {
                 item.kind = .transfer
                 item.categoryID = nil
