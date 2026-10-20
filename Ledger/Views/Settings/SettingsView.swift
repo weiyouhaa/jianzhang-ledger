@@ -152,9 +152,22 @@ struct SettingsView: View {
                 } label: {
                     Label("修改密码", systemImage: "key.fill")
                 }
-                if lock.canUseBiometrics {
+                if lock.canUseBiometrics && !session.isDecoy {
                     Toggle(isOn: $biometricToggle) {
-                        Label("\(lock.biometryName)解锁", systemImage: lock.biometryIcon)
+                        Label("允许\(lock.biometryName)", systemImage: lock.biometryIcon)
+                    }
+                    if lock.biometricsEnabled {
+                        Picker(selection: $lock.unlockMethod) {
+                            Text("密码").tag(AppLockManager.UnlockMethod.passcode)
+                            Text("自动\(lock.biometryName)").tag(AppLockManager.UnlockMethod.autoBiometric)
+                        } label: {
+                            Label("解锁方式", systemImage: "lock.open.fill")
+                        }
+                        if lock.unlockMethod == .passcode {
+                            Toggle(isOn: $lock.showBiometricButton) {
+                                Label("锁屏显示\(lock.biometryName)按钮", systemImage: "hand.tap")
+                            }
+                        }
                     }
                 }
                 Picker(selection: $lock.gracePeriod) {
@@ -202,12 +215,17 @@ struct SettingsView: View {
             if session.isDecoy {
                 Text("密码以加盐哈希保存在本机钥匙串。")
             } else {
-                Text("密码以加盐哈希保存在本机钥匙串。面容 ID / 触控 ID 始终进入真实账本；只有输入防窥密码才会进入防窥账本。防窥账本使用独立数据库与独立偏好（预算、默认账户、分类记忆等），不会同步到 iCloud，也不会写入真实备份。进入防窥时会撤掉真实账本的本地通知。快捷指令记账始终写入真实账本。")
+                Text("密码以加盐哈希保存在本机钥匙串。解锁方式默认「密码」：锁屏不会自动识别面容；选「自动面容 ID」才会在打开时自动识别。面容 ID / 触控 ID 始终进入真实账本；只有输入防窥密码才会进入防窥账本。防窥账本使用独立数据库与独立偏好（预算、默认账户、分类记忆等），不会同步到 iCloud，也不会写入真实备份。进入防窥时会撤掉真实账本的本地通知。快捷指令记账始终写入真实账本。")
             }
         }
         .onAppear { decoyEnabled = DecoyPasscodeStore.isEnabled }
         .sheet(isPresented: $showDecoySetup, onDismiss: { decoyEnabled = DecoyPasscodeStore.isEnabled }) {
-            DecoyPasscodeSetupView { decoyEnabled = true }
+            DecoyPasscodeSetupView {
+                decoyEnabled = true
+                // 开防窥时回到默认：输密码解锁、锁屏不显示面容按钮（锁屏看起来始终一样）
+                lock.unlockMethod = .passcode
+                lock.showBiometricButton = false
+            }
                 .environmentObject(lock)
         }
         .fullScreenCover(isPresented: $showDecoyEditor) {

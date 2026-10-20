@@ -14,6 +14,14 @@ final class AppLockManager: ObservableObject {
     @Published var gracePeriod: Int {
         didSet { UserDefaults.standard.set(gracePeriod, forKey: Keys.grace) }
     }
+    /// 解锁方式：默认「密码」（锁屏不自动弹面容 ID）；「自动面容 ID」才在启动 / 回前台时自动识别
+    @Published var unlockMethod: UnlockMethod {
+        didSet { UserDefaults.standard.set(unlockMethod.rawValue, forKey: Keys.unlockMethod) }
+    }
+    /// 「密码」方式下，锁屏是否显示一个小的面容 ID 按钮（默认关）
+    @Published var showBiometricButton: Bool {
+        didSet { UserDefaults.standard.set(showBiometricButton, forKey: Keys.biometricButton) }
+    }
     @Published private(set) var failedAttempts: Int = 0
     @Published private(set) var lockoutUntil: Date?
 
@@ -31,9 +39,18 @@ final class AppLockManager: ObservableObject {
         }
     }
 
-    private enum Keys {
+    enum UnlockMethod: String, CaseIterable, Identifiable {
+        case passcode
+        case autoBiometric
+        var id: String { rawValue }
+    }
+
+    enum Keys {
         static let biometrics = "lock.biometricsEnabled"
         static let grace = "lock.gracePeriod"
+        /// 不存在时（含老用户升级）= 密码
+        static let unlockMethod = "lock.unlockMethod"
+        static let biometricButton = "lock.showBiometricButton"
     }
 
     init() {
@@ -50,6 +67,20 @@ final class AppLockManager: ObservableObject {
         }
         biometricsEnabled = UserDefaults.standard.bool(forKey: Keys.biometrics)
         gracePeriod = UserDefaults.standard.object(forKey: Keys.grace) as? Int ?? 0
+        unlockMethod = UnlockMethod(rawValue: UserDefaults.standard.string(forKey: Keys.unlockMethod) ?? "") ?? .passcode
+        showBiometricButton = UserDefaults.standard.bool(forKey: Keys.biometricButton)
+    }
+
+    /// 锁屏上是否显示面容 ID 按钮
+    var showsBiometricOnLockScreen: Bool {
+        guard biometricsEnabled, canUseBiometrics else { return false }
+        return unlockMethod == .autoBiometric || showBiometricButton
+    }
+
+    /// 自动识别（启动 / 回到前台）：仅「自动面容 ID」方式
+    func autoBiometricUnlockIfAllowed() {
+        guard unlockMethod == .autoBiometric else { return }
+        tryBiometricUnlock()
     }
 
     var passcodeLength: Int { PasscodeStore.length }
@@ -68,7 +99,7 @@ final class AppLockManager: ObservableObject {
             if passcodeEnabled, Date().timeIntervalSince(t) >= Double(gracePeriod) {
                 isLocked = true
             }
-            if isLocked { tryBiometricUnlock() }
+            if isLocked { autoBiometricUnlockIfAllowed() }
         default:
             break
         }

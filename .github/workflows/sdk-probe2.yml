@@ -9,10 +9,9 @@ jobs:
           xcode-version: latest-stable
       - name: Grep
         run: |
-          xcodebuild -version
           SDK=$(xcrun --sdk iphoneos --show-sdk-path)
-          F=$(find -L "$SDK/" -path "*AppIntents.framework*" -name "arm64e-apple-ios.swiftinterface" | head -1)
-          for pat in "func continueInForeground" "supportedModes" "canContinueInForeground" "struct IntentModes" "var systemContext" "currentMode" "requestToContinueInForeground" "OpensIntent" "opensIntent" "needsToContinueInForegroundError"; do
+          find -L "$SDK/System/Library/Frameworks" -path "*AppIntents*" -name "*.swiftinterface" | grep arm64e | tee /tmp/files
+          for pat in "func continueInForeground" "supportedModes" "canContinueInForeground" "struct IntentModes" "var systemContext" "currentMode" "func requestToContinueInForeground" "protocol OpensIntent" "opensIntent:" "needsToContinueInForegroundError"; do
             echo "===== $pat"
-            grep -n -B2 -A6 "$pat" "$F" | head -50
+            while read -r F; do grep -n -B3 -A4 "$pat" "$F" | head -40; done < /tmp/files
           done

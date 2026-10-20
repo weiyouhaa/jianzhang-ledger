@@ -26,7 +26,7 @@ struct LockScreenView: View {
                         length: lock.passcodeLength,
                         message: statusText(now: context.date),
                         disabled: lock.isLockedOut,
-                        biometricIcon: (lock.biometricsEnabled && lock.canUseBiometrics) ? lock.biometryIcon : nil,
+                        biometricIcon: lock.showsBiometricOnLockScreen ? lock.biometryIcon : nil,
                         onBiometric: { lock.tryBiometricUnlock() },
                         onComplete: { code in
                             let ok = lock.unlock(with: code)
@@ -38,7 +38,8 @@ struct LockScreenView: View {
                 Spacer(minLength: 20)
             }
         }
-        .onAppear { lock.tryBiometricUnlock() }
+        // 默认「密码」方式不自动弹面容 ID，避免被人举到脸前直接进入真实账本
+        .onAppear { lock.autoBiometricUnlockIfAllowed() }
     }
 
     private func statusText(now: Date) -> String? {
