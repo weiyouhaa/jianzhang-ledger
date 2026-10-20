@@ -196,6 +196,25 @@ checkRepay("微信还信用卡", ["还信用卡", "¥1,200.00", "交通银行信
            amount: 1200, cardType: "credit", cardTail: "7316", cardBank: "交通银行", payerType: "wechat", payerTail: nil)
 checkRepay("花呗还款", ["花呗还款成功", "¥860.00", "付款方式 余额宝"],
            amount: 860, cardType: "consumerCredit", cardTail: nil, cardBank: nil, payerType: "alipay", payerTail: nil)
+// 英文界面 / 云闪付（合成样例）
+checkRepay("英文 Repay:CMB Credit card", ["Repay:CMB Credit card(1024)", "-¥144.43", "Payment card CMB Debit card(6688)", "Successful"],
+           amount: 144.43, cardType: "credit", cardTail: "1024", cardBank: "招商银行", payerType: "debit", payerTail: "6688")
+checkRepay("英文 Credit Card Repayment ICBC", ["Credit Card Repayment", "ICBC Credit Card ending in 5566", "CNY 2,000.00", "Paid with CCB Savings Card **8899"],
+           amount: 2000, cardType: "credit", cardTail: "5566", cardBank: "工商银行", payerType: "debit", payerTail: "8899")
+checkRepay("英文 CMBC 不误判为 CMB", ["Repayment", "CMBC Credit Card(3344)", "¥500.00"],
+           amount: 500, cardType: "credit", cardTail: "3344", cardBank: "民生银行", payerType: nil, payerTail: nil)
+checkRepay("云闪付 还款成功", ["还款成功", "¥1,088.00", "还款卡 招商银行(1024)", "付款卡 建设银行储蓄卡(8899)"],
+           amount: 1088, cardType: "credit", cardTail: "1024", cardBank: "招商银行", payerType: "debit", payerTail: "8899")
+for (abbr, zh) in [("BOCOM", "交通银行"), ("SPDB", "浦发银行"), ("CITIC", "中信银行"), ("CEB", "光大银行"), ("CIB", "兴业银行"),
+                   ("PAB", "平安银行"), ("GDB", "广发银行"), ("CGB", "广发银行"), ("PSBC", "邮储银行"), ("HXB", "华夏银行"),
+                   ("ABC", "农业银行"), ("BOC", "中国银行")] {
+    let got = EnglishBankTerms.localize("Repay \(abbr) Credit card")
+    if got.contains(zh + "信用卡") { print("✅ 缩写 \(abbr) → \(zh)") } else { failures += 1; print("❌ 缩写 \(abbr) → \(got)") }
+}
+do {
+    let r = ReceiptParser.parse(lines: ["Payment successful", "¥38.00", "Starbucks", "CMB Credit card(1024)"], now: now, calendar: cal)
+    if r.isCardRepayment { failures += 1; print("❌ 英文信用卡消费误判为还款") } else { print("✅ 英文信用卡消费不是还款（账户线索 \(r.accountHint?.type ?? "nil") \(r.accountHint?.bankName ?? "")）") }
+}
 do {
     let r = ReceiptParser.parse(lines: ["支付成功", "¥46.00", "付款方式 交通银行信用卡(7316)", "收款方 华南畅行高速科技有限公司"], now: now, calendar: cal)
     if r.isCardRepayment { failures += 1; print("❌ 信用卡消费误判为还款") } else { print("✅ 信用卡消费不是还款") }

@@ -114,7 +114,7 @@ enum ModelMerge {
         if r.isCardRepayment {
             r.categoryName = "信用卡还款"
             r.repaymentCardName = account
-            let split = RepaymentDetector.split(text: ctx.lines.joined(separator: " "))
+            let split = RepaymentDetector.split(text: EnglishBankTerms.localize(ctx.lines.joined(separator: " ")))
             r.repaymentCard = ruleMatch?.repaymentCard ?? split.card
             r.accountHint = ruleMatch?.isCardRepayment == true ? ruleMatch?.accountHint : split.payer
         } else {
@@ -176,10 +176,27 @@ enum ModelMerge {
         return Outcome(receipts: valid, engine: .appleIntelligence, dropped: dropped, skippedTransfers: skipped, fallbackReason: nil)
     }
 
-    // MARK: 提示词
+    // MARK: 提示词（尽量短：端侧模型冷启动 + 生成都与输入长度相关）
+
+    /// 只保留可能与交易有关的行：去掉状态栏（顶部 4.5% 内）、纯时间 / 电量 / 符号行，最多 40 行
+    static func relevantLines(_ lines: [OCRLine]) -> [OCRLine] {
+        let timeOnly = try! NSRegularExpression(pattern: #"^\d{1,2}:\d{2}$"#)
+        var out: [OCRLine] = []
+        for l in lines {
+            let t = l.text.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !t.isEmpty else { continue }
+            if l.height > 0 && l.midY < 0.045 { continue }
+            let ns = t as NSString
+            if timeOnly.firstMatch(in: t, range: NSRange(location: 0, length: ns.length)) != nil && out.isEmpty { continue }
+            guard t.unicodeScalars.contains(where: { CharacterSet.letters.contains($0) || CharacterSet.decimalDigits.contains($0) }) else { continue }
+            out.append(l)
+            if out.count >= 40 { break }
+        }
+        return out
+    }
 
     /// 给模型的 OCR 文本：带行号、纵向位置和大字标记，截断到 maxChars
-    static func promptText(_ lines: [OCRLine], maxChars: Int = 1800) -> String {
+    static func promptText(_ lines: [OCRLine], maxChars: Int = 1200) -> String {
         var out: [String] = []
         var total = 0
         for (i, l) in lines.enumerated() {
@@ -198,21 +215,25 @@ enum ModelMerge {
         return out.joined(separator: "\n")
     }
 
+    static let compactInstructionsHeader = """
+    The person's locale is zh_CN.
+    你是记账助手：从支付截图的 OCR 文字中提取交易，只输出结构化结果。
+    """
+
     static func instructions(categories: [String], incomeCategories: [String], accounts: [String]) -> String {
-        let expense = categories.filter { !incomeCategories.contains($0) }
-        return """
-        The person's locale is zh_CN.
-        你是记账助手，从手机支付截图的 OCR 文字中提取交易，只输出结构化结果。
+        let expense = Array(categories.filter { !incomeCategories.contains($0) }.prefix(30))
+        let income = Array(incomeCategories.prefix(15))
+        let accts = Array(accounts.prefix(20))
+        return compactInstructionsHeader + """
+
         规则：
-        1. 只提取真实发生的交易。金额必须是 OCR 文字里原样出现的数字，绝不编造或计算金额。
-        2. 忽略：余额、可用额度、优惠/立减说明里的金额、广告、积分、状态栏时间（如 9:41）、电量、订单号、手机号、卡号。
-        3. 微信/支付宝语义：「对方已收款」「支付成功」「付款」「消费」= expense；「收款」「已收款」「到账」「收入」「工资」「红包收到」= income；「退款」= income 且 isRefund=true；「信用卡还款」「还信用卡」「花呗还款」= cardRepayment；余额宝/零钱通转入转出、充值、提现、自己账户之间互转 = transfer；「转账给某人」= expense。
-        4. 银行短信：「支出/消费/扣款」= expense，「存入/收入/工资」= income，「余额」后面的数字不是交易金额。
-        5. 一张截图可能有多笔（账单列表、多条通知），按从上到下分别输出；同一笔不要重复。
-        6. merchant：收款方/商户/付款方名称（不含金额）；note：简短说明，可为空。
-        7. categoryName 只能从这些支出分类中选：\(expense.joined(separator: "、"))；收入只能选：\(incomeCategories.joined(separator: "、"))。
-        8. accountHint 是付款（或收款）账户，只能从这些账户名中选：\(accounts.isEmpty ? "（无）" : accounts.joined(separator: "、"))；看不出来填「未知」。信用卡还款时填被还款的那张卡。
-        9. dateText 原样抄写截图上的日期时间文字（如「昨天 下午3:25」「10月17日 20:12」），没有就留空。
+        1. 金额必须是原文里出现的数字，不得编造或计算；忽略余额、可用额度、优惠说明、积分、广告、状态栏时间、订单号、卡号。
+        2. 对方已收款/支付成功/付款/消费 = expense；收款/到账/收入 = income；退款 = income 且 isRefund=true；信用卡还款/还信用卡/花呗还款/Repay/Repayment = cardRepayment；余额宝/零钱通转入转出、充值、提现、自己账户互转 = transfer；转账给他人 = expense。
+        3. 银行短信：支出/消费/扣款 = expense，存入/收入 = income。
+        4. 多笔按从上到下分别输出，不要重复。
+        5. categoryName 只能选：支出 \(expense.joined(separator: "、"))；收入 \(income.joined(separator: "、"))。
+        6. accountHint 只能选：\(accts.isEmpty ? "（无）" : accts.joined(separator: "、"))，或「未知」；信用卡还款时填被还款的卡。
+        7. dateText 原样抄写日期时间文字，没有留空。
         """
     }
 }

@@ -67,6 +67,11 @@ jobs:
           swiftc Ledger/OCR/ReceiptParser.swift Ledger/OCR/ModelMerge.swift Tools/ModelMergeCheck/main.swift -o "$RUNNER_TEMP/modelmerge"
           "$RUNNER_TEMP/modelmerge"
 
+      - name: Hard timeout tests (no double resume, returns at deadline even if work ignores cancel)
+        run: |
+          swiftc Ledger/OCR/HardTimeout.swift Tools/HardTimeoutCheck/main.swift -o "$RUNNER_TEMP/hardtimeout"
+          "$RUNNER_TEMP/hardtimeout"
+
       - name: Balance math tests (credit card repayment, edit/delete reversal, stats rules)
         run: |
           swiftc Ledger/Models/RecordKind.swift Tools/BalanceCheck/main.swift -o "$RUNNER_TEMP/balancecheck"

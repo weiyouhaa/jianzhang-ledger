@@ -242,7 +242,11 @@ struct RecordEditorView: View {
                     Button("完成") { amountFocused = false }
                 }
             }
-            .onAppear(perform: load)
+            .onAppear {
+                load()
+                // 预加载端侧模型，选图识别时少等冷启动
+                AppleIntelligenceExtractor.prewarm()
+            }
             .onChange(of: kind) { _, newKind in
                 if newKind != .expense { repayMode = false }
                 if newKind.countsInStats && !categories.contains(where: { $0.id == selectedCategoryID }) {

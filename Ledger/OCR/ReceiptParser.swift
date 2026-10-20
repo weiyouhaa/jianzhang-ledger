@@ -71,6 +71,7 @@ enum AccountHintParser {
     private static let tailPatterns: [NSRegularExpression] = [
         #"(?:尾号|末四位|末4位|账户|账号)\s*[*＊]*\s*(\d{4})(?!\d)"#,
         #"\(\s*[*＊]*\s*(\d{4})\s*\)"#,
+        #"[*＊]{2,}\s*(\d{4})(?!\d)"#,
     ].map { try! NSRegularExpression(pattern: $0) }
 
     static func parse(text: String) -> AccountHint? {
@@ -80,7 +81,7 @@ enum AccountHintParser {
         if let m = bankPattern.firstMatch(in: text, range: range) {
             var bank = ns.substring(with: m.range(at: 1))
             // 「使用交通银行」「您的招商银行」→ 去掉前面的动词 / 代词
-            let prefixes = ["使用", "通过", "您的", "你的", "我的", "绑定", "来自", "用", "您", "在", "向", "从"]
+            let prefixes = ["使用", "通过", "您的", "你的", "我的", "绑定", "来自", "还款", "用", "您", "在", "向", "从"]
             var changed = true
             while changed {
                 changed = false
@@ -119,6 +120,48 @@ enum AccountHintParser {
     }
 }
 
+/// 英文界面（云闪付 / 银行 App 英文版）的银行缩写与卡种 → 中文，仅用于还款识别与账户线索（不改商户名）
+enum EnglishBankTerms {
+    static let banks: [(String, String)] = [
+        ("BOCOM", "交通银行"), ("CMBC", "民生银行"), ("CITIC", "中信银行"), ("PINGAN", "平安银行"), ("PSBC", "邮储银行"),
+        ("SPDB", "浦发银行"), ("ICBC", "工商银行"), ("CMB", "招商银行"), ("CCB", "建设银行"), ("ABC", "农业银行"),
+        ("BOC", "中国银行"), ("BCM", "交通银行"), ("CIB", "兴业银行"), ("CEB", "光大银行"), ("PAB", "平安银行"),
+        ("GDB", "广发银行"), ("CGB", "广发银行"), ("HXB", "华夏银行"),
+    ]
+    private static let bankRegex: NSRegularExpression = {
+        let alt = banks.map(\.0).joined(separator: "|")   // 长的在前：CMBC 先于 CMB
+        return try! NSRegularExpression(pattern: "(?<![A-Za-z])(\(alt))(?![A-Za-z])")
+    }()
+    private static let phrases: [(String, String)] = [
+        (#"(?i)credit\s*card\s*repayments?"#, "信用卡还款"),
+        (#"(?i)(?<![A-Za-z])repay(?:ment)?s?(?![A-Za-z])"#, "还款"),
+        (#"(?i)credit\s*cards?"#, "信用卡"),
+        (#"(?i)debit\s*cards?|savings?\s*(?:cards?|account)"#, "储蓄卡"),
+        (#"(?i)(?<![A-Za-z])ending\s*(?:in|with)?\s*(?=\d{4})"#, "尾号"),
+        (#"(?i)(?<![A-Za-z])successful(?:ly)?(?![A-Za-z])|(?<![A-Za-z])success(?![A-Za-z])"#, "成功"),
+    ].map { ($0.0, $0.1) }
+
+    static func localize(_ text: String) -> String {
+        guard text.range(of: "[A-Za-z]", options: .regularExpression) != nil else { return text }
+        var out = text
+        for (pattern, zh) in phrases {
+            out = out.replacingOccurrences(of: pattern, with: zh, options: .regularExpression)
+        }
+        let ns = out as NSString
+        var result = ""
+        var last = 0
+        for m in bankRegex.matches(in: out, range: NSRange(location: 0, length: ns.length)) {
+            result += ns.substring(with: NSRange(location: last, length: m.range.location - last))
+            let abbr = ns.substring(with: m.range(at: 1))
+            result += banks.first(where: { $0.0 == abbr })?.1 ?? abbr
+            last = m.range.location + m.range.length
+        }
+        result += ns.substring(from: last)
+        // 「招商银行 信用卡」→「招商银行信用卡」：去掉中文之间由英文空格留下的空白
+        return result.replacingOccurrences(of: #"(?<=\p{Han})\s+(?=\p{Han})"#, with: "", options: .regularExpression)
+    }
+}
+
 /// 信用卡还款识别：「信用卡还款」「还信用卡」「还款到 xx 信用卡」「花呗 / 白条还款」
 enum RepaymentDetector {
     static func isCardRepayment(text: String) -> Bool {
@@ -126,7 +169,23 @@ enum RepaymentDetector {
         if t.contains("退款") { return false }
         if t.contains("信用卡还款") || t.contains("还信用卡") || t.contains("信用卡已还") { return true }
         guard t.contains("还款") else { return false }
-        return t.contains("信用卡") || t.contains("花呗") || t.contains("白条") || t.contains("还款到")
+        if t.contains("信用卡") || t.contains("花呗") || t.contains("白条") || t.contains("还款到") || t.contains("还款至") { return true }
+        // 云闪付等：「还款成功 / 还款金额 / 还款卡」+ 银行名
+        return ["还款成功", "还款金额", "还款卡", "本期还款", "还款账户"].contains(where: { t.contains($0) }) && t.contains("银行")
+    }
+
+    /// 「还款卡 / 还款到 / 还款至 招商银行(1024)」：标签后的银行卡就是被还款的卡
+    private static let labelledCard = try! NSRegularExpression(
+        pattern: #"(?:还款卡|还款到|还款至|还款信用卡|还款账户)\s*[:：]?\s*([\p{Han}]{2,8}?银行)\s*(信用卡)?\s*(?:尾号)?\s*[（(]?\s*[*＊]*\s*(\d{4})?\s*[)）]?"#)
+    /// 付款方式标签
+    private static let payerLabel = try! NSRegularExpression(pattern: #"(?:付款卡|付款方式|付款账户|扣款卡|扣款账户|支付方式)\s*[:：]?\s*(.{2,30})"#)
+
+    private static func payerHint(in text: String) -> AccountHint? {
+        let ns = text as NSString
+        guard let m = payerLabel.firstMatch(in: text, range: NSRange(location: 0, length: ns.length)) else { return nil }
+        let hint = AccountHintParser.parse(text: ns.substring(with: m.range(at: 1)))
+        if let h = hint, h.type == "credit" || h.type == "consumerCredit" { return nil }
+        return hint
     }
 
     private static let cardPattern = try! NSRegularExpression(
@@ -137,6 +196,15 @@ enum RepaymentDetector {
         let cleaned = text.replacingOccurrences(of: "信用卡还款", with: " ")
             .replacingOccurrences(of: "还信用卡", with: " ")
         let ns = cleaned as NSString
+        if let m = labelledCard.firstMatch(in: cleaned, range: NSRange(location: 0, length: ns.length)) {
+            var card = AccountHint(type: "credit")
+            card.bankName = ns.substring(with: m.range(at: 1))
+            if m.range(at: 3).location != NSNotFound { card.cardTail = ns.substring(with: m.range(at: 3)) }
+            let rest = ns.replacingCharacters(in: m.range, with: " ")
+            var payer = payerHint(in: rest) ?? AccountHintParser.parse(text: rest)
+            if let p = payer, p.type == "credit" || p.type == "consumerCredit" { payer = nil }
+            return (card, payer)
+        }
         let matches = cardPattern.matches(in: cleaned, range: NSRange(location: 0, length: ns.length))
         guard let m = matches.first(where: { $0.range(at: 3).location != NSNotFound }) ?? matches.first else {
             return (AccountHint(type: "credit"), AccountHintParser.parse(text: cleaned))
@@ -146,14 +214,14 @@ enum RepaymentDetector {
         card.type = kindWord == "信用卡" ? "credit" : "consumerCredit"
         if m.range(at: 1).location != NSNotFound {
             var bank = ns.substring(with: m.range(at: 1))
-            for p in ["还款到", "还款至", "到", "至", "向"] where bank.hasPrefix(p) && bank.count - p.count >= 4 {
+            for p in ["信用卡还款", "还款到", "还款至", "还款", "到", "至", "向"] where bank.hasPrefix(p) && bank.count - p.count >= 4 {
                 bank = String(bank.dropFirst(p.count))
             }
             card.bankName = bank
         }
         if m.range(at: 3).location != NSNotFound { card.cardTail = ns.substring(with: m.range(at: 3)) }
         let rest = ns.replacingCharacters(in: m.range, with: " ")
-        var payer = AccountHintParser.parse(text: rest)
+        var payer = payerHint(in: rest) ?? AccountHintParser.parse(text: rest)
         if let p = payer, p.type == "credit" || p.type == "consumerCredit" { payer = nil }
         return (card, payer)
     }
@@ -236,14 +304,16 @@ enum ReceiptParser {
         result.isIncome = IncomeDetector.isIncome(text: fullText, sign: best?.sign ?? "")
 
         result.merchant = merchant(lines: lines, amountLineIndex: best?.lineIndex)
-        result.accountHint = AccountHintParser.parse(text: fullText)
+        // 英文界面（Repay:CMB Credit card 等）先转成中文再找账户线索 / 还款
+        let hintText = EnglishBankTerms.localize(fullText)
+        result.accountHint = AccountHintParser.parse(text: hintText)
         result.date = date(lines: lines, now: now, calendar: calendar)
 
-        if RepaymentDetector.isCardRepayment(text: fullText) {
+        if RepaymentDetector.isCardRepayment(text: hintText) {
             result.isCardRepayment = true
             result.isIncome = false
             result.categoryName = "信用卡还款"
-            let split = RepaymentDetector.split(text: fullText)
+            let split = RepaymentDetector.split(text: hintText)
             result.repaymentCard = split.card
             result.accountHint = split.payer
             return result

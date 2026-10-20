@@ -85,7 +85,8 @@ struct RecognizeReceiptIntent: AppIntent {
         do {
             // 快捷指令可能在后台运行：端侧模型在后台会被限流，失败时自动回退规则并在结果里注明
             let recognition = try await ReceiptRecognizer.recognizeDetailed(imageData: data,
-                                                                            vocabulary: IntentRecorder.ocrVocabulary())
+                                                                            vocabulary: IntentRecorder.ocrVocabulary(),
+                                                                            context: .shortcut)
             parsedList = recognition.receipts
             OCRRunInfo.engineLine = recognition.engineLine
         } catch {

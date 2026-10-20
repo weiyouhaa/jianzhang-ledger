@@ -12,6 +12,15 @@ enum OCREngineSetting {
     static var preferAppleIntelligence: Bool {
         (UserDefaults.standard.string(forKey: key) ?? auto) != rulesOnly
     }
+
+    /// 「快捷指令中使用 Apple 智能」：默认关闭。快捷指令（背面轻点等）通常在其他 App 前台时于后台运行，
+    /// 系统会限制后台调用端侧模型、并对后台运行时长有限制；关闭时快捷指令只用规则，App 内识图仍用 Apple 智能。
+    static let shortcutsKey = "ocr.engine.shortcuts"
+    static var useInShortcuts: Bool { UserDefaults.standard.bool(forKey: shortcutsKey) }
+
+    /// App 内 / 快捷指令的超时
+    static let inAppTimeout: Double = 15
+    static let shortcutTimeout: Double = 12
 }
 
 /// Apple 智能（端侧基础模型）的可用状态
@@ -106,36 +115,69 @@ struct AIReceiptExtraction {
 #endif
 
 /// 用端侧模型从 OCR 文字中抽取交易。任何失败（不可用、语言、限流、超时、解码错误）都返回 failure，由调用方回退规则解析。
+/// 超时是硬上限：到时立即返回并取消模型任务，不等待它结束（快捷指令在后台有运行时长限制，等待会被系统终止）。
 enum AppleIntelligenceExtractor {
     struct Failure: Error, Sendable {
         let reason: String
     }
 
+    private static let stateLock = NSLock()
+    nonisolated(unsafe) private static var inFlight = false
+    nonisolated(unsafe) private static var inFlightSince = Date.distantPast
+    nonisolated(unsafe) private static var lastPrewarm: Date?
+    nonisolated(unsafe) private static var warmSession: AnyObject?
+
+    private static func begin() -> Bool {
+        stateLock.lock(); defer { stateLock.unlock() }
+        // 超时后模型任务仍未结束：60 秒内不叠加新请求；超过 60 秒视为卡死，允许重新请求
+        if inFlight && Date().timeIntervalSince(inFlightSince) < 60 { return false }
+        inFlight = true
+        inFlightSince = Date()
+        return true
+    }
+
+    private static func end() {
+        stateLock.lock(); inFlight = false; stateLock.unlock()
+    }
+
+    /// 预加载模型（App 回到前台 / 打开记一笔时调用），减少首次识别的冷启动时间
+    static func prewarm() {
+        #if canImport(FoundationModels)
+        if #available(iOS 26.0, *) {
+            guard OCREngineSetting.preferAppleIntelligence, AppleIntelligenceStatus.current.isAvailable else { return }
+            stateLock.lock()
+            let recent = lastPrewarm.map { Date().timeIntervalSince($0) < 120 } ?? false
+            if !recent { lastPrewarm = Date() }
+            stateLock.unlock()
+            guard !recent else { return }
+            let session = LanguageModelSession(instructions: ModelMerge.compactInstructionsHeader)
+            session.prewarm()
+            // 持有一会儿，避免会话立即释放导致预加载被放弃
+            stateLock.lock(); warmSession = session; stateLock.unlock()
+        }
+        #endif
+    }
+
     static func extract(lines: [OCRLine], vocabulary: OCRVocabulary, timeout: Double) async -> Result<[ModelTransaction], Failure> {
         #if canImport(FoundationModels)
         if #available(iOS 26.0, *) {
-            let prompt = "以下是一张截图的 OCR 文字（每行：行号、纵向位置 y（0 顶部，1 底部）、大字标记 | 文字）。请提取其中的交易。\n\n"
-                + ModelMerge.promptText(lines)
+            // 上一次（超时后）仍在后台运行：不再叠加请求，直接用规则
+            guard begin() else { return .failure(Failure(reason: "上一次识别仍在进行")) }
+            let prompt = "OCR 文字（行号 y=纵向位置 大字 | 文字）：\n" + ModelMerge.promptText(ModelMerge.relevantLines(lines))
             let instructions = ModelMerge.instructions(
                 categories: vocabulary.expenseCategories + vocabulary.incomeCategories,
                 incomeCategories: vocabulary.incomeCategories, accounts: vocabulary.accounts)
-            do {
-                let txns = try await withThrowingTaskGroup(of: [ModelTransaction].self) { group -> [ModelTransaction] in
-                    group.addTask { try await run(prompt: prompt, instructions: instructions) }
-                    group.addTask {
-                        try await Task.sleep(nanoseconds: UInt64(max(1, timeout) * 1_000_000_000))
-                        throw Failure(reason: "超时（\(Int(timeout)) 秒）")
-                    }
-                    defer { group.cancelAll() }
-                    guard let first = try await group.next() else { throw Failure(reason: "无结果") }
-                    return first
+            let seconds = max(1, timeout)
+            return await HardTimeout.run(seconds: seconds, onTimeout: { () -> Result<[ModelTransaction], Failure> in
+                .failure(Failure(reason: "超时（\(Int(seconds)) 秒）"))
+            }, operation: { () async -> Result<[ModelTransaction], Failure> in
+                defer { end() }
+                do {
+                    return .success(try await run(prompt: prompt, instructions: instructions))
+                } catch {
+                    return .failure(Failure(reason: describe(error)))
                 }
-                return .success(txns)
-            } catch let f as Failure {
-                return .failure(f)
-            } catch {
-                return .failure(Failure(reason: describe(error)))
-            }
+            })
         }
         #endif
         return .failure(Failure(reason: "需要 iOS 26"))
@@ -144,10 +186,11 @@ enum AppleIntelligenceExtractor {
     #if canImport(FoundationModels)
     @available(iOS 26.0, *)
     private static func run(prompt: String, instructions: String) async throws -> [ModelTransaction] {
+        try Task.checkCancellation()
         let session = LanguageModelSession(instructions: instructions)
         let response = try await session.respond(to: prompt, generating: AIReceiptExtraction.self,
-                                                 options: GenerationOptions(sampling: .greedy))
-        return response.content.transactions.map {
+                                                 options: GenerationOptions(sampling: .greedy, maximumResponseTokens: 600))
+        return response.content.transactions.prefix(12).map {
             ModelTransaction(amount: $0.amount, kind: $0.kind, merchant: $0.merchant, note: $0.note,
                              categoryName: $0.categoryName, accountHint: $0.accountHint,
                              dateText: $0.dateText, isRefund: $0.isRefund)
@@ -162,11 +205,11 @@ enum AppleIntelligenceExtractor {
             case .unsupportedLanguageOrLocale: return "不支持当前语言"
             case .decodingFailure: return "结果解析失败"
             case .concurrentRequests: return "正忙"
-            default: return "出错"
+            default: return "出错：" + String(String(describing: e).prefix(80))
             }
         }
         if error is CancellationError { return "已取消" }
-        return "出错"
+        return "出错：" + String(String(describing: error).prefix(80))
     }
     #endif
 }

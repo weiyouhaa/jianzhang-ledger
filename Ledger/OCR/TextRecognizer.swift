@@ -17,29 +17,54 @@ enum TextRecognizer {
     /// 带位置信息的行（midY：0 = 顶部，1 = 底部；height：该行最高文本块的高度），用于多笔拆分与大字金额识别
     static func recognizeOCRLines(in data: Data) async throws -> [OCRLine] {
         guard let source = CGImageSourceCreateWithData(data as CFData, nil),
-              let cgImage = CGImageSourceCreateImageAtIndex(source, 0, nil) else {
+              CGImageSourceGetCount(source) > 0 else {
             throw RecognizerError.invalidImage
         }
-        let orientation = imageOrientation(source)
-
         return try await withCheckedThrowingContinuation { continuation in
             DispatchQueue.global(qos: .userInitiated).async {
-                let request = VNRecognizeTextRequest()
-                request.recognitionLevel = .accurate
-                request.recognitionLanguages = ["zh-Hans", "en-US"]
-                request.usesLanguageCorrection = true
-                request.minimumTextHeight = 0.008
-
-                let handler = VNImageRequestHandler(cgImage: cgImage, orientation: orientation, options: [:])
-                do {
-                    try handler.perform([request])
-                    let observations = request.results ?? []
-                    continuation.resume(returning: groupIntoLines(observations))
-                } catch {
-                    continuation.resume(throwing: error)
+                // 解码 + 识别都放在 autoreleasepool 里：快捷指令在后台运行时内存上限较低，用完立即释放位图
+                let result: Result<[OCRLine], Error> = autoreleasepool {
+                    guard let (cgImage, orientation) = decode(source) else {
+                        return .failure(RecognizerError.invalidImage)
+                    }
+                    let request = VNRecognizeTextRequest()
+                    request.recognitionLevel = .accurate
+                    request.recognitionLanguages = ["zh-Hans", "en-US"]
+                    request.usesLanguageCorrection = true
+                    request.minimumTextHeight = 0.008
+                    let handler = VNImageRequestHandler(cgImage: cgImage, orientation: orientation, options: [:])
+                    do {
+                        try handler.perform([request])
+                        return .success(groupIntoLines(request.results ?? []))
+                    } catch {
+                        return .failure(error)
+                    }
                 }
+                continuation.resume(with: result)
             }
         }
+    }
+
+    /// 长边超过 maxPixel 时按比例缩小（截图 2796 px → 2400 px，文字仍清晰），并把方向烘焙进位图
+    static let maxPixel = 2400
+
+    private static func decode(_ source: CGImageSource) -> (CGImage, CGImagePropertyOrientation)? {
+        let props = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any]
+        let w = (props?[kCGImagePropertyPixelWidth] as? Int) ?? 0
+        let h = (props?[kCGImagePropertyPixelHeight] as? Int) ?? 0
+        if max(w, h) > maxPixel {
+            let options: [CFString: Any] = [
+                kCGImageSourceCreateThumbnailFromImageAlways: true,
+                kCGImageSourceCreateThumbnailWithTransform: true,
+                kCGImageSourceThumbnailMaxPixelSize: maxPixel,
+                kCGImageSourceShouldCacheImmediately: true,
+            ]
+            if let thumb = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) {
+                return (thumb, .up)
+            }
+        }
+        guard let image = CGImageSourceCreateImageAtIndex(source, 0, nil) else { return nil }
+        return (image, imageOrientation(source))
     }
 
     private struct Block {

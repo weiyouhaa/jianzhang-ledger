@@ -16,6 +16,7 @@ struct SettingsView: View {
     /// 识图「识别引擎」：设备级设置
     @AppStorage(OCREngineSetting.key, store: .standard) private var ocrEngine = OCREngineSetting.auto
     @State private var aiStatus: AppleIntelligenceStatus = .unavailable
+    @AppStorage(OCREngineSetting.shortcutsKey, store: .standard) private var aiInShortcuts = false
     @AppStorage(SettingsKey.hideInAppSwitcher, store: .standard) private var hideInAppSwitcher = true
     @AppStorage(SettingsKey.lastBackupAt, store: .standard) private var lastBackupAt: Double = 0
     @State private var showDemoBackup = false
@@ -325,6 +326,23 @@ struct SettingsView: View {
             }
             .accessibilityIdentifier("ocr-engine-picker")
             .onAppear { aiStatus = AppleIntelligenceStatus.current }
+            if ocrEngine != OCREngineSetting.rulesOnly {
+                Toggle(isOn: $aiInShortcuts) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Label("快捷指令中使用 Apple 智能", systemImage: "square.2.layers.3d")
+                        Text("默认关闭：背面轻点等快捷指令在后台运行，系统会限制模型调用和运行时长。开启后最多等 \(Int(OCREngineSetting.shortcutTimeout)) 秒，超时自动改用规则。")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .accessibilityIdentifier("toggle-ai-shortcuts")
+            }
+            NavigationLink {
+                OCRDiagnosticsView()
+            } label: {
+                Label("识别诊断", systemImage: "stethoscope")
+            }
+            .accessibilityIdentifier("settings-ocr-diagnostics")
             Button {
                 showFileImporter = true
             } label: {

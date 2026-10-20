@@ -26,6 +26,47 @@ enum OCRRunInfo {
     nonisolated(unsafe) static var engineLine: String?
 }
 
+/// 识图运行场景
+enum OCRRunContext: String, Codable, Sendable {
+    case inApp
+    case shortcut
+
+    var title: String { self == .inApp ? "App 内" : "快捷指令" }
+}
+
+/// 识别诊断（设置 › 智能记账 › 识别诊断）：只记引擎、耗时、回退原因与错误文字，不含截图文字和金额。
+/// 只存本机标准偏好，防窥模式下不记录。
+struct OCRDiagnostic: Codable, Identifiable, Equatable {
+    var id = UUID()
+    var date = Date()
+    var context: OCRRunContext
+    var engine: String
+    var aiStatus: String
+    var ocrMs: Int
+    var modelMs: Int?
+    var lineCount: Int
+    var resultCount: Int
+    var dropped: Int
+    var fallbackReason: String?
+
+    static let key = "diag.ocr.recent"
+
+    static func record(_ d: OCRDiagnostic) {
+        guard !ModeDefaults.isDecoyMode else { return }
+        var list = recent()
+        list.insert(d, at: 0)
+        if list.count > 10 { list = Array(list.prefix(10)) }
+        if let data = try? JSONEncoder().encode(list) { UserDefaults.standard.set(data, forKey: key) }
+    }
+
+    static func recent() -> [OCRDiagnostic] {
+        guard !ModeDefaults.isDecoyMode, let data = UserDefaults.standard.data(forKey: key) else { return [] }
+        return (try? JSONDecoder().decode([OCRDiagnostic].self, from: data)) ?? []
+    }
+
+    static func clear() { UserDefaults.standard.removeObject(forKey: key) }
+}
+
 /// OCR + 解析的组合入口，App 内「从截图识别」和快捷指令共用。
 /// 文字识别始终用 Vision；交易抽取在 iOS 26+ 且 Apple 智能可用时优先用端侧模型，结果经原文校验，否则回退规则解析。
 enum ReceiptRecognizer {
@@ -40,9 +81,11 @@ enum ReceiptRecognizer {
     }
 
     static func recognizeDetailed(imageData: Data, now: Date = Date(), vocabulary: OCRVocabulary? = nil,
-                                  timeout: Double = 8) async throws -> OCRRecognition {
+                                  context: OCRRunContext = .inApp) async throws -> OCRRecognition {
+        let t0 = Date()
         let lines = try await TextRecognizer.recognizeOCRLines(in: imageData)
-        return await extract(lines: lines, now: now, vocabulary: vocabulary, timeout: timeout)
+        let ocrMs = Int(Date().timeIntervalSince(t0) * 1000)
+        return await extract(lines: lines, now: now, vocabulary: vocabulary, context: context, ocrMs: ocrMs)
     }
 
     /// 规则解析结果（没有任何一笔时返回一个只带原文的结果）
@@ -51,25 +94,42 @@ enum ReceiptRecognizer {
         return all.isEmpty ? [ReceiptParser.parse(lines: lines.map(\.text), now: now)] : all
     }
 
-    static func extract(lines: [OCRLine], now: Date, vocabulary: OCRVocabulary?, timeout: Double) async -> OCRRecognition {
+    static func seconds(_ ms: Int) -> String { String(format: "%.1f 秒", Double(ms) / 1000) }
+
+    static func extract(lines: [OCRLine], now: Date, vocabulary: OCRVocabulary?, context: OCRRunContext,
+                        ocrMs: Int = 0) async -> OCRRecognition {
         let rules = ruleReceipts(lines, now: now)
-        guard OCREngineSetting.preferAppleIntelligence else {
-            return OCRRecognition(receipts: rules, engine: .rules, note: nil)
-        }
         let status = AppleIntelligenceStatus.current
+        func finish(_ r: OCRRecognition, modelMs: Int? = nil, dropped: Int = 0, reason: String? = nil) -> OCRRecognition {
+            OCRDiagnostic.record(OCRDiagnostic(context: context, engine: r.engine.title, aiStatus: status.title,
+                                               ocrMs: ocrMs, modelMs: modelMs, lineCount: lines.count,
+                                               resultCount: r.receipts.filter { ($0.amount ?? 0) > 0 }.count,
+                                               dropped: dropped, fallbackReason: reason ?? r.note))
+            return r
+        }
+        guard OCREngineSetting.preferAppleIntelligence else {
+            return finish(OCRRecognition(receipts: rules, engine: .rules, note: nil), reason: "设置为仅规则")
+        }
+        if context == .shortcut && !OCREngineSetting.useInShortcuts {
+            return finish(OCRRecognition(receipts: rules, engine: .rules, note: nil),
+                          reason: "快捷指令中未启用 Apple 智能")
+        }
         guard status.isAvailable else {
-            return OCRRecognition(receipts: rules, engine: .rules, note: "Apple 智能\(status.shortReason)")
+            return finish(OCRRecognition(receipts: rules, engine: .rules, note: "Apple 智能\(status.shortReason)"))
         }
         let prepared = ReceiptParser.prepare(lines)
         guard prepared.contains(where: { $0.text.rangeOfCharacter(from: .decimalDigits) != nil }) else {
-            return OCRRecognition(receipts: rules, engine: .rules, note: nil)
+            return finish(OCRRecognition(receipts: rules, engine: .rules, note: nil), reason: "截图中没有数字")
         }
         let vocab = vocabulary ?? OCRVocabulary(expenseCategories: [], incomeCategories: [], accounts: [])
         let ctx = ModelMerge.Context(lines: prepared.map(\.text),
                                      categories: vocab.expenseCategories + vocab.incomeCategories,
                                      incomeCategories: vocab.incomeCategories, accounts: vocab.accounts,
                                      now: now, calendar: .current)
+        let timeout = context == .shortcut ? OCREngineSetting.shortcutTimeout : OCREngineSetting.inAppTimeout
+        let t1 = Date()
         let result = await AppleIntelligenceExtractor.extract(lines: prepared, vocabulary: vocab, timeout: timeout)
+        let modelMs = Int(Date().timeIntervalSince(t1) * 1000)
         let outcome: ModelMerge.Outcome
         switch result {
         case .success(let txns):
@@ -81,6 +141,10 @@ enum ReceiptRecognizer {
         if receipts.isEmpty { receipts = rules }
         var note = outcome.fallbackReason
         if note == nil, outcome.dropped > 0 { note = "已剔除 \(outcome.dropped) 笔不在原文中的金额" }
-        return OCRRecognition(receipts: receipts, engine: outcome.engine, note: note)
+        // 引擎行带耗时，便于诊断
+        let timing: String? = "模型 " + seconds(modelMs)
+        let fullNote = [timing, note].compactMap { $0 }.joined(separator: " · ")
+        return finish(OCRRecognition(receipts: receipts, engine: outcome.engine, note: fullNote.isEmpty ? nil : fullNote),
+                      modelMs: modelMs, dropped: outcome.dropped)
     }
 }

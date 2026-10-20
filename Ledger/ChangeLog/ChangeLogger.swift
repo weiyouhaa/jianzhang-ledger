@@ -555,6 +555,7 @@ struct WatchedSetting {
         .init(key: RepaymentSetting.key, label: "信用卡还款计入支出", entity: .settings, format: WatchedSetting.bool(false)),
         .init(key: OCREngineSetting.key, label: "识别引擎", entity: .settings,
               format: { ($0 as? String) == OCREngineSetting.rulesOnly ? "仅规则" : "自动（优先 Apple 智能）" }),
+        .init(key: OCREngineSetting.shortcutsKey, label: "快捷指令中使用 Apple 智能", entity: .settings, format: WatchedSetting.bool(false)),
         .init(key: SettingsKey.hideAmounts, label: "隐藏金额", entity: .settings, format: WatchedSetting.bool(false)),
         .init(key: SettingsKey.appearance, label: "主题", entity: .settings, format: {
             switch WatchedSetting.int($0, 0) { case 1: return "浅色"; case 2: return "深色"; default: return "跟随系统" }
