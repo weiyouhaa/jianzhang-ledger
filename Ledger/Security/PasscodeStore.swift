@@ -24,7 +24,11 @@ enum PasscodeStore {
         if !ok { salt = Data(UUID().uuidString.utf8) }
         let stored = Stored(salt: salt, hash: derive(passcode, salt: salt), length: passcode.count)
         guard let data = try? JSONEncoder().encode(stored) else { return false }
-        return KeychainStore.set(data, for: account)
+        let existed = isSet
+        let saved = KeychainStore.set(data, for: account)
+        // 只记事件，不记密码 / 位数
+        if saved { ChangeLogger.log(existed ? .update : .create, .security, summary: existed ? "App 密码已修改" : "已开启密码锁") }
+        return saved
     }
 
     static func verify(_ passcode: String) -> Bool {
@@ -34,7 +38,9 @@ enum PasscodeStore {
     }
 
     static func remove() {
+        let existed = isSet
         KeychainStore.delete(account)
+        if existed { ChangeLogger.log(.delete, .security, summary: "已关闭密码锁") }
     }
 
     private static func load() -> Stored? {

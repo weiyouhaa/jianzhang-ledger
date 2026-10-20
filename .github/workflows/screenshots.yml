@@ -106,6 +106,7 @@ jobs:
           shoot decoysettings light 23-decoy-settings
           shoot decoyhome light 24-decoy-home
           shoot decoyeditorhome light 25-decoy-editor
+          shoot changelog light 26-change-log
           shoot home     dark  07-home-dark
           shoot stats    dark  08-stats-dark
           ls -l screenshots

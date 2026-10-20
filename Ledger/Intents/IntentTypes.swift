@@ -170,7 +170,7 @@ enum IntentRecorder {
         context.insert(record)
         RuleStore.rememberAccount(account, for: category)
         do {
-            try context.save()
+            try ChangeLogger.with(.shortcut) { try context.save() }
         } catch {
             throw LedgerIntentError.saveFailed
         }

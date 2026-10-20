@@ -44,11 +44,14 @@ enum BackupService {
     static func exportData(context: ModelContext, password: String?) async throws -> Data {
         let backup = makeBackup(context: context)
         let iterations = BackupCrypto.tunedIterations()
-        return try await Task.detached(priority: .userInitiated) { () throws -> Data in
+        let data = try await Task.detached(priority: .userInitiated) { () throws -> Data in
             let json = try BackupJSON.encode(backup)
             guard let password, !password.isEmpty else { return json }
             return try BackupCrypto.encrypt(json, password: password, iterations: iterations)
         }.value
+        let encrypted = !(password ?? "").isEmpty
+        ChangeLogger.log(.create, .backup, summary: "导出备份（\(encrypted ? "加密" : "明文")，\(backup.records.count) 笔记录）")
+        return data
     }
 
     // MARK: 导出
@@ -74,6 +77,10 @@ enum BackupService {
         let rules = (try? context.fetch(FetchDescriptor<CategoryRule>())) ?? []
         let recurring = (try? context.fetch(FetchDescriptor<RecurringRule>())) ?? []
         let batches = (try? context.fetch(FetchDescriptor<ImportBatch>())) ?? []
+        // 变动日志只在真实库
+        let logs = ModeDefaults.isRealContext(context)
+            ? ((try? context.fetch(FetchDescriptor<ChangeLogEntry>(sortBy: [SortDescriptor(\ChangeLogEntry.timestamp)]))) ?? [])
+            : []
         return LedgerBackup(
             createdAt: Date(),
             appVersion: Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "1.0",
@@ -121,6 +128,7 @@ enum BackupService {
                                       recordCount: $0.recordCount, expenseTotal: $0.expenseTotal, incomeTotal: $0.incomeTotal,
                                       firstDate: $0.firstDate, lastDate: $0.lastDate)
             },
+            changeLog: logs.isEmpty ? nil : logs.map(\.dto),
             settings: settings
         )
     }
@@ -148,6 +156,17 @@ enum BackupService {
 
     @MainActor
     static func restore(_ backup: LedgerBackup, mode: RestoreMode, context: ModelContext) throws -> RestoreResult {
+        let result = try ChangeLogger.with(.restore, title: "恢复备份数据") {
+            try restoreData(backup, mode: mode, context: context)
+        }
+        let when = DateText.full.string(from: backup.createdAt)
+        ChangeLogger.log(.create, .backup, summary: "恢复备份（\(mode == .replace ? "替换" : "合并")，备份于 \(when)）：\(result.summary)",
+                         source: .restore)
+        return result
+    }
+
+    @MainActor
+    private static func restoreData(_ backup: LedgerBackup, mode: RestoreMode, context: ModelContext) throws -> RestoreResult {
         var result = RestoreResult()
         let existingCategories = (try? context.fetch(FetchDescriptor<LedgerCategory>())) ?? []
         let existingRecords = (try? context.fetch(FetchDescriptor<LedgerRecord>())) ?? []
@@ -316,6 +335,16 @@ enum BackupService {
             context.insert(b)
         }
 
+        // 变动日志：替换时以备份为准；合并时补充本机没有的条目
+        if ModeDefaults.isRealContext(context) {
+            let existingLogs = (try? context.fetch(FetchDescriptor<ChangeLogEntry>())) ?? []
+            if mode == .replace { for e in existingLogs { context.delete(e) } }
+            let logIDs = Set(mode == .merge ? existingLogs.map(\.id) : [])
+            for dto in backup.changeLog ?? [] where !logIDs.contains(dto.id) {
+                context.insert(ChangeLogEntry(dto: dto))
+            }
+        }
+
         if mode == .replace {
             applySettings(backup.settings)
         }
@@ -437,6 +466,8 @@ enum AutoBackup {
     static func fingerprint(of backup: LedgerBackup, encrypted: Bool) throws -> String {
         var b = backup
         b.createdAt = Date(timeIntervalSince1970: 0)
+        // 日志不算「数据变化」：否则每次备份写的日志又会让下一次备份判定为有变化
+        b.changeLog = nil
         let digest = SHA256.hash(data: try BackupJSON.encode(b))
         return (encrypted ? "E:" : "P:") + digest.map { String(format: "%02x", $0) }.joined()
     }
@@ -509,6 +540,11 @@ enum AutoBackup {
             }
         }.value
 
+        if result.wrote && force {
+            // 只记录主动 / 定期备份；滚动模式下随数据变化自动更新的那一份不记（避免刷屏）
+            let auto = ChangeLogger.scope?.source == .system
+            ChangeLogger.log(.create, .backup, summary: "\(auto ? "自动备份" : "立即备份")：\(result.url.lastPathComponent)（\(encrypted ? "加密" : "明文")）")
+        }
         if result.wrote {
             UserDefaults.standard.set(fp, forKey: SettingsKey.autoBackupFingerprint)
             UserDefaults.standard.set(Date().timeIntervalSince1970, forKey: SettingsKey.lastBackupAt)
@@ -553,7 +589,8 @@ enum AutoBackup {
         }
         isRunning = true
         defer { isRunning = false }
-        _ = try? await backupNow(context: context, force: mode == .periodic)
+        let periodic = mode == .periodic
+        _ = try? await ChangeLogger.withAsync(.system) { try await backupNow(context: context, force: periodic) }
     }
 
     /// 切到后台时调用（仅滚动模式）：申请后台时间把文件写完

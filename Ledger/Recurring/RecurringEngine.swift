@@ -64,7 +64,9 @@ enum RecurringEngine {
             }
             if let last = occurrences.last, last > (processed ?? .distantPast) { rule.lastProcessedAt = last }
         }
-        if context.hasChanges { try? context.save() }
+        ChangeLogger.with(.recurring) {
+            if context.hasChanges { try? context.save() }
+        }
         if created > 0 { BudgetMonitor.check(in: context) }
         return created
     }
@@ -101,7 +103,7 @@ enum RecurringEngine {
         if let existing = keys[rule.key(for: occurrence)]?.first { return existing }
         guard let record = makeRecord(rule, occurrence: occurrence, in: context) else { return nil }
         context.insert(record)
-        try? context.save()
+        ChangeLogger.with(.recurring) { try? context.save() }
         BudgetMonitor.check(in: context)
         return record
     }

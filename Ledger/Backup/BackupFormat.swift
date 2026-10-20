@@ -19,6 +19,8 @@ struct LedgerBackup: Codable {
     var rules: [RuleDTO]? = nil
     var recurring: [RecurringDTO]? = nil
     var importBatches: [BatchDTO]? = nil
+    /// 变动日志（可选字段，旧版 App 读取时忽略；不计入自动备份的内容指纹）
+    var changeLog: [ChangeLogDTO]? = nil
     /// 不包含密码、面容 ID 等安全设置
     var settings: SettingsDTO
 
@@ -105,6 +107,19 @@ struct LedgerBackup: Codable {
         var incomeTotal: Double
         var firstDate: Date?
         var lastDate: Date?
+    }
+
+    struct ChangeLogDTO: Codable {
+        var id: UUID
+        var timestamp: Date
+        var source: String
+        var action: String
+        var entityType: String
+        var entityID: String
+        var summary: String
+        var diffs: String? = nil
+        var children: String? = nil
+        var childCount: Int? = nil
     }
 
     struct AccountDTO: Codable {

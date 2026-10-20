@@ -62,6 +62,7 @@ struct SettingsView: View {
                 switch screen {
                 case "rules": RulesView()
                 case "recurring": RecurringListView()
+                case "changelog": ChangeLogView()
                 default: BudgetView()
                 }
             }
@@ -75,7 +76,7 @@ struct SettingsView: View {
                     decoyEnabled = true
                     // 截图里展开防窥选项：依赖 decoyEnabled 已为 true
                     break
-                case "rules", "recurring", "budgets": if demoDestination == nil { demoDestination = ScreenshotDemo.screen }
+                case "rules", "recurring", "budgets", "changelog": if demoDestination == nil { demoDestination = ScreenshotDemo.screen }
                 case "import":
                     if importSession == nil, let session = ScreenshotDemo.importSession() { importSession = session }
                 default: break
@@ -406,6 +407,13 @@ struct SettingsView: View {
 
     private var dataSection: some View {
         Section {
+            // 仅真实模式（dataSection 在防窥会话中不显示；编辑防窥数据里也没有设置页）
+            NavigationLink {
+                ChangeLogView()
+            } label: {
+                Label("变动日志", systemImage: "clock.badge.checkmark")
+            }
+            .accessibilityIdentifier("settings-changelog")
             Button {
                 showCSVWarning = true
             } label: {
@@ -505,8 +513,10 @@ struct SettingsView: View {
 
     @MainActor
     private func deleteAll() {
-        for r in records { context.delete(r) }
-        for b in batches { context.delete(b) }
-        try? context.save()
+        ChangeLogger.with(.app, title: "删除全部记录") {
+            for r in records { context.delete(r) }
+            for b in batches { context.delete(b) }
+            try? context.save()
+        }
     }
 }

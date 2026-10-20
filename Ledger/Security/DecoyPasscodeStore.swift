@@ -34,8 +34,13 @@ enum DecoyPasscodeStore {
         }
         let stored = Stored(salt: salt, hash: derive(passcode, salt: salt), length: passcode.count)
         guard let data = try? JSONEncoder().encode(stored) else { return false }
+        let wasEnabled = isEnabled
         let ok = KeychainStore.set(data, for: account)
-        if ok { isEnabled = true }
+        if ok {
+            isEnabled = true
+            // 只在真实模式下可设置；只记开关，不记防窥密码与防窥数据
+            ChangeLogger.log(wasEnabled ? .update : .create, .security, summary: wasEnabled ? "防窥密码已修改" : "防窥模式已开启")
+        }
         return ok
     }
 
@@ -45,8 +50,10 @@ enum DecoyPasscodeStore {
     }
 
     static func remove() {
+        let wasEnabled = isEnabled
         KeychainStore.delete(account)
         isEnabled = false
+        if wasEnabled { ChangeLogger.log(.delete, .security, summary: "防窥模式已关闭") }
     }
 
     private static func load() -> Stored? {

@@ -478,7 +478,7 @@ struct RecognizeReceiptIntent: AppIntent {
                                 account: item.accountEdited ? record.accountRef : nil, in: context)
             }
         }
-        try? context.save()
+        ChangeLogger.with(.shortcut) { try? context.save() }
         if !SessionManager.shared.isDecoy {
             BudgetMonitor.check(in: context)
         }

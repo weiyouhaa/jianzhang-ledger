@@ -20,7 +20,7 @@ enum ScreenshotDemo {
         switch screen {
         case "stats", "statsbudget": return 1
         case "assets", "account", "assetssocial", "quickbalance", "decoyassets": return 2
-        case "settings", "backup", "backupencrypt", "decoysettings", "decoyeditor", "decoyeditorhome", "rules", "import", "recurring", "budgets": return 3
+        case "settings", "backup", "backupencrypt", "decoysettings", "decoyeditor", "decoyeditorhome", "rules", "import", "recurring", "budgets", "changelog": return 3
         case "decoyhome": return 0
         default: return 0
         }
@@ -217,7 +217,55 @@ enum ScreenshotDemo {
         transfer(6000, from: "住房公积金", to: "招商银行储蓄卡", date: dayDate(12, 10, 30), note: "公积金提取（租房）")
 
         seedSmart(context: context, accounts: accountByName, now: now)
+        if screen == "changelog" { seedChangeLog(context: context, now: now) }
         try? context.save()
+    }
+
+    // MARK: - 变动日志（虚构示例）
+
+    private static func seedChangeLog(context: ModelContext, now: Date) {
+        let cal = DateText.calendar
+        func at(_ daysBack: Int, _ h: Int, _ m: Int) -> Date {
+            let d = cal.date(byAdding: .day, value: -daysBack, to: now) ?? now
+            return cal.date(bySettingHour: h, minute: m, second: 0, of: d) ?? d
+        }
+        func md(_ date: Date) -> String { DateText.monthDayTime.string(from: date) }
+        let coffee = at(0, 12, 18)
+        let entries: [ChangeLogEntry] = [
+            ChangeLogEntry(timestamp: at(0, 12, 21), source: .app, action: .update, entity: .record,
+                           summary: "星巴克咖啡 -¥35.00 · \(md(coffee))",
+                           diffs: [FieldDiff(field: "金额", old: "¥32.00", new: "¥35.00"),
+                                   FieldDiff(field: "分类", old: "购物", new: "餐饮")]),
+            ChangeLogEntry(timestamp: at(0, 12, 18), source: .shortcut, action: .create, entity: .record,
+                           summary: "星巴克咖啡 -¥32.00 · \(md(coffee))",
+                           diffs: [FieldDiff(field: "金额", new: "¥32.00"), FieldDiff(field: "账户", new: "微信")]),
+            ChangeLogEntry(timestamp: at(0, 9, 2), source: .recurring, action: .batch, entity: .record,
+                           summary: "周期账单自动记账：新增 3",
+                           children: [ChildChange(action: "create", entity: "record", summary: "住房公积金缴存 +¥2,400.00"),
+                                      ChildChange(action: "create", entity: "record", summary: "医保个人账户缴存 +¥280.00"),
+                                      ChildChange(action: "create", entity: "record", summary: "视频会员 -¥25.00")],
+                           childCount: 3),
+            ChangeLogEntry(timestamp: at(0, 8, 40), source: .app, action: .update, entity: .security,
+                           summary: "解锁方式：自动面容 ID → 密码",
+                           diffs: [FieldDiff(field: "解锁方式", old: "自动面容 ID", new: "密码")]),
+            ChangeLogEntry(timestamp: at(1, 21, 15), source: .importing, action: .batch, entity: .record,
+                           summary: "导入微信支付账单「微信支付账单(示例).csv」：新增 8",
+                           children: [ChildChange(action: "create", entity: "record", summary: "滴滴出行 -¥18.60")], childCount: 8),
+            ChangeLogEntry(timestamp: at(1, 20, 3), source: .app, action: .update, entity: .account,
+                           summary: "微信（微信）",
+                           diffs: [FieldDiff(field: "初始余额", old: "¥1,000.00", new: "¥1,200.00")]),
+            ChangeLogEntry(timestamp: at(1, 19, 40), source: .app, action: .update, entity: .budget,
+                           summary: "月预算：¥4,500.00 → ¥5,000.00",
+                           diffs: [FieldDiff(field: "月预算", old: "¥4,500.00", new: "¥5,000.00")]),
+            ChangeLogEntry(timestamp: at(1, 10, 0), source: .app, action: .delete, entity: .record,
+                           summary: "奶茶 -¥16.00 · \(md(at(1, 9, 50)))",
+                           diffs: [FieldDiff(field: "金额", old: "¥16.00")]),
+            ChangeLogEntry(timestamp: at(2, 19, 25), source: .app, action: .create, entity: .rule,
+                           summary: "盒马鲜生 → 购物", diffs: [FieldDiff(field: "分类", new: "购物")]),
+            ChangeLogEntry(timestamp: at(2, 9, 0), source: .app, action: .create, entity: .backup,
+                           summary: "立即备份：简账自动备份.jzbackup（加密）"),
+        ]
+        for e in entries { context.insert(e) }
     }
 
     // MARK: - 记账规则 / 周期账单 / 分类预算

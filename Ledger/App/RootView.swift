@@ -16,6 +16,14 @@ struct RootView: View {
             if ScreenshotDemo.screen == "reviewsnippet" {
                 ReviewSnippetDemoView().zIndex(3)
             }
+            #if DEBUG
+            if ChangeLogProbe.enabled {
+                ChangeLogProbe()
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
+                    .allowsHitTesting(false)
+                    .zIndex(4)
+            }
+            #endif
 
             // 兜底：如果无法创建独立锁屏窗口，则在视图层级内显示锁屏
             if lock.isLocked && !lockWindowShown {

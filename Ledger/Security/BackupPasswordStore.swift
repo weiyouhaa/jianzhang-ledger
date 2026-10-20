@@ -25,8 +25,10 @@ enum BackupPasswordStore {
     @discardableResult
     static func save(_ password: String) -> Bool {
         guard !ScreenshotDemo.isActive else { return false }
+        let existed = load() != nil
         let ok = KeychainStore.set(Data(password.utf8), for: account)
         if ok {
+            ChangeLogger.log(existed ? .update : .create, .security, summary: existed ? "备份密码已修改" : "已保存备份密码")
             UserDefaults.standard.set(false, forKey: SettingsKey.backupNeedsPassword)
             AutoBackup.invalidateFingerprint()
         }
@@ -34,7 +36,9 @@ enum BackupPasswordStore {
     }
 
     static func remove() {
+        let existed = load() != nil
         KeychainStore.delete(account)
+        if existed { ChangeLogger.log(.delete, .security, summary: "已移除本机保存的备份密码") }
         AutoBackup.invalidateFingerprint()
     }
 }

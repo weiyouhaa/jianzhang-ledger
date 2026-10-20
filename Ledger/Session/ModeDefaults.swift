@@ -54,7 +54,7 @@ enum ModeDefaults {
     nonisolated static func isGlobal(_ key: String) -> Bool {
         if globalKeys.contains(key) { return true }
         return key.hasPrefix("lock.") || key.hasPrefix("icloud.") || key.hasPrefix("backup.")
-            || key.hasPrefix("pending.") || key.hasPrefix("migration.")
+            || key.hasPrefix("pending.") || key.hasPrefix("migration.") || key.hasPrefix("changelog.")
     }
 
     nonisolated static func store(for key: String) -> UserDefaults { isGlobal(key) ? .standard : store }

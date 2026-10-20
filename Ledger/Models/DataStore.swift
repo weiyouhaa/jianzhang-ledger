@@ -19,8 +19,9 @@ enum DataStore {
 
     /// 存储文件名保持 "Ledger" 不变（Application Support/Ledger.store），本地 / iCloud 模式共用同一个文件，切换不丢数据
     private static func makeContainer() -> (container: ModelContainer, status: SyncStatus) {
+        // 变动日志只在真实库（防窥库的 Schema 不含 ChangeLogEntry）
         let schema = Schema([LedgerRecord.self, LedgerCategory.self, LedgerAccount.self,
-                             CategoryRule.self, ImportBatch.self, RecurringRule.self])
+                             CategoryRule.self, ImportBatch.self, RecurringRule.self, ChangeLogEntry.self])
         var status: SyncStatus = .local
 
         if !ScreenshotDemo.isActive && UserDefaults.standard.bool(forKey: SettingsKey.iCloudSyncEnabled) {
@@ -35,6 +36,7 @@ enum DataStore {
                     let container = try ModelContainer(for: schema, configurations: [cloudConfig])
                     seedIfNeeded(container: container)
                     migrateAccountsIfNeeded(container: container)
+                    ChangeLogger.shared.install(container: container)
                     return (container, .cloud)
                 } catch {
                     status = .failed(error.localizedDescription)
@@ -50,6 +52,8 @@ enum DataStore {
             seedIfNeeded(container: container)
             migrateAccountsIfNeeded(container: container)
             ScreenshotDemo.seed(container: container)   // 仅截图模式下生效
+            // 在初始化 / 迁移 / 示例数据之后安装，启动时的这些写入不进日志
+            ChangeLogger.shared.install(container: container)
             return (container, status)
         } catch {
             fatalError("无法创建数据存储：\(error)")
@@ -85,7 +89,7 @@ enum DataStore {
                 keepAccounts[a.name] = a
             }
         }
-        if changed { try? context.save() }
+        if changed { ChangeLogger.with(.system, title: "iCloud 同步后合并重复的分类 / 账户") { try? context.save() } }
     }
 
     // MARK: - 账户
