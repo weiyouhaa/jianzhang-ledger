@@ -20,7 +20,7 @@ enum ScreenshotDemo {
         switch screen {
         case "stats", "statsbudget": return 1
         case "assets", "account", "assetssocial", "quickbalance", "decoyassets": return 2
-        case "settings", "backup", "backupencrypt", "decoysettings", "decoyeditor", "rules", "import", "recurring", "budgets": return 3
+        case "settings", "backup", "backupencrypt", "decoysettings", "decoyeditor", "decoyeditorhome", "rules", "import", "recurring", "budgets": return 3
         case "decoyhome": return 0
         default: return 0
         }
@@ -50,7 +50,7 @@ enum ScreenshotDemo {
         UserDefaults.standard.set(80, forKey: BudgetKey.warnPercent)
         UserDefaults.standard.set(true, forKey: RuleStore.learnKey)
         UserDefaults.standard.set("¥", forKey: SettingsKey.currencySymbol)
-        if ["decoysettings", "decoyhome", "decoyassets", "decoyeditor"].contains(screen ?? "") {
+        if ["decoysettings", "decoyhome", "decoyassets", "decoyeditor", "decoyeditorhome"].contains(screen ?? "") {
             UserDefaults.standard.set(true, forKey: "lock.decoyEnabled")
             if screen == "decoyhome" || screen == "decoyassets" { ModeDefaults.setDecoyMode(true) }
             ModeDefaults.seedDecoyDefaultsIfNeeded()

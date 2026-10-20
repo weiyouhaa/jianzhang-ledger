@@ -146,6 +146,7 @@ struct AssetsView: View {
                     } label: {
                         Image(systemName: "plus.circle.fill")
                     }
+                    .accessibilityIdentifier("assets-add-menu")
                 }
             }
             .sheet(item: $editorTarget) { target in

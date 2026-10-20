@@ -69,7 +69,7 @@ struct SettingsView: View {
                 // 截图模式：直接打开对应页面
                 switch ScreenshotDemo.screen {
                 case "backup", "backupencrypt": if !showDemoBackup { showDemoBackup = true }
-                case "decoyeditor":
+                case "decoyeditor", "decoyeditorhome":
                     if !showDecoyEditor { showDecoyEditor = true }
                 case "decoysettings":
                     decoyEnabled = true

@@ -105,6 +105,7 @@ jobs:
           shoot reviewsnippet light 22-review-snippet
           shoot decoysettings light 23-decoy-settings
           shoot decoyhome light 24-decoy-home
+          shoot decoyeditorhome light 25-decoy-editor
           shoot home     dark  07-home-dark
           shoot stats    dark  08-stats-dark
           ls -l screenshots

@@ -52,4 +52,41 @@ final class QuickBalanceSheetUITests: XCTestCase {
     func testDecoyEditorQuickBalanceStays() {
         runQuickBalance(screen: "decoyeditor", account: "微信")
     }
+
+    // MARK: - 编辑防窥数据：顶栏不能盖住子页面的导航栏按钮
+
+    private func assertBelowBar(_ app: XCUIApplication, _ element: XCUIElement, _ name: String,
+                                file: StaticString = #filePath, line: UInt = #line) {
+        XCTAssertTrue(element.waitForExistence(timeout: 15), "找不到 \(name)", file: file, line: line)
+        XCTAssertTrue(element.isHittable, "\(name) 不可点（被顶栏遮住？）", file: file, line: line)
+        let bar = app.descendants(matching: .any).matching(identifier: "decoy-editor-done").firstMatch
+        XCTAssertTrue(bar.exists, "找不到「完成」", file: file, line: line)
+        XCTAssertTrue(bar.isHittable, "「完成」不可点", file: file, line: line)
+        let barBottom = app.descendants(matching: .any).matching(identifier: "decoy-editor-bar").firstMatch
+        let limit = barBottom.exists ? barBottom.frame.maxY : bar.frame.maxY
+        XCTAssertGreaterThanOrEqual(element.frame.minY + 0.5, limit,
+                                    "\(name) 顶部 \(element.frame.minY) 在顶栏底部 \(limit) 之上", file: file, line: line)
+    }
+
+    func testDecoyEditorTopBarDoesNotCoverChildButtons() {
+        let app = launch("decoyeditorhome")
+        let search = app.descendants(matching: .any).matching(identifier: "home-search").firstMatch
+        assertBelowBar(app, search, "明细页右上角搜索")
+        search.tap()
+        XCTAssertTrue(app.navigationBars["搜索"].waitForExistence(timeout: 5)
+                      || app.staticTexts["筛选"].waitForExistence(timeout: 5), "点搜索没有进入搜索页")
+        let back = app.navigationBars["搜索"].buttons.element(boundBy: 0)
+        if back.exists { back.tap() }
+
+        app.tabBars.buttons["资产"].firstMatch.tap()
+        let add = app.descendants(matching: .any).matching(identifier: "assets-add-menu").firstMatch
+        assertBelowBar(app, add, "资产页右上角添加")
+
+        app.tabBars.buttons["说明"].firstMatch.tap()
+        let title = app.navigationBars["说明"].firstMatch
+        XCTAssertTrue(title.waitForExistence(timeout: 5), "说明页导航栏不见了")
+        XCTAssertGreaterThanOrEqual(title.frame.minY + 0.5,
+                                    app.descendants(matching: .any).matching(identifier: "decoy-editor-bar").firstMatch.frame.maxY,
+                                    "说明页导航栏被顶栏盖住")
+    }
 }

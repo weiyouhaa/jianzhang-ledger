@@ -71,32 +71,10 @@ struct DecoyDataEditorHost: View {
     @State private var tab = ScreenshotDemo.screen == "decoyeditor" ? 1 : 0
 
     var body: some View {
-        Group {
-            if let container {
-                TabView(selection: $tab) {
-                    HomeView()
-                        .tabItem { Label("明细", systemImage: "list.bullet.rectangle.portrait") }
-                        .tag(0)
-                    AssetsView()
-                        .tabItem { Label("资产", systemImage: "wallet.pass.fill") }
-                        .tag(1)
-                    NavigationStack {
-                        Form {
-                            Text("这里改的是防窥账本里的账户和流水，不影响真实数据。改完点「完成」。")
-                                .font(.subheadline)
-                                .foregroundStyle(.secondary)
-                        }
-                        .navigationTitle("编辑防窥数据")
-                    }
-                    .tabItem { Label("说明", systemImage: "info.circle") }
-                    .tag(2)
-                }
-                .modelContainer(container)
-            } else {
-                ProgressView("正在打开…")
-            }
-        }
-        .safeAreaInset(edge: .top, spacing: 0) {
+        // 顶栏与内容用 VStack 上下排布：TabView 整体位于顶栏下方，
+        // 子页面自己的导航栏（大标题、右上角按钮）不会被顶栏盖住。
+        // （TabView 外层的 safeAreaInset 在 iOS 26/27 上不会传进各 tab 的 NavigationStack。）
+        VStack(spacing: 0) {
             HStack {
                 Text("编辑防窥数据").font(.subheadline.weight(.semibold))
                 Spacer()
@@ -105,8 +83,40 @@ struct DecoyDataEditorHost: View {
                     .accessibilityIdentifier("decoy-editor-done")
             }
             .padding(.horizontal, 16)
-            .padding(.vertical, 8)
-            .background(.bar)
+            .padding(.vertical, 10)
+            .frame(maxWidth: .infinity)
+            .background(.bar, ignoresSafeAreaEdges: .top)
+            .overlay(alignment: .bottom) { Divider() }
+            .accessibilityElement(children: .contain)
+            .accessibilityIdentifier("decoy-editor-bar")
+
+            Group {
+                if let container {
+                    TabView(selection: $tab) {
+                        HomeView()
+                            .tabItem { Label("明细", systemImage: "list.bullet.rectangle.portrait") }
+                            .tag(0)
+                        AssetsView()
+                            .tabItem { Label("资产", systemImage: "wallet.pass.fill") }
+                            .tag(1)
+                        NavigationStack {
+                            Form {
+                                Text("这里改的是防窥账本里的账户和流水，不影响真实数据。改完点「完成」。")
+                                    .font(.subheadline)
+                                    .foregroundStyle(.secondary)
+                            }
+                            .navigationTitle("说明")
+                        }
+                        .tabItem { Label("说明", systemImage: "info.circle") }
+                        .tag(2)
+                    }
+                    .modelContainer(container)
+                } else {
+                    ProgressView("正在打开…")
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .onAppear {
             if container == nil {

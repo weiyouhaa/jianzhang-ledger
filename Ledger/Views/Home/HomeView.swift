@@ -121,6 +121,7 @@ struct HomeView: View {
                     } label: {
                         Image(systemName: "magnifyingglass")
                     }
+                    .accessibilityIdentifier("home-search")
                 }
                 if !isCurrentMonth {
                     ToolbarItem(placement: .topBarLeading) {
