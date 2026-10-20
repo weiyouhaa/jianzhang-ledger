@@ -3,7 +3,9 @@ import SwiftUI
 import UIKit
 
 enum Money {
-    static var symbol: String { ModeDefaults.string(forKey: SettingsKey.currencySymbol) ?? "¥" }
+    /// 「编辑防窥数据」打开期间由编辑器设置为防窥货币符号（全屏覆盖真实界面，关闭即清除）
+    nonisolated(unsafe) static var symbolOverride: String?
+    static var symbol: String { symbolOverride ?? ModeDefaults.string(forKey: SettingsKey.currencySymbol) ?? "¥" }
 
     private static let formatter: NumberFormatter = {
         let f = NumberFormatter()

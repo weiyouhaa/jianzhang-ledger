@@ -5,7 +5,10 @@ import Charts
 struct StatsView: View {
     @Query(sort: \LedgerRecord.date, order: .reverse) private var allRecords: [LedgerRecord]
     @Query(sort: \LedgerCategory.sortOrder) private var categories: [LedgerCategory]
-    @AppStorage(BudgetKey.yearly, store: ModeDefaults.store) private var yearlyBudget: Double = 0
+    @AppStorage(BudgetKey.yearly) private var yearlyBudget: Double = 0
+    @AppStorage(SettingsKey.monthlyBudget) private var budgetSetting: Double = 0
+    @AppStorage(BudgetKey.rollover) private var rolloverSetting = false
+    @Environment(\.ledgerPrefs) private var prefs
 
     @State private var period: Period = .month
     @State private var anchor: Date = Date()
@@ -76,7 +79,7 @@ struct StatsView: View {
                     overviewCard(expense: expense, income: income, count: periodRecords.count)
 
                     if period == .month {
-                        let status = BudgetService.status(records: allRecords, categories: categories, month: anchor)
+                        let status = BudgetService.status(records: allRecords, categories: categories, month: anchor, prefs: prefs)
                         if status.total != nil || !status.categories.isEmpty {
                             card { BudgetStatsCard(status: status) }
                         }

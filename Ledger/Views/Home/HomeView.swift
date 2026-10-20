@@ -3,6 +3,10 @@ import SwiftData
 
 struct HomeView: View {
     @Environment(\.modelContext) private var context
+    @Environment(\.ledgerPrefs) private var prefs
+    /// 预算变化时刷新
+    @AppStorage(SettingsKey.monthlyBudget) private var budgetSetting: Double = 0
+    @AppStorage(BudgetKey.rollover) private var rolloverSetting = false
     @Query(sort: \LedgerRecord.date, order: .reverse) private var allRecords: [LedgerRecord]
     @State private var month: Date = DateText.calendar.startOfMonth(for: Date())
     @State private var editorTarget: EditorTarget?
@@ -59,7 +63,7 @@ struct HomeView: View {
                         month: month,
                         income: income,
                         expense: expense,
-                        budget: BudgetService.effectiveMonthlyBudget(records: allRecords, month: month),
+                        budget: BudgetService.effectiveMonthlyBudget(records: allRecords, month: month, prefs: prefs),
                         canGoNext: !isCurrentMonth,
                         onPrevious: { shiftMonth(-1) },
                         onNext: { shiftMonth(1) }

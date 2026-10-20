@@ -6,7 +6,7 @@ import Charts
 struct AssetsView: View {
     @Query(sort: \LedgerAccount.sortOrder) private var accounts: [LedgerAccount]
     @Query(sort: \LedgerRecord.date) private var records: [LedgerRecord]
-    @AppStorage(SettingsKey.hideAmounts, store: ModeDefaults.store) private var hideAmounts = false
+    @AppStorage(SettingsKey.hideAmounts) private var hideAmounts = false
 
     @State private var editorTarget: AccountEditorTarget?
     @State private var showTransfer = false

@@ -12,6 +12,8 @@ struct LedgerApp: App {
             RootView()
                 .environmentObject(lock)
                 .environmentObject(session)
+                // 当前模式的偏好 store（切模式时 epoch 变化整树重建，重新注入）
+                .ledgerPrefs(ModeDefaults.store)
                 // 切换真实 / 防窥容器时整树重建，避免串库
                 .id(session.epoch)
         }

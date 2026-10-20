@@ -7,17 +7,17 @@ struct BackupSettingsView: View {
     @EnvironmentObject private var lock: AppLockManager
     @Environment(\.modelContext) private var context
 
-    @AppStorage(SettingsKey.iCloudSyncEnabled) private var syncEnabled = false
-    @AppStorage(SettingsKey.autoBackupEnabled) private var autoBackupEnabled = false
-    @AppStorage(SettingsKey.autoBackupInterval) private var autoBackupInterval = 86_400
-    @AppStorage(SettingsKey.autoBackupKeep) private var autoBackupKeep = 10
-    @AppStorage(SettingsKey.autoBackupMode) private var autoBackupMode = AutoBackupMode.rolling.rawValue
-    @AppStorage(SettingsKey.autoBackupDailySnapshot) private var dailySnapshot = true
-    @AppStorage(SettingsKey.autoBackupSnapshotKeep) private var snapshotKeep = 7
-    @AppStorage(SettingsKey.lastBackupAt) private var lastBackupAt: Double = 0
-    @AppStorage(SettingsKey.lastBackupLocation) private var lastBackupLocation = ""
-    @AppStorage(SettingsKey.backupEncryption) private var encryptionEnabled = true
-    @AppStorage(SettingsKey.backupNeedsPassword) private var needsPassword = false
+    @AppStorage(SettingsKey.iCloudSyncEnabled, store: .standard) private var syncEnabled = false
+    @AppStorage(SettingsKey.autoBackupEnabled, store: .standard) private var autoBackupEnabled = false
+    @AppStorage(SettingsKey.autoBackupInterval, store: .standard) private var autoBackupInterval = 86_400
+    @AppStorage(SettingsKey.autoBackupKeep, store: .standard) private var autoBackupKeep = 10
+    @AppStorage(SettingsKey.autoBackupMode, store: .standard) private var autoBackupMode = AutoBackupMode.rolling.rawValue
+    @AppStorage(SettingsKey.autoBackupDailySnapshot, store: .standard) private var dailySnapshot = true
+    @AppStorage(SettingsKey.autoBackupSnapshotKeep, store: .standard) private var snapshotKeep = 7
+    @AppStorage(SettingsKey.lastBackupAt, store: .standard) private var lastBackupAt: Double = 0
+    @AppStorage(SettingsKey.lastBackupLocation, store: .standard) private var lastBackupLocation = ""
+    @AppStorage(SettingsKey.backupEncryption, store: .standard) private var encryptionEnabled = true
+    @AppStorage(SettingsKey.backupNeedsPassword, store: .standard) private var needsPassword = false
 
     @State private var syncToggle = false
     @State private var didLoad = false

@@ -56,12 +56,13 @@ struct BudgetView: View {
     @Query(sort: \LedgerRecord.date, order: .reverse) private var records: [LedgerRecord]
     @Query(sort: \LedgerCategory.sortOrder) private var categories: [LedgerCategory]
 
-    @AppStorage(SettingsKey.monthlyBudget, store: ModeDefaults.store) private var monthly: Double = 0
-    @AppStorage(BudgetKey.yearly, store: ModeDefaults.store) private var yearly: Double = 0
-    @AppStorage(BudgetKey.rollover, store: ModeDefaults.store) private var rollover = false
-    @AppStorage(BudgetKey.alertsEnabled, store: ModeDefaults.store) private var alertsEnabled = false
-    @AppStorage(BudgetKey.warnPercent, store: ModeDefaults.store) private var warnPercent = 80
-    @AppStorage(BudgetKey.alertOver, store: ModeDefaults.store) private var alertOver = true
+    @AppStorage(SettingsKey.monthlyBudget) private var monthly: Double = 0
+    @AppStorage(BudgetKey.yearly) private var yearly: Double = 0
+    @AppStorage(BudgetKey.rollover) private var rollover = false
+    @AppStorage(BudgetKey.alertsEnabled) private var alertsEnabled = false
+    @AppStorage(BudgetKey.warnPercent) private var warnPercent = 80
+    @AppStorage(BudgetKey.alertOver) private var alertOver = true
+    @Environment(\.ledgerPrefs) private var prefs
 
     @State private var monthlyText = ""
     @State private var yearlyText = ""
@@ -73,7 +74,7 @@ struct BudgetView: View {
     private var expenseCategories: [LedgerCategory] { categories.filter { $0.kind == .expense } }
 
     var body: some View {
-        let status = BudgetService.status(records: records, categories: categories, month: Date())
+        let status = BudgetService.status(records: records, categories: categories, month: Date(), prefs: prefs)
         let spentByCategory = Dictionary(grouping: records.filter {
             $0.kind == .expense && DateText.calendar.isDate($0.date, equalTo: Date(), toGranularity: .month)
         }, by: { $0.category?.id }).mapValues { $0.reduce(0) { $0 + $1.amount } }

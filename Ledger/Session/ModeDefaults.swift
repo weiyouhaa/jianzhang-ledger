@@ -1,4 +1,5 @@
 import Foundation
+import SwiftData
 import SwiftUI
 
 /// 真实 / 防窥两套偏好隔离。
@@ -132,5 +133,41 @@ enum ModePref {
     }
     static func bindingString(_ key: String, default def: String = "") -> Binding<String> {
         Binding(get: { string(key, default: def) }, set: { setString($0, key) })
+    }
+}
+
+
+// MARK: - 按子树 / 按数据容器取偏好（不依赖全局模式）
+
+extension ModeDefaults {
+    /// 由数据容器决定偏好：真实库 → standard，防窥库 → 防窥 suite。
+    /// 「编辑防窥数据」在真实会话里用防窥容器，因此读到的是防窥预算等，而真实页面 / 后台检查仍用真实偏好。
+    @MainActor
+    static func prefs(for context: ModelContext) -> UserDefaults {
+        context.container === DataStore.shared ? .standard : decoy
+    }
+
+    @MainActor
+    static func isRealContext(_ context: ModelContext) -> Bool {
+        context.container === DataStore.shared
+    }
+}
+
+private struct LedgerPrefsKey: EnvironmentKey {
+    static let defaultValue: UserDefaults = .standard
+}
+
+extension EnvironmentValues {
+    /// 当前子树使用的账本偏好（预算、默认账户、隐藏金额等）。根视图注入当前模式的 store，编辑防窥数据注入防窥 suite。
+    var ledgerPrefs: UserDefaults {
+        get { self[LedgerPrefsKey.self] }
+        set { self[LedgerPrefsKey.self] = newValue }
+    }
+}
+
+extension View {
+    /// 同时设置 @AppStorage 默认 store 与 \.ledgerPrefs
+    func ledgerPrefs(_ store: UserDefaults) -> some View {
+        self.defaultAppStorage(store).environment(\.ledgerPrefs, store)
     }
 }

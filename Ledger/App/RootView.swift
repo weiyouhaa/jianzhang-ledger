@@ -5,8 +5,8 @@ struct RootView: View {
     @EnvironmentObject private var lock: AppLockManager
     @EnvironmentObject private var session: SessionManager
     @Environment(\.scenePhase) private var scenePhase
-    @AppStorage(SettingsKey.appearance) private var appearance = 0
-    @AppStorage(SettingsKey.hideInAppSwitcher) private var hideInAppSwitcher = true
+    @AppStorage(SettingsKey.appearance, store: .standard) private var appearance = 0
+    @AppStorage(SettingsKey.hideInAppSwitcher, store: .standard) private var hideInAppSwitcher = true
     @State private var lockWindowShown = false
 
     var body: some View {

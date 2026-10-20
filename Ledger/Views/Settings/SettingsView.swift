@@ -8,12 +8,12 @@ struct SettingsView: View {
     @Query(sort: \LedgerRecord.date, order: .reverse) private var records: [LedgerRecord]
     @Query(sort: \LedgerAccount.sortOrder) private var accounts: [LedgerAccount]
 
-    @AppStorage(SettingsKey.monthlyBudget, store: ModeDefaults.store) private var budget: Double = 0
-    @AppStorage(SettingsKey.currencySymbol, store: ModeDefaults.store) private var currencySymbol = "¥"
-    @AppStorage(SettingsKey.appearance) private var appearance = 0
-    @AppStorage(SettingsKey.defaultAccount, store: ModeDefaults.store) private var defaultAccount = ""
-    @AppStorage(SettingsKey.hideInAppSwitcher) private var hideInAppSwitcher = true
-    @AppStorage(SettingsKey.lastBackupAt) private var lastBackupAt: Double = 0
+    @AppStorage(SettingsKey.monthlyBudget) private var budget: Double = 0
+    @AppStorage(SettingsKey.currencySymbol) private var currencySymbol = "¥"
+    @AppStorage(SettingsKey.appearance, store: .standard) private var appearance = 0
+    @AppStorage(SettingsKey.defaultAccount) private var defaultAccount = ""
+    @AppStorage(SettingsKey.hideInAppSwitcher, store: .standard) private var hideInAppSwitcher = true
+    @AppStorage(SettingsKey.lastBackupAt, store: .standard) private var lastBackupAt: Double = 0
     @State private var showDemoBackup = false
     @State private var demoDestination: String?
     @State private var showFileImporter = false
@@ -35,7 +35,7 @@ struct SettingsView: View {
     @State private var showDeleteAll = false
     @State private var showCSVWarning = false
     @State private var csvShare: ShareItem?
-    @AppStorage(SettingsKey.backupNeedsPassword) private var backupNeedsPassword = false
+    @AppStorage(SettingsKey.backupNeedsPassword, store: .standard) private var backupNeedsPassword = false
     @State private var biometricError: String?
 
     var body: some View {

@@ -44,7 +44,8 @@ enum RuleStore {
     @discardableResult
     static func learn(merchant: String, kind: RecordKind, category: LedgerCategory?, account: LedgerAccount?,
                       in context: ModelContext, force: Bool = false) -> CategoryRule? {
-        guard force || learnEnabled, kind.countsInStats, let category else { return nil }
+        let enabled = ModeDefaults.prefs(for: context).object(forKey: learnKey) as? Bool ?? true
+        guard force || enabled, kind.countsInStats, let category else { return nil }
         let display = merchant.trimmingCharacters(in: .whitespacesAndNewlines)
         let key = MerchantNormalizer.normalize(display)
         guard key.count >= 2 else { return nil }
@@ -83,7 +84,7 @@ enum RuleStore {
     }
 
     static func defaultAccount(in context: ModelContext) -> LedgerAccount? {
-        let name = ModeDefaults.string(forKey: SettingsKey.defaultAccount) ?? ""
+        let name = ModeDefaults.prefs(for: context).string(forKey: SettingsKey.defaultAccount) ?? ""
         return DataStore.account(named: name, in: context)
     }
 }

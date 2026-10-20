@@ -8,7 +8,7 @@ struct AccountDetailView: View {
 
     @Environment(\.modelContext) private var context
     @Query(sort: \LedgerRecord.date, order: .reverse) private var records: [LedgerRecord]
-    @AppStorage(SettingsKey.hideAmounts, store: ModeDefaults.store) private var hideAmounts = false
+    @AppStorage(SettingsKey.hideAmounts) private var hideAmounts = false
 
     @State private var showEditor = false
     @State private var showAdjust = false

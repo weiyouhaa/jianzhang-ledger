@@ -104,7 +104,7 @@ struct BackupExportSheet: View {
     @EnvironmentObject private var lock: AppLockManager
     @Environment(\.modelContext) private var context
     @Environment(\.dismiss) private var dismiss
-    @AppStorage(SettingsKey.backupEncryption) private var encryptionSetting = true
+    @AppStorage(SettingsKey.backupEncryption, store: .standard) private var encryptionSetting = true
 
     @State private var encrypt = true
     @State private var useSaved = false

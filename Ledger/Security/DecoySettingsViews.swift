@@ -111,6 +111,8 @@ struct DecoyDataEditorHost: View {
                         .tag(2)
                     }
                     .modelContainer(container)
+                    // 嵌入的明细 / 资产页读防窥偏好（预算 ¥3,000、默认账户、隐藏金额…），真实页面不受影响
+                    .ledgerPrefs(ModeDefaults.decoy)
                 } else {
                     ProgressView("正在打开…")
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -118,7 +120,9 @@ struct DecoyDataEditorHost: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
+        .onDisappear { Money.symbolOverride = nil }
         .onAppear {
+            Money.symbolOverride = ModeDefaults.decoy.string(forKey: SettingsKey.currencySymbol) ?? "¥"
             if container == nil {
                 container = SessionManager.shared.decoyContainerForEditing()
             }

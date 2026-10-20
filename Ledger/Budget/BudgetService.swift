@@ -39,9 +39,9 @@ struct BudgetStatus {
 enum BudgetService {
     static var calendar: Calendar { DateText.calendar }
 
-    static var monthlyBase: Double { max(0, ModeDefaults.double(forKey: SettingsKey.monthlyBudget)) }
-    static var yearlyBudget: Double { max(0, ModeDefaults.double(forKey: BudgetKey.yearly)) }
-    static var rolloverEnabled: Bool { ModeDefaults.bool(forKey: BudgetKey.rollover) }
+    static func monthlyBase(_ prefs: UserDefaults) -> Double { max(0, prefs.double(forKey: SettingsKey.monthlyBudget)) }
+    static func yearlyBudget(_ prefs: UserDefaults) -> Double { max(0, prefs.double(forKey: BudgetKey.yearly)) }
+    static func rolloverEnabled(_ prefs: UserDefaults) -> Bool { prefs.bool(forKey: BudgetKey.rollover) }
 
     static func monthRange(_ month: Date) -> (Date, Date) {
         let start = calendar.startOfMonth(for: month)
@@ -57,8 +57,8 @@ enum BudgetService {
     }
 
     /// 上月结余（可为负）结转到本月，只结转一个月，不滚雪球
-    static func carry(base: Double, records: [LedgerRecord], month: Date, categoryID: UUID? = nil) -> Double {
-        guard rolloverEnabled, base > 0 else { return 0 }
+    static func carry(base: Double, records: [LedgerRecord], month: Date, categoryID: UUID? = nil, prefs: UserDefaults) -> Double {
+        guard rolloverEnabled(prefs), base > 0 else { return 0 }
         let (start, _) = monthRange(month)
         guard let prevStart = calendar.date(byAdding: .month, value: -1, to: start) else { return 0 }
         // 上个月没有任何记录（比如刚开始记账）时不结转
@@ -68,18 +68,19 @@ enum BudgetService {
     }
 
     /// 本月总预算（含结转），用于首页与统计
-    static func effectiveMonthlyBudget(records: [LedgerRecord], month: Date) -> Double {
-        let base = monthlyBase
+    /// prefs：调用方所在子树的偏好（视图用 @Environment(\.ledgerPrefs)，后台用 ModeDefaults.prefs(for:)）
+    static func effectiveMonthlyBudget(records: [LedgerRecord], month: Date, prefs: UserDefaults) -> Double {
+        let base = monthlyBase(prefs)
         guard base > 0 else { return 0 }
-        return max(0, base + carry(base: base, records: records, month: month))
+        return max(0, base + carry(base: base, records: records, month: month, prefs: prefs))
     }
 
-    static func status(records: [LedgerRecord], categories: [LedgerCategory], month: Date) -> BudgetStatus {
+    static func status(records: [LedgerRecord], categories: [LedgerCategory], month: Date, prefs: UserDefaults) -> BudgetStatus {
         let (start, end) = monthRange(month)
         var result = BudgetStatus(total: nil, categories: [], yearly: nil, month: start)
-        let base = monthlyBase
+        let base = monthlyBase(prefs)
         if base > 0 {
-            let c = carry(base: base, records: records, month: start)
+            let c = carry(base: base, records: records, month: start, prefs: prefs)
             result.total = BudgetLine(id: "total", name: "本月总预算", icon: "chart.pie.fill", colorHex: "#007AFF",
                                       budget: max(0, base + c), base: base, carry: c,
                                       spent: spent(records, from: start, to: end))
@@ -91,7 +92,7 @@ enum BudgetService {
                                                 spent: spent(records, from: start, to: end, categoryID: cat.id)))
         }
         result.categories.sort { $0.ratio > $1.ratio }
-        let yearly = yearlyBudget
+        let yearly = yearlyBudget(prefs)
         if yearly > 0, let yStart = calendar.date(from: calendar.dateComponents([.year], from: start)),
            let yEnd = calendar.date(byAdding: .year, value: 1, to: yStart) {
             result.yearly = BudgetLine(id: "yearly", name: "\(calendar.component(.year, from: start)) 年度预算", icon: "calendar",
@@ -109,26 +110,30 @@ enum BudgetService {
         let from = min(yStart, calendar.date(byAdding: .month, value: -1, to: start) ?? start)
         let records = DataStore.records(from: from, to: max(end, calendar.date(byAdding: .year, value: 1, to: yStart) ?? end), in: context)
         let categories = (try? context.fetch(FetchDescriptor<LedgerCategory>())) ?? []
-        return status(records: records, categories: categories, month: now)
+        return status(records: records, categories: categories, month: now, prefs: ModeDefaults.prefs(for: context))
     }
 }
 
 /// 预算提醒：保存记录 / 导入 / 快捷指令 / 周期记账后检查，达到阈值时发本地通知（每期每档只提醒一次）
 @MainActor
 enum BudgetMonitor {
-    static var alertsEnabled: Bool { ModeDefaults.bool(forKey: BudgetKey.alertsEnabled) }
+    /// 只有真实库会发预算通知，因此提醒设置固定读真实偏好
+    private static var prefs: UserDefaults { .standard }
+    static var alertsEnabled: Bool { prefs.bool(forKey: BudgetKey.alertsEnabled) }
     static var warnPercent: Int {
-        let v = ModeDefaults.integer(forKey: BudgetKey.warnPercent)
+        let v = prefs.integer(forKey: BudgetKey.warnPercent)
         return v == 0 ? 80 : v
     }
-    static var alertOver: Bool { ModeDefaults.object(forKey: BudgetKey.alertOver) as? Bool ?? true }
+    static var alertOver: Bool { prefs.object(forKey: BudgetKey.alertOver) as? Bool ?? true }
 
     static func check(in context: ModelContext) {
-        guard alertsEnabled, !ScreenshotDemo.isActive, !SessionManager.shared.isDecoy else { return }
+        // 防窥会话、或真实会话里「编辑防窥数据」（防窥容器）都不检查、不发通知
+        guard ModeDefaults.isRealContext(context), !SessionManager.shared.isDecoy,
+              alertsEnabled, !ScreenshotDemo.isActive else { return }
         let status = BudgetService.currentStatus(in: context)
         let monthKey = DayKey.formatter.string(from: status.month).prefix(7)
         let yearKey = monthKey.prefix(4)
-        var sent = ModeDefaults.dictionary(forKey: BudgetKey.sentAlerts) as? [String: Bool] ?? [:]
+        var sent = prefs.dictionary(forKey: BudgetKey.sentAlerts) as? [String: Bool] ?? [:]
         // 只保留本月 / 本年的记录
         sent = sent.filter { $0.key.hasPrefix(String(monthKey)) || $0.key.hasPrefix("Y" + yearKey) }
 
@@ -153,6 +158,6 @@ enum BudgetMonitor {
                 : "预算 \(Money.format(line.budget))，已花 \(Money.format(line.spent))，还剩 \(Money.format(line.remaining))。"
             NotificationManager.shared.postNow(id: "budget.\(key)", title: title, body: body)
         }
-        ModeDefaults.set(sent, forKey: BudgetKey.sentAlerts)
+        prefs.set(sent, forKey: BudgetKey.sentAlerts)
     }
 }

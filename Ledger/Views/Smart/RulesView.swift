@@ -7,7 +7,7 @@ struct RulesView: View {
     @Query(sort: \CategoryRule.updatedAt, order: .reverse) private var rules: [CategoryRule]
     @Query(sort: \LedgerCategory.sortOrder) private var categories: [LedgerCategory]
     @Query(sort: \LedgerAccount.sortOrder) private var accounts: [LedgerAccount]
-    @AppStorage(RuleStore.learnKey, store: ModeDefaults.store) private var learnEnabled = true
+    @AppStorage(RuleStore.learnKey) private var learnEnabled = true
 
     @State private var editorTarget: EditorTarget?
     @State private var pendingDelete: CategoryRule?

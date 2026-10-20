@@ -15,7 +15,7 @@ struct RecordEditorView: View {
     @Environment(\.dismiss) private var dismiss
     @Query(sort: \LedgerCategory.sortOrder) private var allCategories: [LedgerCategory]
     @Query(sort: \LedgerAccount.sortOrder) private var allAccounts: [LedgerAccount]
-    @AppStorage(SettingsKey.defaultAccount, store: ModeDefaults.store) private var defaultAccount = ""
+    @AppStorage(SettingsKey.defaultAccount) private var defaultAccount = ""
 
     @State private var kind: RecordKind = .expense
     @State private var amountText = ""
