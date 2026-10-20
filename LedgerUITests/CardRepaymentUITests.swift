@@ -45,10 +45,18 @@ final class CardRepaymentUITests: XCTestCase {
 
     /// 资产页长按信用卡 →「还款」，返回是否打开了还款表单
     private func openRepayFromAssets(_ app: XCUIApplication, card: String) {
+        // 列表是懒加载的：负债分组在下面，先等页面出来，再上滑直到信用卡行可点
+        XCTAssertTrue(element(app, "account-微信").waitForExistence(timeout: 15) || element(app, "account-" + card).exists,
+                      "资产页没有出现")
         let row = element(app, "account-" + card)
-        XCTAssertTrue(row.waitForExistence(timeout: 15), "找不到账户行 \(card)")
         var tries = 0
-        while !row.isHittable && tries < 6 { app.swipeUp(); tries += 1 }
+        while !(row.exists && row.isHittable) && tries < 8 {
+            app.swipeUp()
+            Thread.sleep(forTimeInterval: 0.4)
+            tries += 1
+        }
+        if !row.exists { dump(app, "repay-assets") }
+        XCTAssertTrue(row.exists, "找不到账户行 \(card)")
         row.press(forDuration: 1.2)
         let item = app.buttons["还款"].firstMatch
         if !item.waitForExistence(timeout: 5) { dump(app, "repay-menu") }
