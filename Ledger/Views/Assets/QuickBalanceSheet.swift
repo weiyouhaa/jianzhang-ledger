@@ -55,6 +55,7 @@ struct QuickBalanceSheet: View {
                         .font(.system(size: 26, weight: .semibold, design: .rounded))
                         .foregroundStyle(.secondary)
                     TextField("0.00", text: $text)
+                        .accessibilityIdentifier("quickbalance-field")
                         .font(.system(size: 42, weight: .bold, design: .rounded))
                         .keyboardType(shown < 0 ? .numbersAndPunctuation : .decimalPad)
                         .focused($focused)

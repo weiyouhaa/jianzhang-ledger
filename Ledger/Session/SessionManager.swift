@@ -21,7 +21,7 @@ final class SessionManager: ObservableObject {
 
     private init() {
         ModeDefaults.setDecoyMode(false)
-        if ScreenshotDemo.screen == "decoyhome" {
+        if ScreenshotDemo.screen == "decoyhome" || ScreenshotDemo.screen == "decoyassets" {
             // 截图模式：启动即进入防窥库，避免 RootView.onAppear 里改 epoch 把界面拆掉
             forceDecoyForDemo()
         }

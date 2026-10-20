@@ -42,6 +42,21 @@ targets:
         SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD: NO
         LOCALIZATION_PREFERS_STRING_CATALOGS: NO
 
+  LedgerUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources:
+      - path: LedgerUITests
+    dependencies:
+      - target: Ledger
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.fve.ledger.uitests
+        GENERATE_INFOPLIST_FILE: YES
+        TEST_TARGET_NAME: Ledger
+        CODE_SIGN_STYLE: Automatic
+        DEVELOPMENT_TEAM: ""
+
 schemes:
   Ledger:
     build:
@@ -49,5 +64,9 @@ schemes:
         Ledger: all
     run:
       config: Debug
+    test:
+      config: Debug
+      targets:
+        - LedgerUITests
     archive:
       config: Release

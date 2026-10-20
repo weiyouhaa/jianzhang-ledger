@@ -66,22 +66,26 @@ struct DecoyPasscodeSetupView: View {
 struct DecoyDataEditorHost: View {
     @Environment(\.dismiss) private var dismiss
     @State private var container: ModelContainer?
+    @State private var tab = ScreenshotDemo.screen == "decoyeditor" ? 1 : 0
 
     var body: some View {
         NavigationStack {
             Group {
                 if let container {
-                    TabView {
+                    TabView(selection: $tab) {
                         HomeView()
                             .tabItem { Label("明细", systemImage: "list.bullet.rectangle.portrait") }
+                            .tag(0)
                         AssetsView()
                             .tabItem { Label("资产", systemImage: "wallet.pass.fill") }
+                            .tag(1)
                         Form {
                             Text("这里改的是防窥账本里的账户和流水，不影响真实数据。改完点右上角「完成」。")
                                 .font(.subheadline)
                                 .foregroundStyle(.secondary)
                         }
                         .tabItem { Label("说明", systemImage: "info.circle") }
+                        .tag(2)
                     }
                     .modelContainer(container)
                 } else {
@@ -98,7 +102,7 @@ struct DecoyDataEditorHost: View {
         }
         .onAppear {
             if container == nil {
-                container = DataStore.makeDecoyContainer(inMemory: false)
+                container = DataStore.makeDecoyContainer(inMemory: ScreenshotDemo.isActive)
             }
         }
     }

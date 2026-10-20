@@ -230,6 +230,7 @@ struct AssetsView: View {
         } label: {
             AccountRow(account: a, balance: balance, hidden: hideAmounts)
         }
+        .accessibilityIdentifier("account-" + a.name)
         .swipeActions {
             Button { editorTarget = .edit(a) } label: { Label("编辑", systemImage: "pencil") }
                 .tint(.blue)
