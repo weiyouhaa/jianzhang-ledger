@@ -7,6 +7,7 @@ struct HomeView: View {
     /// 预算变化时刷新
     @AppStorage(SettingsKey.monthlyBudget) private var budgetSetting: Double = 0
     @AppStorage(BudgetKey.rollover) private var rolloverSetting = false
+    @AppStorage(RepaymentSetting.key) private var repaymentAsExpense = false
     @Query(sort: \LedgerRecord.date, order: .reverse) private var allRecords: [LedgerRecord]
     @State private var month: Date = DateText.calendar.startOfMonth(for: Date())
     @State private var editorTarget: EditorTarget?
@@ -28,8 +29,10 @@ struct HomeView: View {
     struct DayGroup {
         let day: Date
         let records: [LedgerRecord]
+        /// 「信用卡还款计入支出」
+        var includeRepayment = false
         var income: Double { records.filter { $0.kind == .income }.reduce(0) { $0 + $1.amount } }
-        var expense: Double { records.filter { $0.kind == .expense }.reduce(0) { $0 + $1.amount } }
+        var expense: Double { records.filter { $0.countsAsExpense(includeRepayment: includeRepayment) }.reduce(0) { $0 + $1.amount } }
     }
 
     private var calendar: Calendar { DateText.calendar }
@@ -43,7 +46,8 @@ struct HomeView: View {
     private var dayGroups: [DayGroup] {
         let grouped = Dictionary(grouping: monthRecords) { calendar.startOfDay(for: $0.date) }
         return grouped
-            .map { DayGroup(day: $0.key, records: $0.value.sorted { $0.date > $1.date }) }
+            .map { DayGroup(day: $0.key, records: $0.value.sorted { $0.date > $1.date },
+                            includeRepayment: repaymentAsExpense) }
             .sorted { $0.day > $1.day }
     }
 
@@ -54,7 +58,8 @@ struct HomeView: View {
     var body: some View {
         let records = monthRecords
         let income = records.filter { $0.kind == .income }.reduce(0) { $0 + $1.amount }
-        let expense = records.filter { $0.kind == .expense }.reduce(0) { $0 + $1.amount }
+        let includeRepayment = repaymentAsExpense
+        let expense = records.filter { $0.countsAsExpense(includeRepayment: includeRepayment) }.reduce(0) { $0 + $1.amount }
 
         NavigationStack {
             List {
@@ -146,6 +151,8 @@ struct HomeView: View {
                         .background(Circle().fill(Color.accentColor.gradient))
                         .shadow(color: Color.accentColor.opacity(0.4), radius: 10, y: 5)
                 }
+                .accessibilityLabel("记一笔")
+                .accessibilityIdentifier("home-add")
                 .padding(.trailing, 22)
                 .padding(.bottom, 20)
                 .accessibilityLabel("记一笔")

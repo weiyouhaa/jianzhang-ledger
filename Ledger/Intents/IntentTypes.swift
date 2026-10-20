@@ -178,6 +178,47 @@ enum IntentRecorder {
         return record
     }
 
+    /// 识图得到的信用卡还款：被还款的负债账户（线索匹配不到时，只有一张信用卡就用它）
+    @MainActor
+    static func repaymentCard(hint: AccountHint?) -> LedgerAccount? {
+        let context = DataStore.shared.mainContext
+        if let a = DataStore.account(matching: hint, in: context), a.type.isLiability { return a }
+        let cards = DataStore.accounts(in: context).filter { $0.type.isLiability && $0.type.rawValue == (hint?.type ?? "credit") }
+        return cards.count == 1 ? cards.first : nil
+    }
+
+    /// 还款的付款账户：指定 > 识图线索（非负债）> 默认账户（非负债）> 第一张储蓄卡
+    @MainActor
+    static func repaymentPayer(accountID: UUID?, hint: AccountHint?, excluding cardID: UUID) -> LedgerAccount? {
+        let context = DataStore.shared.mainContext
+        let candidates: [LedgerAccount?] = [
+            accountID.flatMap { DataStore.account(id: $0, in: context) },
+            DataStore.account(matching: hint, in: context),
+            RuleStore.defaultAccount(in: context),
+            DataStore.accounts(in: context).first(where: { $0.type == .debit }),
+        ]
+        return candidates.compactMap { $0 }.first(where: { !$0.type.isLiability && $0.id != cardID })
+    }
+
+    /// 保存一笔信用卡还款（付款账户 → 信用卡的转账，不计入收支统计，除非开启「信用卡还款计入支出」）
+    @MainActor
+    @discardableResult
+    static func saveRepayment(amount: Double, fromID: UUID, toID: UUID, note: String, date: Date, source: String) throws -> LedgerRecord {
+        let context = DataStore.shared.mainContext
+        let from = DataStore.account(id: fromID, in: context)
+        let record = LedgerRecord(amount: (amount * 100).rounded() / 100, kind: .transfer, category: nil,
+                                  note: note, merchant: "", account: from?.name ?? "", date: date, source: source)
+        record.accountRef = from
+        record.toAccount = DataStore.account(id: toID, in: context)
+        context.insert(record)
+        do {
+            try ChangeLogger.with(.shortcut) { try context.save() }
+        } catch {
+            throw LedgerIntentError.saveFailed
+        }
+        return record
+    }
+
     /// 审核预览：按与 save 相同的优先级解析分类和账户（不累计规则命中次数）
     @MainActor
     static func resolve(kind: RecordKind, merchant: String, note: String, categoryID: UUID?, categoryName: String?,

@@ -23,7 +23,9 @@ struct AssetsView: View {
     struct AccountRecordTarget: Identifiable {
         let account: LedgerAccount
         let kind: RecordKind
-        var id: String { account.id.uuidString + kind.rawValue }
+        /// 长按信用卡「还款」：直接进入支出 · 信用卡还款
+        var repay = false
+        var id: String { account.id.uuidString + kind.rawValue + (repay ? "-repay" : "") }
     }
 
     struct NetWorthPoint: Identifiable {
@@ -168,7 +170,11 @@ struct AssetsView: View {
                 }
             }
             .sheet(item: $recordTarget) { t in
-                RecordEditorView(record: nil, initialKind: t.kind, presetAccountID: t.account.id)
+                if t.repay {
+                    RecordEditorView(record: nil, initialKind: .expense, repayCardID: t.account.id)
+                } else {
+                    RecordEditorView(record: nil, initialKind: t.kind, presetAccountID: t.account.id)
+                }
             }
             .navigationDestination(isPresented: $showDemoAccount) {
                 if let demoAccount { AccountDetailView(account: demoAccount) }
@@ -178,6 +184,10 @@ struct AssetsView: View {
                 if ScreenshotDemo.screen == "quickbalance", quickBalanceTarget == nil,
                    let a = activeAccounts.first(where: { $0.type == .debit }) ?? activeAccounts.first {
                     quickBalanceTarget = QuickBalanceTarget(id: a.id)
+                }
+                if ScreenshotDemo.screen == "cardrepayment", recordTarget == nil,
+                   let card = activeAccounts.first(where: { $0.type == .credit }) {
+                    recordTarget = AccountRecordTarget(account: card, kind: .expense, repay: true)
                 }
                 if ScreenshotDemo.screen == "account", !showDemoAccount,
                    let target = activeAccounts.first(where: { $0.type == .credit }) ?? activeAccounts.first {
@@ -251,6 +261,12 @@ struct AssetsView: View {
             } label: {
                 Label(a.type.isLiability ? "修改欠款" : "修改余额", systemImage: "pencil.circle")
             }
+            if a.type.isLiability {
+                Button { present { recordTarget = AccountRecordTarget(account: a, kind: .expense, repay: true) } } label: {
+                    Label("还款", systemImage: LedgerRecord.repaymentIcon)
+                }
+                .accessibilityIdentifier("menu-repay")
+            }
             Divider()
             if a.type.isSocialSecurity {
                 Button { present { recordTarget = AccountRecordTarget(account: a, kind: .contribution) } } label: {
@@ -262,7 +278,7 @@ struct AssetsView: View {
                 }
             }
             Button { present { recordTarget = AccountRecordTarget(account: a, kind: .transfer) } } label: {
-                Label(a.type.isLiability ? "还款 / 转账" : (a.type == .housingFund ? "提取 / 转账" : "转账"),
+                Label(a.type == .housingFund ? "提取 / 转账" : "转账",
                       systemImage: "arrow.left.arrow.right")
             }
             Button { present { editorTarget = .edit(a) } } label: {

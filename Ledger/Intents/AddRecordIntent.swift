@@ -69,8 +69,8 @@ struct MonthSummaryIntent: AppIntent {
         let start = cal.startOfMonth(for: Date())
         let end = cal.date(byAdding: .month, value: 1, to: start) ?? Date()
         let records = DataStore.records(from: start, to: end, in: DataStore.shared.mainContext)
-            .filter { $0.kind.countsInStats }
-        let expense = records.filter { $0.kind == .expense }.reduce(0) { $0 + $1.amount }
+        let includeRepayment = RepaymentSetting.includeInExpense(UserDefaults.standard)
+        let expense = records.filter { $0.countsAsExpense(includeRepayment: includeRepayment) }.reduce(0) { $0 + $1.amount }
         let income = records.filter { $0.kind == .income }.reduce(0) { $0 + $1.amount }
         var text = "本月支出 \(Money.format(expense))，收入 \(Money.format(income))，结余 \(Money.format(income - expense))"
         let budget = UserDefaults.standard.double(forKey: SettingsKey.monthlyBudget)

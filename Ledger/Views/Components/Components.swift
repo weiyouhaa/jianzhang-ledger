@@ -35,7 +35,17 @@ struct RecordRow: View {
                     .font(.body)
                     .lineLimit(1)
                 HStack(spacing: 4) {
-                    Text(record.categoryName)
+                    if record.isCreditRepayment {
+                        // 信用卡还款：付款账户 → 信用卡（标题无备注时已是「信用卡还款」）
+                        if !record.note.isEmpty {
+                            Text("信用卡还款")
+                            Text("·")
+                        }
+                        Text("\(record.accountName.isEmpty ? "未选账户" : record.accountName) → \(record.toAccount?.name ?? "")")
+                            .accessibilityIdentifier("repayment-route")
+                    } else {
+                        Text(record.categoryName)
+                    }
                     if record.kind == .transfer {
                         if record.fee > 0 {
                             Text("·")

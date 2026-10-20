@@ -64,6 +64,8 @@ struct ReviewItem: Identifiable {
     var merchant: String
     var note: String
     var accountID: UUID?
+    /// 信用卡还款（kind == .transfer）：被还款的信用卡；accountID 为付款账户
+    var toAccountID: UUID? = nil
     var date: Date
     var dateRecognized: Bool
     var isDuplicate = false
@@ -101,16 +103,17 @@ enum ReviewFormatter {
     static func row(_ item: ReviewItem, index: Int, in context: ModelContext) -> ReviewRow {
         let category = item.categoryID.flatMap { DataStore.category(id: $0, in: context) }
         let account = item.accountID.flatMap { DataStore.account(id: $0, in: context) }
+        let repayCard = item.kind == .transfer ? item.toAccountID.flatMap { DataStore.account(id: $0, in: context) } : nil
         return ReviewRow(
             index: index,
             isIncome: item.kind == .income,
-            amountText: (item.kind == .income ? "+" : "-") + Money.format(item.amount),
-            categoryName: category?.name ?? (item.kind == .income ? "其他收入" : "其他"),
-            icon: category?.icon ?? "tag.fill",
-            colorHex: category?.colorHex ?? "#8E8E93",
+            amountText: (item.kind == .income ? "+" : (item.kind == .transfer ? " " : "-")) + Money.format(item.amount),
+            categoryName: repayCard != nil ? "信用卡还款" : (category?.name ?? (item.kind == .income ? "其他收入" : "其他")),
+            icon: repayCard != nil ? LedgerRecord.repaymentIcon : (category?.icon ?? "tag.fill"),
+            colorHex: repayCard != nil ? "#30B0C7" : (category?.colorHex ?? "#8E8E93"),
             merchant: item.merchant,
             note: item.note,
-            accountName: account?.name ?? "未指定账户",
+            accountName: repayCard.map { "\(account?.name ?? "未指定账户") → \($0.name)" } ?? (account?.name ?? "未指定账户"),
             timeText: item.dateRecognized || item.isManual ? DateText.monthDayTime.string(from: item.date) : "时间未识别（按现在）",
             duplicate: item.isDuplicate ? (item.saveDuplicate ? .saveAnyway : .skip) : .none,
             isManual: item.isManual
@@ -119,7 +122,8 @@ enum ReviewFormatter {
 
     /// 一行文字摘要（选项标题 / 对话框）
     static func line(_ row: ReviewRow) -> String {
-        var parts = ["\(row.isIncome ? "收入" : "支出") \(row.amountText.dropFirst())", row.categoryName]
+        let kindText = row.categoryName == "信用卡还款" ? "还款" : (row.isIncome ? "收入" : "支出")
+        var parts = ["\(kindText) \(row.amountText.dropFirst())", row.categoryName]
         if !row.merchant.isEmpty { parts.append(row.merchant) }
         parts.append(row.accountName)
         parts.append(row.timeText)
@@ -241,7 +245,7 @@ struct ReviewRowView: View {
     }
 
     private var detail: String {
-        var parts: [String] = [row.isIncome ? "收入" : "支出"]
+        var parts: [String] = [row.categoryName == "信用卡还款" ? "还款" : (row.isIncome ? "收入" : "支出")]
         if !row.merchant.isEmpty { parts.append(row.categoryName) }
         parts.append(row.accountName)
         parts.append(row.timeText)

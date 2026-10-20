@@ -12,6 +12,7 @@ struct SettingsView: View {
     @AppStorage(SettingsKey.currencySymbol) private var currencySymbol = "¥"
     @AppStorage(SettingsKey.appearance, store: .standard) private var appearance = 0
     @AppStorage(SettingsKey.defaultAccount) private var defaultAccount = ""
+    @AppStorage(RepaymentSetting.key) private var repaymentAsExpense = false
     @AppStorage(SettingsKey.hideInAppSwitcher, store: .standard) private var hideInAppSwitcher = true
     @AppStorage(SettingsKey.lastBackupAt, store: .standard) private var lastBackupAt: Double = 0
     @State private var showDemoBackup = false
@@ -250,7 +251,7 @@ struct SettingsView: View {
     }
 
     private var bookkeepingSection: some View {
-        Section("记账") {
+        Section {
             NavigationLink {
                 CategoryManagerView()
             } label: {
@@ -289,6 +290,14 @@ struct SettingsView: View {
             } label: {
                 Label("货币符号", systemImage: "dollarsign.circle.fill")
             }
+            Toggle(isOn: $repaymentAsExpense) {
+                Label("信用卡还款计入支出", systemImage: LedgerRecord.repaymentIcon)
+            }
+            .accessibilityIdentifier("toggle-repayment-expense")
+        } header: {
+            Text("记账")
+        } footer: {
+            Text("默认关闭：刷卡消费已记为支出，还款只是把钱从银行卡转到信用卡，再计入会重复。开启后首页、统计和总预算都会把还款算作支出。")
         }
     }
 

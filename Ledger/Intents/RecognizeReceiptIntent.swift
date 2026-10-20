@@ -113,6 +113,17 @@ struct RecognizeReceiptIntent: AppIntent {
             var item = ReviewItem(amount: p.amount ?? 0, kind: k, categoryID: resolved.category?.id,
                                   merchant: merchant, note: note ?? "", accountID: resolved.account?.id,
                                   date: p.date ?? Date(), dateRecognized: p.date != nil)
+            // 信用卡还款截图：付款账户 → 信用卡 的转账（未指定类型 / 分类、且匹配到负债账户时）
+            if p.isCardRepayment, kind == nil, category == nil,
+               let card = IntentRecorder.repaymentCard(hint: p.repaymentCard),
+               let payer = IntentRecorder.repaymentPayer(accountID: account?.id, hint: p.accountHint, excluding: card.id) {
+                item.kind = .transfer
+                item.categoryID = nil
+                item.toAccountID = card.id
+                item.accountID = payer.id
+                if item.note.isEmpty { item.note = merchant.isEmpty ? "信用卡还款" : merchant }
+                item.merchant = ""
+            }
             // 去重：同金额、同商户、时间相差 2 分钟内的已有记录
             item.isDuplicate = item.dateRecognized
                 && IntentRecorder.isDuplicate(amount: item.amount, merchant: item.merchant, date: item.date)
@@ -465,6 +476,11 @@ struct RecognizeReceiptIntent: AppIntent {
     private func persist(_ items: [ReviewItem], context: ModelContext) throws -> [LedgerRecord] {
         var saved: [LedgerRecord] = []
         for item in items where item.willSave {
+            if item.kind == .transfer, let to = item.toAccountID, let from = item.accountID {
+                saved.append(try IntentRecorder.saveRepayment(amount: item.amount, fromID: from, toID: to, note: item.note,
+                                                              date: item.date, source: item.isManual ? "shortcut" : "ocr"))
+                continue
+            }
             let record = try IntentRecorder.save(
                 amount: item.amount, kind: item.kind,
                 categoryID: item.categoryID, categoryName: nil,

@@ -21,7 +21,7 @@ struct RecordSnapshot: Sendable {
 
     init(_ r: LedgerRecord) {
         date = r.date
-        kind = r.kind.title
+        kind = r.isCreditRepayment ? "信用卡还款" : r.kind.title
         category = r.categoryName
         amount = r.amount
         account = r.accountName

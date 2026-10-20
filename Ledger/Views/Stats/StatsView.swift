@@ -9,6 +9,8 @@ struct StatsView: View {
     @AppStorage(SettingsKey.monthlyBudget) private var budgetSetting: Double = 0
     @AppStorage(BudgetKey.rollover) private var rolloverSetting = false
     @Environment(\.ledgerPrefs) private var prefs
+    /// 「信用卡还款计入支出」：开启后还款作为「信用卡还款」分类计入支出
+    @AppStorage(RepaymentSetting.key) private var repaymentAsExpense = false
 
     @State private var period: Period = .month
     @State private var anchor: Date = Date()
@@ -58,12 +60,13 @@ struct StatsView: View {
     var body: some View {
         let r = range
         // 转账与余额校准不计入统计
-        let periodRecords = allRecords.filter { $0.date >= r.start && $0.date < r.end && $0.kind.countsInStats }
-        let kindRecords = periodRecords.filter { $0.kind == kind }
+        let inc = repaymentAsExpense
+        let periodRecords = allRecords.filter { $0.date >= r.start && $0.date < r.end && $0.statsKind(includeRepayment: inc) != nil }
+        let kindRecords = periodRecords.filter { $0.statsKind(includeRepayment: inc) == kind }
         let total = kindRecords.reduce(0) { $0 + $1.amount }
         let totals = categoryTotals(kindRecords)
         let trend = trendPoints(kindRecords, kindTitle: kind.title)
-        let expense = periodRecords.filter { $0.kind == .expense }.reduce(0) { $0 + $1.amount }
+        let expense = periodRecords.filter { $0.statsKind(includeRepayment: inc) == .expense }.reduce(0) { $0 + $1.amount }
         let income = periodRecords.filter { $0.kind == .income }.reduce(0) { $0 + $1.amount }
 
         NavigationStack {
@@ -231,7 +234,7 @@ struct StatsView: View {
                     NavigationLink {
                         CategoryRecordsView(
                             title: "\(item.name) · \(periodTitle)",
-                            records: records.filter { ($0.category?.id.uuidString ?? "none") == item.id }
+                            records: records.filter { Self.groupKey($0) == item.id }
                         )
                     } label: {
                         HStack(spacing: 12) {
@@ -264,7 +267,7 @@ struct StatsView: View {
     }
 
     private func compareCard(records: [LedgerRecord]) -> some View {
-        let points = trendPoints(records.filter { $0.kind == .expense }, kindTitle: "支出")
+        let points = trendPoints(records.filter { $0.countsAsExpense(includeRepayment: repaymentAsExpense) }, kindTitle: "支出")
             + trendPoints(records.filter { $0.kind == .income }, kindTitle: "收入")
         return card {
             VStack(alignment: .leading, spacing: 12) {
@@ -306,8 +309,13 @@ struct StatsView: View {
 
     // MARK: - 计算
 
+    /// 分类分组：信用卡还款（无分类）单独成组
+    static func groupKey(_ r: LedgerRecord) -> String {
+        r.isCreditRepayment ? "card-repayment" : (r.category?.id.uuidString ?? "none")
+    }
+
     private func categoryTotals(_ records: [LedgerRecord]) -> [CategoryTotal] {
-        let grouped = Dictionary(grouping: records) { $0.category?.id.uuidString ?? "none" }
+        let grouped = Dictionary(grouping: records) { Self.groupKey($0) }
         return grouped.map { key, list in
             let first = list.first
             return CategoryTotal(

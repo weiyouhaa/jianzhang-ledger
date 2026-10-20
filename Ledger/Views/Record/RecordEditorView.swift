@@ -10,12 +10,15 @@ struct RecordEditorView: View {
     var presetAccountID: UUID? = nil
     /// 周期账单提醒「记一笔」时带入的内容
     var prefill: RecordPrefill? = nil
+    /// 资产页长按信用卡「还款」：直接进入信用卡还款，并选好这张卡
+    var repayCardID: UUID? = nil
 
     @Environment(\.modelContext) private var context
     @Environment(\.dismiss) private var dismiss
     @Query(sort: \LedgerCategory.sortOrder) private var allCategories: [LedgerCategory]
     @Query(sort: \LedgerAccount.sortOrder) private var allAccounts: [LedgerAccount]
     @AppStorage(SettingsKey.defaultAccount) private var defaultAccount = ""
+    @Environment(\.ledgerPrefs) private var prefs
 
     @State private var kind: RecordKind = .expense
     @State private var amountText = ""
@@ -33,6 +36,8 @@ struct RecordEditorView: View {
     @State private var accountTouched = false
     @State private var categoryTouched = false
     @State private var ruleHint: String?
+    /// 支出页的「信用卡还款」：保存为 付款账户 → 负债账户 的转账（付款账户减少，欠款减少，默认不计入支出统计）
+    @State private var repayMode = false
 
     @State private var photoItem: PhotosPickerItem?
     @State private var isRecognizing = false
@@ -51,6 +56,30 @@ struct RecordEditorView: View {
         allAccounts.filter { !$0.isArchived || $0.id == accountID || $0.id == toAccountID }
     }
 
+    /// 还款的付款账户：非负债账户
+    private var payerAccounts: [LedgerAccount] {
+        selectableAccounts.filter { !$0.type.isLiability || $0.id == accountID }
+    }
+
+    /// 还款的目标：信用卡 / 花呗 / 贷款等负债账户
+    private var cardAccounts: [LedgerAccount] {
+        selectableAccounts.filter { $0.type.isLiability || $0.id == toAccountID }
+    }
+
+    private var selectedCard: LedgerAccount? {
+        allAccounts.first(where: { $0.id == toAccountID })
+    }
+
+    /// 当前欠款（编辑已有还款时，加回这条记录本身还掉的金额）
+    private var fullRepaymentAmount: Double? {
+        guard let card = selectedCard, card.type.isLiability else { return nil }
+        var owed = card.debt
+        if let record, record.isCreditRepayment, record.toAccount?.id == card.id {
+            owed = max(0, -(card.balance() - record.amount))
+        }
+        return owed > 0.004 ? (owed * 100).rounded() / 100 : nil
+    }
+
     private var parsedAmount: Double? { Money.parse(amountText) }
 
     private var amountValid: Bool {
@@ -60,6 +89,9 @@ struct RecordEditorView: View {
 
     private var canSave: Bool {
         guard amountValid else { return false }
+        if repayMode {
+            return accountID != nil && accountID != toAccountID && (selectedCard?.type.isLiability ?? false)
+        }
         if kind == .transfer {
             return accountID != nil && toAccountID != nil && accountID != toAccountID
         }
@@ -118,17 +150,18 @@ struct RecordEditorView: View {
                     }
                 } else {
                     categorySection
+                    if repayMode { repaymentSection }
                 }
 
                 Section {
                     DatePicker("时间", selection: $date)
                     TextField("备注", text: $note)
-                    if kind.countsInStats {
+                    if kind.countsInStats && !repayMode {
                         TextField("商户（可选）", text: $merchant)
                         accountPicker(title: "账户", selection: userAccountBinding, allowNone: true)
                     }
                 } footer: {
-                    if let ruleHint, kind.countsInStats {
+                    if let ruleHint, kind.countsInStats, !repayMode {
                         Label(ruleHint, systemImage: "wand.and.stars")
                     }
                 }
@@ -202,6 +235,7 @@ struct RecordEditorView: View {
             }
             .onAppear(perform: load)
             .onChange(of: kind) { _, newKind in
+                if newKind != .expense { repayMode = false }
                 if newKind.countsInStats && !categories.contains(where: { $0.id == selectedCategoryID }) {
                     selectedCategoryID = categories.first?.id
                 }
@@ -226,11 +260,13 @@ struct RecordEditorView: View {
 
     private var navTitle: String {
         if kind == .contribution { return record == nil ? "缴存" : "编辑缴存" }
+        if repayMode { return record == nil ? "信用卡还款" : "编辑还款" }
         if record == nil { return kind == .transfer ? "转账" : "记一笔" }
         return kind == .adjustment ? "余额校准" : "编辑记录"
     }
 
     private var amountColor: Color {
+        if repayMode { return Color(hex: "#30B0C7") }
         switch kind {
         case .income: return .green
         case .contribution: return Color(hex: "#E8A33D")
@@ -242,18 +278,41 @@ struct RecordEditorView: View {
     private var categorySection: some View {
         Section {
             LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 5), spacing: 14) {
+                if kind == .expense {
+                    VStack(spacing: 6) {
+                        CategoryIcon(icon: LedgerRecord.repaymentIcon, color: LedgerRecord.repaymentColor, size: 44, selected: repayMode)
+                        Text("信用卡还款")
+                            .font(.caption2)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.8)
+                            .foregroundStyle(repayMode ? Color.primary : Color.secondary)
+                    }
+                    .frame(maxWidth: .infinity)
+                    .contentShape(Rectangle())
+                    .accessibilityElement(children: .combine)
+                    .accessibilityAddTraits(.isButton)
+                    .accessibilityIdentifier("tile-card-repayment")
+                    .onTapGesture {
+                        UISelectionFeedbackGenerator().selectionChanged()
+                        enterRepayMode(card: nil)
+                    }
+                }
                 ForEach(categories) { c in
                     VStack(spacing: 6) {
-                        CategoryIcon(icon: c.icon, color: c.color, size: 44, selected: c.id == selectedCategoryID)
+                        CategoryIcon(icon: c.icon, color: c.color, size: 44, selected: !repayMode && c.id == selectedCategoryID)
                         Text(c.name)
                             .font(.caption2)
                             .lineLimit(1)
-                            .foregroundStyle(c.id == selectedCategoryID ? Color.primary : Color.secondary)
+                            .foregroundStyle(!repayMode && c.id == selectedCategoryID ? Color.primary : Color.secondary)
                     }
                     .frame(maxWidth: .infinity)
                     .contentShape(Rectangle())
                     .onTapGesture {
                         UISelectionFeedbackGenerator().selectionChanged()
+                        if repayMode {
+                            repayMode = false
+                            if allAccounts.first(where: { $0.id == accountID })?.type.isLiability == true { accountID = nil }
+                        }
                         selectedCategoryID = c.id
                         categoryTouched = true
                         ruleHint = nil
@@ -301,12 +360,62 @@ struct RecordEditorView: View {
         }
     }
 
-    private func accountPicker(title: String, selection: Binding<UUID?>, allowNone: Bool) -> some View {
+    private var repaymentSection: some View {
+        Section {
+            accountPicker(title: "付款账户", selection: $accountID, allowNone: false, options: payerAccounts)
+                .accessibilityIdentifier("repay-from")
+            accountPicker(title: "还款信用卡", selection: $toAccountID, allowNone: false, options: cardAccounts)
+                .accessibilityIdentifier("repay-card")
+            if let full = fullRepaymentAmount {
+                Button {
+                    UISelectionFeedbackGenerator().selectionChanged()
+                    amountText = String(format: "%.2f", full)
+                    amountFocused = false
+                } label: {
+                    Label("全额还款 \(Money.format(full))", systemImage: "checkmark.circle")
+                }
+                .accessibilityIdentifier("repay-full")
+            }
+        } header: {
+            Text("信用卡还款")
+        } footer: {
+            if accountID != nil && accountID == toAccountID {
+                Text("付款账户和信用卡不能相同。").foregroundStyle(.red)
+            } else if cardAccounts.isEmpty {
+                Text("还没有信用卡 / 花呗等负债账户，请先在「资产」页添加。")
+            } else {
+                Text(RepaymentSetting.includeInExpense(prefs)
+                     ? "付款账户余额减少，信用卡欠款同步减少。已设置「信用卡还款计入支出」，会计入支出统计。"
+                     : "付款账户余额减少，信用卡欠款同步减少。刷卡消费已记为支出，还款默认不再计入支出（可在设置中开启）。")
+            }
+        }
+    }
+
+    /// 切到信用卡还款：付款账户默认用默认账户（非负债），信用卡默认选有欠款的第一张
+    private func enterRepayMode(card: UUID?) {
+        repayMode = true
+        ruleHint = nil
+        if let card { toAccountID = card }
+        if selectedCard?.type.isLiability != true {
+            let active = allAccounts.filter { $0.type.isLiability && !$0.isArchived }
+            toAccountID = (active.first(where: { $0.type.hasCreditLimit && $0.debt > 0 })
+                ?? active.first(where: { $0.type.hasCreditLimit }) ?? active.first)?.id
+        }
+        let current = allAccounts.first(where: { $0.id == accountID })
+        if current == nil || current?.type.isLiability == true || accountID == toAccountID {
+            let payers = allAccounts.filter { !$0.type.isLiability && !$0.isArchived && !$0.type.isSocialSecurity && $0.id != toAccountID }
+            accountID = (payers.first(where: { $0.name == defaultAccount })
+                ?? payers.first(where: { $0.type == .debit }) ?? payers.first)?.id
+        }
+    }
+
+    private func accountPicker(title: String, selection: Binding<UUID?>, allowNone: Bool,
+                               options: [LedgerAccount]? = nil) -> some View {
         Picker(title, selection: selection) {
             if allowNone || selection.wrappedValue == nil {
                 Text(allowNone ? "不选择" : "请选择").tag(UUID?.none)
             }
-            ForEach(selectableAccounts) { a in
+            ForEach(options ?? selectableAccounts) { a in
                 Label(a.name, systemImage: a.iconName).tag(UUID?.some(a.id))
             }
         }
@@ -339,7 +448,8 @@ struct RecordEditorView: View {
         guard !didLoad else { return }
         didLoad = true
         if let record {
-            kind = record.kind
+            kind = record.isCreditRepayment ? .expense : record.kind
+            repayMode = record.isCreditRepayment
             amountText = String(format: "%.2f", record.amount)
             selectedCategoryID = record.category?.id
             note = record.note
@@ -362,6 +472,17 @@ struct RecordEditorView: View {
             source = p.recurringKey.isEmpty ? "manual" : "recurring"
             accountTouched = true
             categoryTouched = true
+        } else if let repayCardID {
+            kind = .expense
+            date = initialDate
+            selectedCategoryID = allCategories.first(where: { $0.kind == .expense })?.id
+            enterRepayMode(card: repayCardID)
+            accountTouched = true
+            if ScreenshotDemo.isActive, let full = fullRepaymentAmount {
+                amountText = String(format: "%.2f", full)
+            } else {
+                amountFocused = true
+            }
         } else {
             kind = initialKind
             date = initialDate
@@ -380,16 +501,23 @@ struct RecordEditorView: View {
             alertMessage = "请输入有效的金额"
             return
         }
+        // 信用卡还款以「付款账户 → 信用卡」的转账保存：沿用转账的余额算法，无需新字段（CloudKit / 迁移安全）
+        let kind: RecordKind = repayMode ? .transfer : self.kind
         if kind == .transfer {
             guard accountID != nil, toAccountID != nil, accountID != toAccountID else {
-                alertMessage = "请选择不同的转出和转入账户"
+                alertMessage = repayMode ? "请选择付款账户和要还款的信用卡" : "请选择不同的转出和转入账户"
                 return
             }
         }
         let category: LedgerCategory? = kind.countsInStats ? allCategories.first(where: { $0.id == selectedCategoryID }) : nil
         let fromAccount = allAccounts.first(where: { $0.id == accountID })
         let toAccount: LedgerAccount? = kind == .transfer ? allAccounts.first(where: { $0.id == toAccountID }) : nil
-        let fee = kind == .transfer ? max(0, Money.parse(feeText) ?? 0) : 0
+        let fee: Double
+        if repayMode {
+            fee = record?.isCreditRepayment == true ? (record?.fee ?? 0) : 0
+        } else {
+            fee = kind == .transfer ? max(0, Money.parse(feeText) ?? 0) : 0
+        }
         let trimmedNote = note.trimmingCharacters(in: .whitespacesAndNewlines)
         let trimmedMerchant = kind.countsInStats ? merchant.trimmingCharacters(in: .whitespacesAndNewlines) : ""
 
@@ -466,7 +594,7 @@ struct RecordEditorView: View {
     }
 
     static func receiptTitle(_ r: ParsedReceipt) -> String {
-        var parts = [(r.isIncome ? "收入 " : "支出 ") + Money.format(r.amount ?? 0)]
+        var parts = [(r.isCardRepayment ? "信用卡还款 " : (r.isIncome ? "收入 " : "支出 ")) + Money.format(r.amount ?? 0)]
         if let m = r.merchant, !m.isEmpty { parts.append(m) }
         if let d = r.date { parts.append(DateText.monthDayTime.string(from: d)) }
         return parts.joined(separator: " · ")
@@ -478,6 +606,20 @@ struct RecordEditorView: View {
             alertMessage = "没有识别到金额，请手动填写"
             return
         }
+        if parsed.isCardRepayment {
+            kind = .expense
+            amountText = String(format: "%.2f", amount)
+            if let d = parsed.date { date = d }
+            let card = DataStore.account(matching: parsed.repaymentCard, in: context)
+            if let payer = DataStore.account(matching: parsed.accountHint, in: context), !payer.type.isLiability {
+                accountID = payer.id
+            }
+            enterRepayMode(card: card?.type.isLiability == true ? card?.id : nil)
+            if note.isEmpty, let m = parsed.merchant, !m.isEmpty { note = m }
+            source = "ocr"
+            return
+        }
+        repayMode = false
         kind = parsed.isIncome ? .income : .expense
         amountText = String(format: "%.2f", amount)
         if let m = parsed.merchant { merchant = m }

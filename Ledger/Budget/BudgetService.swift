@@ -48,9 +48,12 @@ enum BudgetService {
         return (start, calendar.date(byAdding: .month, value: 1, to: start) ?? start)
     }
 
-    static func spent(_ records: [LedgerRecord], from start: Date, to end: Date, categoryID: UUID? = nil) -> Double {
+    /// includeRepayment：「信用卡还款计入支出」开启时，还款也占用总预算（分类预算不受影响：还款没有分类）
+    static func spent(_ records: [LedgerRecord], from start: Date, to end: Date, categoryID: UUID? = nil,
+                      includeRepayment: Bool = false) -> Double {
         records.reduce(0) { sum, r in
-            guard r.kind == .expense, r.date >= start, r.date < end else { return sum }
+            guard r.countsAsExpense(includeRepayment: includeRepayment && categoryID == nil),
+                  r.date >= start, r.date < end else { return sum }
             if let categoryID, r.category?.id != categoryID { return sum }
             return sum + r.amount
         }
@@ -64,7 +67,8 @@ enum BudgetService {
         // 上个月没有任何记录（比如刚开始记账）时不结转
         let prevRecords = records.filter { $0.date >= prevStart && $0.date < start }
         guard !prevRecords.isEmpty else { return 0 }
-        return base - spent(prevRecords, from: prevStart, to: start, categoryID: categoryID)
+        return base - spent(prevRecords, from: prevStart, to: start, categoryID: categoryID,
+                            includeRepayment: RepaymentSetting.includeInExpense(prefs))
     }
 
     /// 本月总预算（含结转），用于首页与统计
@@ -83,7 +87,8 @@ enum BudgetService {
             let c = carry(base: base, records: records, month: start, prefs: prefs)
             result.total = BudgetLine(id: "total", name: "本月总预算", icon: "chart.pie.fill", colorHex: "#007AFF",
                                       budget: max(0, base + c), base: base, carry: c,
-                                      spent: spent(records, from: start, to: end))
+                                      spent: spent(records, from: start, to: end,
+                                                   includeRepayment: RepaymentSetting.includeInExpense(prefs)))
         }
         for cat in categories where cat.kind == .expense && cat.monthlyBudget > 0 {
             // 结转只作用于总预算，分类预算每月固定
@@ -97,7 +102,8 @@ enum BudgetService {
            let yEnd = calendar.date(byAdding: .year, value: 1, to: yStart) {
             result.yearly = BudgetLine(id: "yearly", name: "\(calendar.component(.year, from: start)) 年度预算", icon: "calendar",
                                        colorHex: "#5856D6", budget: yearly, base: yearly, carry: 0,
-                                       spent: spent(records, from: yStart, to: yEnd))
+                                       spent: spent(records, from: yStart, to: yEnd,
+                                                    includeRepayment: RepaymentSetting.includeInExpense(prefs)))
         }
         return result
     }

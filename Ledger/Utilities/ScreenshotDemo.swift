@@ -19,7 +19,7 @@ enum ScreenshotDemo {
     static var initialTab: Int {
         switch screen {
         case "stats", "statsbudget": return 1
-        case "assets", "account", "assetssocial", "quickbalance", "decoyassets": return 2
+        case "assets", "account", "assetssocial", "quickbalance", "decoyassets", "cardrepayment": return 2
         case "settings", "backup", "backupencrypt", "decoysettings", "decoyeditor", "decoyeditorhome", "rules", "import", "recurring", "budgets", "changelog": return 3
         case "decoyhome": return 0
         default: return 0

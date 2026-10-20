@@ -15,6 +15,7 @@ struct SearchView: View {
     @State private var minAmountText = ""
     @State private var maxAmountText = ""
     @State private var editing: LedgerRecord?
+    @AppStorage(RepaymentSetting.key) private var repaymentAsExpense = false
 
     private var filtered: [LedgerRecord] {
         let q = text.trimmingCharacters(in: .whitespaces)
@@ -25,9 +26,9 @@ struct SearchView: View {
         let end = cal.date(byAdding: .day, value: 1, to: cal.startOfDay(for: toDate)) ?? toDate
 
         return records.filter { r in
-            if kindFilter == 1 && r.kind != .expense { return false }
+            if kindFilter == 1 && !r.countsAsExpense(includeRepayment: repaymentAsExpense) { return false }
             if kindFilter == 2 && r.kind != .income { return false }
-            if kindFilter == 3 && r.kind.countsInStats { return false }
+            if kindFilter == 3 && r.statsKind(includeRepayment: repaymentAsExpense) != nil { return false }
             if let categoryID, r.category?.id != categoryID { return false }
             if useDateRange && (r.date < start || r.date >= end) { return false }
             if let minAmount, r.amount < minAmount { return false }
@@ -57,7 +58,7 @@ struct SearchView: View {
 
     var body: some View {
         let results = filtered
-        let expense = results.filter { $0.kind == .expense }.reduce(0) { $0 + $1.amount }
+        let expense = results.filter { $0.countsAsExpense(includeRepayment: repaymentAsExpense) }.reduce(0) { $0 + $1.amount }
         let income = results.filter { $0.kind == .income }.reduce(0) { $0 + $1.amount }
 
         List {

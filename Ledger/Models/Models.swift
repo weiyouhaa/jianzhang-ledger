@@ -2,39 +2,6 @@ import Foundation
 import SwiftData
 import SwiftUI
 
-/// 记录类型（以字符串存储，便于 #Predicate 过滤）。转账、余额校准、缴存不计入收支统计和预算。
-enum RecordKind: String, CaseIterable, Identifiable, Codable {
-    case expense
-    case income
-    case transfer
-    case adjustment
-    /// 公积金 / 社保 / 年金缴存：只增加该账户余额，不计入收入
-    case contribution
-
-    var id: String { rawValue }
-    var title: String {
-        switch self {
-        case .expense: return "支出"
-        case .income: return "收入"
-        case .transfer: return "转账"
-        case .adjustment: return "余额校准"
-        case .contribution: return "缴存"
-        }
-    }
-    var sign: String {
-        switch self {
-        case .expense: return "-"
-        case .income, .contribution: return "+"
-        case .transfer, .adjustment: return ""
-        }
-    }
-    /// 有分类、计入统计的类型
-    static let categoryKinds: [RecordKind] = [.expense, .income]
-    /// 记账页可选的类型
-    static let editorKinds: [RecordKind] = [.expense, .income, .transfer]
-    var countsInStats: Bool { self == .expense || self == .income }
-}
-
 @Model
 final class LedgerCategory {
     var id: UUID = UUID()
@@ -120,9 +87,12 @@ final class LedgerRecord {
 
     var isCreditRepayment: Bool { kind == .transfer && (toAccount?.type.isLiability ?? false) }
 
+    static let repaymentIcon = "creditcard.and.123"
+    static let repaymentColor = Color(hex: "#30B0C7")
+
     var categoryName: String {
         switch kind {
-        case .transfer: return isCreditRepayment ? "还款" : "转账"
+        case .transfer: return isCreditRepayment ? "信用卡还款" : "转账"
         case .adjustment: return "余额校准"
         case .contribution: return "缴存"
         default: return category?.name ?? "未分类"
@@ -130,7 +100,7 @@ final class LedgerRecord {
     }
     var categoryIcon: String {
         switch kind {
-        case .transfer: return isCreditRepayment ? "creditcard.and.123" : "arrow.left.arrow.right"
+        case .transfer: return isCreditRepayment ? Self.repaymentIcon : "arrow.left.arrow.right"
         case .adjustment: return "slider.horizontal.3"
         case .contribution: return "tray.and.arrow.down.fill"
         default: return category?.icon ?? "questionmark.circle.fill"
@@ -148,6 +118,7 @@ final class LedgerRecord {
     /// 列表中显示的标题：备注 > 商户 > 分类名（转账显示「A → B」）
     var displayTitle: String {
         if !note.isEmpty { return note }
+        if isCreditRepayment { return "信用卡还款" }
         if !merchant.isEmpty { return merchant }
         if kind == .transfer { return (accountRef?.name ?? "?") + " → " + (toAccount?.name ?? "?") }
         if kind == .contribution { return (accountRef?.name ?? "") + "缴存" }
@@ -173,19 +144,15 @@ final class LedgerRecord {
 
     /// 本记录对某账户余额的影响
     func effect(on account: LedgerAccount) -> Double {
-        var delta = 0.0
-        if accountRef?.id == account.id {
-            switch kind {
-            case .expense: delta -= amount
-            case .income: delta += amount
-            case .transfer: delta -= amount + fee
-            case .adjustment, .contribution: delta += amount
-            }
-        }
-        if kind == .transfer, toAccount?.id == account.id {
-            delta += amount
-        }
-        return delta
+        BalanceMath.effect(kind: kind, amount: amount, fee: fee,
+                           isSource: accountRef?.id == account.id, isTarget: toAccount?.id == account.id)
+    }
+
+    /// 统计口径下的类型：支出 / 收入；信用卡还款在「计入支出」开启时算支出；其余（转账、校准、缴存）为 nil
+    func countsAsExpense(includeRepayment: Bool) -> Bool { statsKind(includeRepayment: includeRepayment) == .expense }
+
+    func statsKind(includeRepayment: Bool) -> RecordKind? {
+        BalanceMath.statsKind(kind: kind, toLiability: toAccount?.type.isLiability ?? false, includeRepayment: includeRepayment)
     }
 }
 

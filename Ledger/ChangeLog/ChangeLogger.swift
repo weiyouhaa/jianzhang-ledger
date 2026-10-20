@@ -552,6 +552,7 @@ struct WatchedSetting {
         .init(key: SettingsKey.defaultAccount, label: "默认账户", entity: .settings,
               format: { let s = ($0 as? String) ?? ""; return s.isEmpty ? "不设置" : s }),
         .init(key: RuleStore.learnKey, label: "自动学习分类", entity: .settings, format: WatchedSetting.bool(true)),
+        .init(key: RepaymentSetting.key, label: "信用卡还款计入支出", entity: .settings, format: WatchedSetting.bool(false)),
         .init(key: SettingsKey.hideAmounts, label: "隐藏金额", entity: .settings, format: WatchedSetting.bool(false)),
         .init(key: SettingsKey.appearance, label: "主题", entity: .settings, format: {
             switch WatchedSetting.int($0, 0) { case 1: return "浅色"; case 2: return "深色"; default: return "跟随系统" }

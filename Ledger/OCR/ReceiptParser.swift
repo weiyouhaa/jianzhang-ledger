@@ -9,6 +9,9 @@ struct ParsedReceipt: Equatable {
     var categoryName: String?
     /// 付款方式线索（支付宝 / 微信 / 银行卡尾号 / 信用卡 / 花呗）
     var accountHint: AccountHint?
+    /// 信用卡 / 花呗还款截图：isCardRepayment 为 true，accountHint 为付款账户线索，repaymentCard 为被还款的卡
+    var isCardRepayment: Bool = false
+    var repaymentCard: AccountHint?
     var rawText: String = ""
     /// 金额候选得分（内部用于多笔拆分时过滤低置信度片段）
     var score: Double = 0
@@ -103,6 +106,46 @@ enum AccountHintParser {
     }
 }
 
+/// 信用卡还款识别：「信用卡还款」「还信用卡」「还款到 xx 信用卡」「花呗 / 白条还款」
+enum RepaymentDetector {
+    static func isCardRepayment(text: String) -> Bool {
+        let t = text.replacingOccurrences(of: " ", with: "")
+        if t.contains("退款") { return false }
+        if t.contains("信用卡还款") || t.contains("还信用卡") || t.contains("信用卡已还") { return true }
+        guard t.contains("还款") else { return false }
+        return t.contains("信用卡") || t.contains("花呗") || t.contains("白条") || t.contains("还款到")
+    }
+
+    private static let cardPattern = try! NSRegularExpression(
+        pattern: #"([\p{Han}]{2,8}?银行)?(信用卡|花呗|白条)\s*(?:尾号|末四位)?\s*[（(]?\s*[*＊]*\s*(\d{4})?\s*[)）]?"#)
+
+    /// 拆出被还款的卡与付款账户：带尾号的「xx 信用卡」优先作为卡，其余文字再解析付款方式
+    static func split(text: String) -> (card: AccountHint?, payer: AccountHint?) {
+        let cleaned = text.replacingOccurrences(of: "信用卡还款", with: " ")
+            .replacingOccurrences(of: "还信用卡", with: " ")
+        let ns = cleaned as NSString
+        let matches = cardPattern.matches(in: cleaned, range: NSRange(location: 0, length: ns.length))
+        guard let m = matches.first(where: { $0.range(at: 3).location != NSNotFound }) ?? matches.first else {
+            return (AccountHint(type: "credit"), AccountHintParser.parse(text: cleaned))
+        }
+        var card = AccountHint()
+        let kindWord = ns.substring(with: m.range(at: 2))
+        card.type = kindWord == "信用卡" ? "credit" : "consumerCredit"
+        if m.range(at: 1).location != NSNotFound {
+            var bank = ns.substring(with: m.range(at: 1))
+            for p in ["还款到", "还款至", "到", "至", "向"] where bank.hasPrefix(p) && bank.count - p.count >= 4 {
+                bank = String(bank.dropFirst(p.count))
+            }
+            card.bankName = bank
+        }
+        if m.range(at: 3).location != NSNotFound { card.cardTail = ns.substring(with: m.range(at: 3)) }
+        let rest = ns.replacingCharacters(in: m.range, with: " ")
+        var payer = AccountHintParser.parse(text: rest)
+        if let p = payer, p.type == "credit" || p.type == "consumerCredit" { payer = nil }
+        return (card, payer)
+    }
+}
+
 /// 从支付截图 / 小票 / 银行短信的 OCR 文本中提取金额、商户、时间并猜测分类。
 /// 纯 Foundation 实现，不依赖 Apple 专有框架，可在 Linux 上做单元检查（见 Tools/ParserCheck）。
 enum ReceiptParser {
@@ -182,6 +225,16 @@ enum ReceiptParser {
         result.merchant = merchant(lines: lines, amountLineIndex: best?.lineIndex)
         result.accountHint = AccountHintParser.parse(text: fullText)
         result.date = date(lines: lines, now: now, calendar: calendar)
+
+        if RepaymentDetector.isCardRepayment(text: fullText) {
+            result.isCardRepayment = true
+            result.isIncome = false
+            result.categoryName = "信用卡还款"
+            let split = RepaymentDetector.split(text: fullText)
+            result.repaymentCard = split.card
+            result.accountHint = split.payer
+            return result
+        }
 
         if let m = result.merchant, let c = CategoryGuesser.guess(text: m, isIncome: result.isIncome) {
             result.categoryName = c

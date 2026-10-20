@@ -72,7 +72,8 @@ enum BackupService {
             budgetRollover: d.bool(forKey: BudgetKey.rollover),
             budgetAlerts: d.bool(forKey: BudgetKey.alertsEnabled),
             budgetWarnPercent: d.object(forKey: BudgetKey.warnPercent) as? Int,
-            learnRules: d.object(forKey: RuleStore.learnKey) as? Bool
+            learnRules: d.object(forKey: RuleStore.learnKey) as? Bool,
+            repaymentAsExpense: d.object(forKey: RepaymentSetting.key) as? Bool
         )
         let rules = (try? context.fetch(FetchDescriptor<CategoryRule>())) ?? []
         let recurring = (try? context.fetch(FetchDescriptor<RecurringRule>())) ?? []
@@ -368,6 +369,7 @@ enum BackupService {
         // 预算提醒需要通知权限：恢复后由用户在「预算」页重新开启
         if let v = s.budgetWarnPercent { d.set(v, forKey: BudgetKey.warnPercent) }
         if let v = s.learnRules { d.set(v, forKey: RuleStore.learnKey) }
+        if let v = s.repaymentAsExpense { d.set(v, forKey: RepaymentSetting.key) }
     }
 }
 

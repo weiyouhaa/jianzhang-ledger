@@ -150,6 +150,8 @@ struct LedgerBackup: Codable {
         var budgetAlerts: Bool? = nil
         var budgetWarnPercent: Int? = nil
         var learnRules: Bool? = nil
+        /// 信用卡还款计入支出（新字段，旧备份没有时保持当前设置）
+        var repaymentAsExpense: Bool? = nil
     }
 
     var recordDateRange: ClosedRange<Date>? {

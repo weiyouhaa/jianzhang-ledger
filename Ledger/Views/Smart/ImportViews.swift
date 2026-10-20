@@ -75,7 +75,7 @@ struct ImportPreviewView: View {
                 } header: {
                     Text("选项")
                 } footer: {
-                    Text("已全额退款、交易关闭的交易会跳过；部分退款按净额记账。不计收支（还款、转账、理财）匹配到两个账户时记为转账。")
+                    Text("已全额退款、交易关闭的交易会跳过；部分退款按净额记账。不计收支（还款、转账、理财）匹配到两个账户时记为转账；转入信用卡 / 花呗即为信用卡还款。")
                 }
 
                 if !newItems.isEmpty { itemSection("新交易", newItems) }
@@ -181,7 +181,9 @@ struct ImportPreviewView: View {
             } label: {
                 HStack(spacing: 10) {
                     if item.kind == .transfer {
-                        CategoryIcon(icon: "arrow.left.arrow.right", color: Color(hex: "#30B0C7"), size: 34)
+                        // 转入信用卡 / 花呗等负债账户 = 信用卡还款
+                        CategoryIcon(icon: toAccount?.type.isLiability == true ? LedgerRecord.repaymentIcon : "arrow.left.arrow.right",
+                                     color: Color(hex: "#30B0C7"), size: 34)
                     } else {
                         CategoryIcon(icon: category?.icon ?? "questionmark", color: category?.color ?? .gray, size: 34)
                     }
@@ -212,6 +214,7 @@ struct ImportPreviewView: View {
     private func subtitle(_ item: ImportItem, category: LedgerCategory?, account: LedgerAccount?, toAccount: LedgerAccount?) -> String {
         var parts = [DateText.monthDayTime.string(from: item.entry.date)]
         if item.kind == .transfer {
+            if toAccount?.type.isLiability == true { parts.append("信用卡还款") }
             parts.append("\(account?.name ?? "?") → \(toAccount?.name ?? "?")")
         } else {
             parts.append(category?.name ?? "未分类")

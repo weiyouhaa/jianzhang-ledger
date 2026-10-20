@@ -107,6 +107,7 @@ jobs:
           shoot decoyhome light 24-decoy-home
           shoot decoyeditorhome light 25-decoy-editor
           shoot changelog light 26-change-log
+          shoot cardrepayment light 27-card-repayment
           shoot home     dark  07-home-dark
           shoot stats    dark  08-stats-dark
           ls -l screenshots

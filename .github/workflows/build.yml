@@ -62,6 +62,11 @@ jobs:
             Tools/ImportCheck/main.swift -o "$RUNNER_TEMP/importcheck"
           "$RUNNER_TEMP/importcheck" Tests/Fixtures/import
 
+      - name: Balance math tests (credit card repayment, edit/delete reversal, stats rules)
+        run: |
+          swiftc Ledger/Models/RecordKind.swift Tools/BalanceCheck/main.swift -o "$RUNNER_TEMP/balancecheck"
+          "$RUNNER_TEMP/balancecheck"
+
       - name: Passcode route tests (real vs decoy unlock)
         run: |
           swiftc Tools/PasscodeRouteCheck/main.swift -o "$RUNNER_TEMP/passcoderoute"

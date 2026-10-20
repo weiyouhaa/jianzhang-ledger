@@ -173,6 +173,34 @@ checkAll("退款", [OCRLine("退款成功"), OCRLine("¥99.00"), OCRLine("退款
 checkAll("对方已收款=支出", [OCRLine("支付成功,对方已收款"), OCRLine("¥8.00"), OCRLine("收款方 李记早点")],
          [Expect(amount: 8, income: false, merchant: "李记早点", category: "餐饮")])
 
+// 信用卡还款：识别为还款，拆出被还款的卡与付款账户
+func checkRepay(_ name: String, _ lines: [String], amount: Double, cardType: String, cardTail: String?, cardBank: String?,
+                payerType: String?, payerTail: String?) {
+    let r = ReceiptParser.parse(lines: lines, now: now, calendar: cal)
+    var errs: [String] = []
+    if !r.isCardRepayment { errs.append("not repayment") }
+    if r.amount != amount { errs.append("amount \(String(describing: r.amount))") }
+    if r.isIncome { errs.append("income") }
+    if r.categoryName != "信用卡还款" { errs.append("category \(String(describing: r.categoryName))") }
+    if r.repaymentCard?.type != cardType { errs.append("card type \(String(describing: r.repaymentCard?.type))") }
+    if r.repaymentCard?.cardTail != cardTail { errs.append("card tail \(String(describing: r.repaymentCard?.cardTail))") }
+    if r.repaymentCard?.bankName != cardBank { errs.append("card bank \(String(describing: r.repaymentCard?.bankName))") }
+    if r.accountHint?.type != payerType { errs.append("payer type \(String(describing: r.accountHint?.type))") }
+    if r.accountHint?.cardTail != payerTail { errs.append("payer tail \(String(describing: r.accountHint?.cardTail))") }
+    if errs.isEmpty { print("✅ \(name)") } else { failures += 1; print("❌ \(name): " + errs.joined(separator: ", ")) }
+}
+// 合成样例（非用户数据）
+checkRepay("支付宝信用卡还款", ["信用卡还款", "-3,000.00", "交易成功", "还款到 招商银行信用卡(1024)", "付款方式 招商银行储蓄卡(6688)"],
+           amount: 3000, cardType: "credit", cardTail: "1024", cardBank: "招商银行", payerType: "debit", payerTail: "6688")
+checkRepay("微信还信用卡", ["还信用卡", "¥1,200.00", "交通银行信用卡 尾号7316", "零钱支付"],
+           amount: 1200, cardType: "credit", cardTail: "7316", cardBank: "交通银行", payerType: "wechat", payerTail: nil)
+checkRepay("花呗还款", ["花呗还款成功", "¥860.00", "付款方式 余额宝"],
+           amount: 860, cardType: "consumerCredit", cardTail: nil, cardBank: nil, payerType: "alipay", payerTail: nil)
+do {
+    let r = ReceiptParser.parse(lines: ["支付成功", "¥46.00", "付款方式 交通银行信用卡(7316)", "收款方 华南畅行高速科技有限公司"], now: now, calendar: cal)
+    if r.isCardRepayment { failures += 1; print("❌ 信用卡消费误判为还款") } else { print("✅ 信用卡消费不是还款") }
+}
+
 // 时段与星期
 checkAll("凌晨", [OCRLine("前天 凌晨12:30"), OCRLine("付款金额"), OCRLine("¥30.00")], [Expect(amount: 30, date: "2026-10-16 00:30")])
 checkAll("中午", [OCRLine("昨天 中午12:15"), OCRLine("付款金额"), OCRLine("¥30.00")], [Expect(amount: 30, date: "2026-10-17 12:15")])
