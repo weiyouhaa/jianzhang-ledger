@@ -330,7 +330,7 @@ struct SettingsView: View {
                 Toggle(isOn: $aiInShortcuts) {
                     VStack(alignment: .leading, spacing: 2) {
                         Label("快捷指令中使用 Apple 智能", systemImage: "square.2.layers.3d")
-                        Text("默认关闭：背面轻点等快捷指令在后台运行，系统会限制模型调用和运行时长。开启后最多等 \(Int(OCREngineSetting.shortcutTimeout)) 秒，超时自动改用规则。")
+                        Text("默认关闭：背面轻点等快捷指令在后台运行，系统会限制模型调用和运行时长。开启后最多等 \(Int(OCREngineSetting.shortcutTimeout)) 秒（按识图已用时间调整），出错会用更短的提示词重试一次，仍不行自动改用规则。")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }

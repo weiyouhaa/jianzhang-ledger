@@ -62,9 +62,9 @@ jobs:
             Tools/ImportCheck/main.swift -o "$RUNNER_TEMP/importcheck"
           "$RUNNER_TEMP/importcheck" Tests/Fixtures/import
 
-      - name: Apple Intelligence merge tests (mocked model output validation / fallback)
+      - name: Apple Intelligence merge + prompt tests (mocked model output validation / fallback, prompt size, budget, error text redaction)
         run: |
-          swiftc Ledger/OCR/ReceiptParser.swift Ledger/OCR/ModelMerge.swift Ledger/OCR/AccountResolver.swift Tools/ModelMergeCheck/main.swift -o "$RUNNER_TEMP/modelmerge"
+          swiftc Ledger/OCR/ReceiptParser.swift Ledger/OCR/ModelMerge.swift Ledger/OCR/ModelPrompt.swift Ledger/OCR/AccountResolver.swift Tools/ModelMergeCheck/main.swift -o "$RUNNER_TEMP/modelmerge"
           "$RUNNER_TEMP/modelmerge"
 
       - name: Hard timeout tests (no double resume, returns at deadline even if work ignores cancel)

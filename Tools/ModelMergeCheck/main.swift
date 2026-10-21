@@ -1,5 +1,5 @@
 // Apple 智能结果校验 / 合并测试（模拟模型输出，合成数据）
-// swiftc Ledger/OCR/ReceiptParser.swift Ledger/OCR/ModelMerge.swift Tools/ModelMergeCheck/main.swift
+// swiftc Ledger/OCR/ReceiptParser.swift Ledger/OCR/ModelMerge.swift Ledger/OCR/ModelPrompt.swift Ledger/OCR/AccountResolver.swift Tools/ModelMergeCheck/main.swift
 import Foundation
 
 var cal = Calendar(identifier: .gregorian)
@@ -103,13 +103,16 @@ let o13 = ModelMerge.merge(model: [ModelTransaction(amount: 46, kind: "expense",
                            rules: [], ctx: ctx(["滴滴出行", "¥46.00"]))
 check(o13.receipts.first?.accountName == nil && o13.receipts.first?.categoryName == "交通", "未知账户为 nil，分类不在列表时用关键词兜底：\(o13.receipts.first?.categoryName ?? "nil")")
 
-// 11. 提示词：带行号、位置、大字标记，且有长度上限
-let p = ModelMerge.promptText([OCRLine("¥18.00", midY: 0.31, height: 0.05), OCRLine("阿芳", midY: 0.25, height: 0.02)])
-check(p.contains("L01 y=0.31 大字 | ¥18.00") && p.contains("L02 y=0.25 | 阿芳"), "提示词包含行号 / 位置")
-let long = ModelMerge.promptText((0..<500).map { OCRLine("第\($0)行 一些文字") }, maxChars: 300)
-check(long.count <= 300, "提示词截断（\(long.count) 字）")
-let ins = ModelMerge.instructions(categories: expenseCats + incomeCats, incomeCategories: incomeCats, accounts: accounts)
-check(ins.contains("对方已收款") && ins.contains("招行信用卡") && !ins.contains("支出分类中选：餐饮、交通、购物、娱乐、生活缴费、其他、工资"), "指令包含语义说明与用户列表")
+// 11. 提示词：大字标记、行数 / 字数上限、指令包含语义说明与用户列表
+let p = ModelPromptBuilder.build(lines: [OCRLine("¥18.00", midY: 0.31, height: 0.05), OCRLine("阿芳", midY: 0.35, height: 0.02)],
+                                 instructions: "x", level: .normal)
+check(p.prompt.contains("★¥18.00") && p.prompt.contains("阿芳") && !p.prompt.contains("y="), "提示词：大字标记，无行号 / 坐标")
+let long = ModelPromptBuilder.build(lines: (0..<500).map { OCRLine("第\($0)行 一些文字", midY: 0.1 + Double($0) / 1000, height: 0.02) },
+                                    instructions: "x", level: .minimal)
+check(long.keptLines <= PromptLevel.minimal.maxLines && long.prompt.count <= PromptLevel.minimal.maxChars + 10 && long.truncatedLines > 0,
+      "提示词截断（\(long.keptLines) 行，\(long.prompt.count) 字）")
+let ins = ModelPromptBuilder.instructions(expenseCategories: expenseCats, incomeCategories: incomeCats, accounts: accounts, level: .normal)
+check(ins.contains("支付成功") && ins.contains("招行信用卡") && ins.contains("repay") && ins.contains("餐饮"), "指令包含语义说明与用户列表")
 
 // 12. 不得 trap：长数字串（订单号）、极端金额、重复名称、垃圾日期（全部为合成数据）
 // 曾经：OCR 里 28 位订单号 → Double → ×100 → Int 溢出，Swift 运行时 trap（SIGTRAP），快捷指令「意外退出」
@@ -120,10 +123,12 @@ let edge1 = ModelMerge.merge(model: [ModelTransaction(amount: 144.43000000001, k
                              rules: [], ctx: ctx(orderLines))
 check(edge1.engine == .appleIntelligence && edge1.receipts.count == 1 && edge1.receipts.first?.amount == 144.43,
       "长订单号不 trap，144.43000000001 → 144.43")
-let weird: [Double] = [-144.43, 0, -0.0, .nan, -.nan, .infinity, -.infinity, 1e20, -1e20, .greatestFiniteMagnitude,
+let weird: [Double] = [0, -0.0, .nan, -.nan, .infinity, -.infinity, 1e20, -1e20, .greatestFiniteMagnitude,
                        .leastNonzeroMagnitude, 99_999_999.99, 100_000_000, 1e15, 9.2e16]
 let edge2 = ModelMerge.merge(model: weird.map { ModelTransaction(amount: $0, kind: "expense") }, rules: [], ctx: ctx(orderLines))
 check(edge2.receipts.allSatisfy { ($0.amount ?? 0).isFinite } && edge2.dropped == weird.count, "异常金额全部丢弃，不 trap（丢弃 \(edge2.dropped)）")
+let negOK = ModelMerge.merge(model: [ModelTransaction(amount: -144.43, kind: "expense")], rules: [], ctx: ctx(orderLines))
+check(negOK.dropped == 0 && negOK.receipts.first?.amount == 144.43, "2.0 (4)：原文「-144.43」、模型给负数 → 取绝对值后有效")
 check(ModelMerge.cents(.nan) == nil && ModelMerge.cents(.infinity) == nil && ModelMerge.cents(1e300) == nil
       && ModelMerge.cents(-1e300) == nil && ModelMerge.cents(144.43000000001) == 14443, "cents 安全换算")
 check(!ModelMerge.amountAppears(.nan, in: "nan") && !ModelMerge.amountAppears(1e30, in: "1000000000000000000000000000000"),
@@ -225,10 +230,94 @@ check(AccountResolver.resolve(hint: AccountHint(type: "credit"), modelName: nil,
 let spend = AccountResolver.resolve(hint: AccountHint(type: "credit", cardTail: "2468", bankName: "招商银行"), modelName: nil, role: .single, accounts: userAccounts)
 check(spend.id == idCmbCredit, "普通消费的信用卡按银行匹配")
 check(AccountResolver.normalizeTail("[2468]") == "2468" && AccountResolver.normalizeTail("12") == nil && AccountResolver.normalizeTail(nil) == nil, "尾号规范化")
-let insUP = ModelMerge.instructions(categories: expenseCats, incomeCategories: incomeCats, accounts: ["储蓄卡-招商银行"],
-                                    accountDetails: ["储蓄卡-招商银行〔储蓄卡·招商银行〕"])
-check(insUP.contains("Payment Method") && insUP.contains("Credit Card Number") && insUP.contains("CMB 招商银行")
-      && insUP.contains("〔储蓄卡·招商银行〕") && insUP.contains("示例"), "指令含英文字段语义、银行缩写、账户说明和示例")
+// ===== 2.0 (4)：提示词瘦身 / 预算 / 错误分类 / 金额格式（全部为合成数据）=====
+
+// 英文云闪付（合成）：附英文字段说明、只附出现过的银行缩写、还款示例
+let upLines = [OCRLine("9:41", midY: 0.02, height: 0.015), OCRLine("Repay:CMB Credit card", midY: 0.2, height: 0.03),
+               OCRLine("¥268.10", midY: 0.25, height: 0.05), OCRLine("Payment Method", midY: 0.4, height: 0.02),
+               OCRLine("CMB Debit card[1357]", midY: 0.42, height: 0.02), OCRLine("Credit Card Number", midY: 0.45, height: 0.02),
+               OCRLine("CMB Credit card[2468]", midY: 0.47, height: 0.02), OCRLine("Order Time 2026.01.02 10:00:00", midY: 0.5, height: 0.02),
+               OCRLine("Order Number 1234567890123456789012345678", midY: 0.55, height: 0.02), OCRLine("Customer Service", midY: 0.9, height: 0.02)]
+let upIns = ModelPromptBuilder.instructions(expenseCategories: expenseCats, incomeCategories: incomeCats, accounts: accounts, level: .normal)
+let up = ModelPromptBuilder.build(lines: upLines, instructions: upIns, level: .normal)
+check(up.prompt.contains("Payment Method/Paid with") && up.prompt.contains("CMB=招商银行") && !up.prompt.contains("ICBC"),
+      "英文截图：附英文字段说明，只列出现过的银行缩写")
+check(up.prompt.contains("kind=repay") && up.prompt.contains("[2468]") && up.prompt.contains("[1357]"), "还款截图：附示例，保留尾号")
+check(!up.prompt.contains("1234567890123") && !up.prompt.contains("9:41") && !up.prompt.contains("Customer Service") && up.noiseLines == 3,
+      "去掉状态栏、订单号整行、客服按钮（去噪 \(up.noiseLines)）")
+check(up.estimatedTokens + PromptLevel.normal.maxResponseTokens < ModelPromptBuilder.contextTokens - ModelPromptBuilder.safetyMargin,
+      "还款截图 + 3 个分类组：估算 \(up.estimatedTokens) tokens + 输出上限 在上下文内")
+
+// 中文截图：不附英文说明 / 还款示例；广告行、按钮行去掉；带付款字样的「优惠」行保留；卡号全号只留末 4 位
+let cnLines = ["微信支付", "-26.00", "示例面馆", "当前状态 支付成功", "支付方式 零钱", "商户单号 4200001234567890123456", "限时福利 立即领取红包",
+               "实付金额 优惠券抵扣 2.00", "收款卡号 6222 0000 1111 2468", "返回", "对此订单有疑问"].map { OCRLine($0) }
+let cn = ModelPromptBuilder.build(lines: cnLines, instructions: "x", level: .normal)
+check(!cn.prompt.contains("英文") && !cn.prompt.contains("例：") && cn.prompt.contains("示例面馆"), "中文截图：不附英文说明 / 示例")
+check(!cn.prompt.contains("限时福利") && !cn.prompt.contains("对此订单") && !cn.prompt.contains("返回") && !cn.prompt.contains("42000012"),
+      "广告 / 按钮 / 商户单号去掉")
+check(cn.prompt.contains("优惠券抵扣") && cn.prompt.contains("#2468") && !cn.prompt.contains("6222"), "带付款字样的行保留；卡号全号只留末 4 位")
+let dateLine = ModelPromptBuilder.clean([OCRLine("2026-10-21 21:56:01"), OCRLine("交易时间 2026-01-02 10:00")])
+check(dateLine.lines.count == 2 && dateLine.lines[0].text == "2026-10-21 21:56:01", "日期时间不被当成长数字串")
+
+// 大词表：14 个长账户名 + 30 个分类，标准级别仍在预算内；精简 / 极简更短
+let bigAccounts = (1...14).map { "示例储蓄卡\($0)号" }
+let bigCats = (1...30).map { "分类\($0)" }
+let insN = ModelPromptBuilder.instructions(expenseCategories: bigCats, incomeCategories: ["工资", "红包"], accounts: bigAccounts, level: .normal)
+let insC = ModelPromptBuilder.instructions(expenseCategories: bigCats, incomeCategories: ["工资", "红包"], accounts: bigAccounts, level: .compact)
+let insM = ModelPromptBuilder.instructions(expenseCategories: bigCats, incomeCategories: ["工资", "红包"], accounts: bigAccounts, level: .minimal)
+check(insN.count > insC.count && insC.count > insM.count, "指令长度：标准 \(insN.count) > 精简 \(insC.count) > 极简 \(insM.count)")
+check(!insN.contains("分类21") && insM.contains("示例储蓄卡8号") && !insM.contains("示例储蓄卡9号") && insN.contains("示例储蓄卡14号"),
+      "分类 / 账户按级别限量")
+let bigLines = (0..<60).map { OCRLine("第\($0)行 示例商户名称很长很长很长 ¥\($0).00 备注文字", midY: 0.1 + Double($0) / 100, height: 0.02) }
+for level in PromptLevel.allCases {
+    let i = ModelPromptBuilder.instructions(expenseCategories: bigCats, incomeCategories: ["工资"], accounts: bigAccounts, level: level)
+    let b = ModelPromptBuilder.build(lines: bigLines, instructions: i, level: level)
+    check(b.estimatedTokens + level.maxResponseTokens + ModelPromptBuilder.safetyMargin <= ModelPromptBuilder.contextTokens,
+          "\(level.title)：60 行长截图估算 \(b.estimatedTokens) tokens，在上下文内（\(b.keptLines) 行）")
+}
+check(ModelPromptBuilder.estimateTokens("招商银行") == 6 && ModelPromptBuilder.estimateTokens("Payment") == 3, "token 估算")
+check(PromptLevel.initial(thermalSerious: true) == .compact && PromptLevel.normal.smaller == .compact && PromptLevel.compact.smaller == .minimal,
+      "发热用精简；重试逐级缩短")
+check(!ModelPromptBuilder.build(lines: [OCRLine("信用卡还款"), OCRLine("¥500.00")], instructions: "x", level: .minimal).prompt.contains("例："),
+      "极简级别不附示例")
+
+// 预算：OCR 快 → 15 秒；慢 → 递减，最少 8 秒；App 内最多 20 秒
+check(ModelBudget.timeout(shortcut: true, elapsed: 0.5) == 15 && ModelBudget.timeout(shortcut: true, elapsed: 6) == 13
+      && ModelBudget.timeout(shortcut: true, elapsed: 30) == 8 && ModelBudget.timeout(shortcut: true, elapsed: .nan) == 15, "快捷指令超时自适应")
+check(ModelBudget.timeout(shortcut: false, elapsed: 1) == 20 && ModelBudget.timeout(shortcut: false, elapsed: 20) == 10, "App 内超时自适应")
+
+// 错误分类：桥接成 NSError 时按说明文字猜种类，类型名本身不误判
+check(ModelErrorKind.guess(from: "FoundationModels.LanguageModelSession.GenerationError error -1") == .unknown, "类型名不误判为语言错误")
+check(ModelErrorKind.guess(from: "Exceeded model context window size") == .exceededContextWindowSize, "context window → 超出上下文")
+check(ModelErrorKind.guess(from: "Failed to deserialize a Generable type from model output (decoding)") == .decodingFailure, "decoding")
+check(ModelErrorKind.guess(from: "May contain sensitive or unsafe content") == .guardrailViolation, "guardrail")
+check(ModelErrorKind.guess(from: "Failed to generate") == .unknown, "generate 不误判为限流")
+check(ModelErrorKind.exceededContextWindowSize.retryable && ModelErrorKind.unknown.retryable && !ModelErrorKind.rateLimited.retryable
+      && !ModelErrorKind.assetsUnavailable.retryable, "可重试的错误种类")
+
+// 错误说明脱敏：不含原文单词、中文、金额、长数字
+let src = "Repay CMB Credit card ¥268.10 Payment Method 示例面馆 1234567890"
+let red = ModelErrorText.sanitize("Exceeded context window: 4200 tokens. Payment Method 示例面馆 268.10 1234567890 Repay", source: src)
+check(red.contains("Exceeded context window") && red.contains("4200") && !red.contains("Payment") && !red.contains("Repay")
+      && !red.contains("268") && !red.contains("123456") && !red.contains("示例"), "错误说明脱敏：\(red)")
+
+// 金额格式：负数取绝对值、全角、货币符号、千分位空格、元
+let fmtLines = ["示例超市", "－１２．００", "¥1, 234.50", "12 .50元", "付款 ￥88"]
+let mf = ModelMerge.merge(model: [ModelTransaction(amount: -12, kind: "expense", merchant: "示例超市"),
+                                  ModelTransaction(amount: 1234.5, kind: "expense", merchant: "示例超市", dateText: "a"),
+                                  ModelTransaction(amount: 12.5, kind: "expense", merchant: "示例超市", dateText: "b"),
+                                  ModelTransaction(amount: 88, kind: "expense", merchant: "示例超市", dateText: "c")],
+                          rules: [], ctx: ctx(fmtLines))
+check(mf.engine == .appleIntelligence && mf.receipts.count == 4 && mf.dropped == 0 && mf.receipts.first?.amount == 12,
+      "负数 / 全角 / 千分位空格 / 元 都能匹配（\(mf.receipts.count) 笔，丢弃 \(mf.dropped)）")
+let md = ModelMerge.merge(model: [ModelTransaction(amount: 0, kind: "expense"), ModelTransaction(amount: .nan, kind: "expense"),
+                                  ModelTransaction(amount: 2e9, kind: "expense"), ModelTransaction(amount: 77, kind: "expense")],
+                          rules: [], ctx: ctx(["示例", "¥88.00"]))
+check(md.dropped == 4 && md.dropReasons == ["格式无效 1", "为零 1", "超出范围 1", "不在原文 1"], "丢弃原因分类：\(md.dropReasons)")
+check(ModelMerge.nearMissHint(8.8, ModelMerge.numbers(in: "¥88.00")) == "小数位不同" && ModelMerge.nearMissHint(5, ModelMerge.numbers(in: "¥88.00")) == "原文无相近数字",
+      "不在原文：区分小数位不同 / 编造")
+let mr4 = ModelMerge.merge(model: [ModelTransaction(amount: 500, kind: "repay")], rules: [], ctx: ctx(["信用卡还款", "¥500.00"]))
+check(mr4.receipts.first?.isCardRepayment == true, "kind=repay 识别为还款")
 
 print(failures == 0 ? "ALL PASSED" : "\(failures) FAILED")
 exit(failures == 0 ? 0 : 1)

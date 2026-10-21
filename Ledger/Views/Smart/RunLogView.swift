@@ -151,6 +151,7 @@ struct RunLogView: View {
             parts.append("\(d.lineCount) 行 → \(d.resultCount) 笔")
             if d.dropped > 0 { parts.append("剔除 \(d.dropped)") }
             if let r = d.fallbackReason, !r.isEmpty { parts.append(r) }
+            if let m = d.modelDetail, !m.isEmpty { parts.append(m) }
             parts.append("Apple 智能：\(d.aiStatus)")
             s += parts.joined(separator: " · ") + "\n"
         }

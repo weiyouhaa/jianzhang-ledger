@@ -50,6 +50,8 @@ struct OCRDiagnostic: Codable, Identifiable, Equatable {
     var resultCount: Int
     var dropped: Int
     var fallbackReason: String?
+    /// 2.0 (4)：提示词级别 / 估算 tokens / 尝试次数 / 错误种类 / 丢弃原因（不含文字和金额；旧记录为 nil）
+    var modelDetail: String?
 
     static let key = "diag.ocr.recent"
 
@@ -85,10 +87,34 @@ enum ReceiptRecognizer {
     static func recognizeDetailed(imageData: Data, now: Date = Date(), vocabulary: OCRVocabulary? = nil,
                                   context: OCRRunContext = .inApp) async throws -> OCRRecognition {
         let t0 = Date()
+        // 要用 Apple 智能时：先查状态并创建 / 预加载会话（指令只依赖词表），模型加载与 OCR 同时进行
+        let plan = modelPlan(vocabulary: vocabulary, context: context)
         let lines = try await TextRecognizer.recognizeOCRLines(in: imageData)
         let ocrMs = Int(Date().timeIntervalSince(t0) * 1000)
         RunLog.shared.log(.info, "ocr-done", "OCR 共 \(lines.count) 行，用时 \(ocrMs) ms（\(context == .shortcut ? "快捷指令" : "App 内")）")
-        return await extract(lines: lines, now: now, vocabulary: vocabulary, context: context, ocrMs: ocrMs)
+        return await extract(lines: lines, now: now, vocabulary: vocabulary, context: context, ocrMs: ocrMs,
+                             plan: plan, startedAt: t0)
+    }
+
+    /// 识图前的模型准备结果
+    struct ModelPlan {
+        var status: AppleIntelligenceStatus?
+        var prepared: PreparedModelSession?
+    }
+
+    static func modelPlan(vocabulary: OCRVocabulary?, context: OCRRunContext) -> ModelPlan {
+        guard OCREngineSetting.preferAppleIntelligence,
+              context != .shortcut || OCREngineSetting.useInShortcuts else { return ModelPlan() }
+        RunLog.shared.log(.info, "ai-status", "查询 Apple 智能状态")
+        let status = AppleIntelligenceStatus.current
+        RunLog.shared.log(.info, "ai-status", "Apple 智能：\(status.title)")
+        guard status.isAvailable else { return ModelPlan(status: status) }
+        let vocab = vocabulary ?? OCRVocabulary(expenseCategories: [], incomeCategories: [], accounts: [])
+        let prepared = AppleIntelligenceExtractor.prepareSession(vocabulary: vocab)
+        RunLog.shared.log(.info, "model-prewarm", "预加载会话（与 OCR 并行）：级别 \(prepared.level.title)，指令 \(prepared.instructions.count) 字"
+                          + "，约 \(ModelPromptBuilder.estimateTokens(prepared.instructions)) tokens"
+                          + (AppleIntelligenceExtractor.thermalSerious ? "（设备发热，用精简提示词）" : ""))
+        return ModelPlan(status: status, prepared: prepared)
     }
 
     /// 规则解析结果（没有任何一笔时返回一个只带原文的结果）
@@ -109,14 +135,15 @@ enum ReceiptRecognizer {
     static func seconds(_ ms: Int) -> String { String(format: "%.1f 秒", Double(ms) / 1000) }
 
     static func extract(lines: [OCRLine], now: Date, vocabulary: OCRVocabulary?, context: OCRRunContext,
-                        ocrMs: Int = 0) async -> OCRRecognition {
+                        ocrMs: Int = 0, plan: ModelPlan? = nil, startedAt: Date? = nil) async -> OCRRecognition {
         let tRules = Date()
         // 规则结果同样过金额上限（例如把长数字串误识别成金额），后续换算 / 预算计算都不会溢出
         let rules = sanitize(ruleReceipts(lines, now: now))
         RunLog.shared.log(.info, "rules", "规则解析：\(rules.filter { ($0.amount ?? 0) > 0 }.count) 笔，用时 \(Int(Date().timeIntervalSince(tRules) * 1000)) ms")
         // 只在真正要用 Apple 智能时才查询模型状态：关闭时完全不触碰 FoundationModels
         var checkedStatus: AppleIntelligenceStatus?
-        func finish(_ raw: OCRRecognition, modelMs: Int? = nil, dropped: Int = 0, reason: String? = nil) -> OCRRecognition {
+        func finish(_ raw: OCRRecognition, modelMs: Int? = nil, dropped: Int = 0, reason: String? = nil,
+                    detail: String? = nil) -> OCRRecognition {
             var r = raw
             r.receipts = sanitize(r.receipts)
             let found = r.receipts.filter { ($0.amount ?? 0) > 0 }
@@ -125,7 +152,7 @@ enum ReceiptRecognizer {
             OCRDiagnostic.record(OCRDiagnostic(context: context, engine: r.engine.title, aiStatus: checkedStatus?.title ?? "未检查（未启用）",
                                                ocrMs: ocrMs, modelMs: modelMs, lineCount: lines.count,
                                                resultCount: r.receipts.filter { ($0.amount ?? 0) > 0 }.count,
-                                               dropped: dropped, fallbackReason: reason ?? r.note))
+                                               dropped: dropped, fallbackReason: reason ?? r.note, modelDetail: detail))
             return r
         }
         guard OCREngineSetting.preferAppleIntelligence else {
@@ -135,10 +162,15 @@ enum ReceiptRecognizer {
             return finish(OCRRecognition(receipts: rules, engine: .rules, note: nil),
                           reason: "快捷指令中未启用 Apple 智能")
         }
-        RunLog.shared.log(.info, "ai-status", "查询 Apple 智能状态")
-        let status = AppleIntelligenceStatus.current
+        let status: AppleIntelligenceStatus
+        if let s = plan?.status {
+            status = s
+        } else {
+            RunLog.shared.log(.info, "ai-status", "查询 Apple 智能状态")
+            status = AppleIntelligenceStatus.current
+            RunLog.shared.log(.info, "ai-status", "Apple 智能：\(status.title)")
+        }
         checkedStatus = status
-        RunLog.shared.log(.info, "ai-status", "Apple 智能：\(status.title)")
         guard status.isAvailable else {
             return finish(OCRRecognition(receipts: rules, engine: .rules, note: "Apple 智能\(status.shortReason)"))
         }
@@ -151,14 +183,18 @@ enum ReceiptRecognizer {
                                      categories: vocab.expenseCategories + vocab.incomeCategories,
                                      incomeCategories: vocab.incomeCategories, accounts: vocab.accounts,
                                      now: now, calendar: .current)
-        let timeout = context == .shortcut ? OCREngineSetting.shortcutTimeout : OCREngineSetting.inAppTimeout
+        // 超时按已用时间自适应：OCR 快就多给模型一些时间（快捷指令最多 15 秒）
+        let elapsed = Date().timeIntervalSince(startedAt ?? Date().addingTimeInterval(-Double(ocrMs) / 1000))
+        let timeout = ModelBudget.timeout(shortcut: context == .shortcut, elapsed: elapsed)
         let t1 = Date()
-        RunLog.shared.log(.info, "model-start", "端侧模型开始（超时 \(Int(timeout)) 秒，\(prepared.count) 行）")
-        let result = await AppleIntelligenceExtractor.extract(lines: prepared, vocabulary: vocab, timeout: timeout)
+        RunLog.shared.log(.info, "model-start", "端侧模型开始（超时 \(String(format: "%.1f", timeout)) 秒，已用 \(String(format: "%.1f", elapsed)) 秒，\(prepared.count) 行）")
+        let stats = ModelRunStats()
+        let result = await AppleIntelligenceExtractor.extract(lines: prepared, vocabulary: vocab, timeout: timeout,
+                                                              prepared: plan?.prepared, stats: stats)
         let modelMs = Int(Date().timeIntervalSince(t1) * 1000)
         switch result {
         case .success(let txns): RunLog.shared.log(.info, "model-end", "模型完成，用时 \(modelMs) ms，\(txns.count) 笔")
-        case .failure(let f): RunLog.shared.log(.warn, "model-end", "模型失败，用时 \(modelMs) ms：\(f.reason)")
+        case .failure(let f): RunLog.shared.log(.warn, "model-end", "模型失败，用时 \(modelMs) ms：\(f.reason)（\(f.kind.rawValue)）")
         }
         ModelMerge.trace = { step, message in RunLog.shared.log(.info, step, message) }
         let outcome: ModelMerge.Outcome
@@ -177,7 +213,10 @@ enum ReceiptRecognizer {
         // 引擎行带耗时，便于诊断
         let timing: String? = "模型 " + seconds(modelMs)
         let fullNote = [timing, note].compactMap { $0 }.joined(separator: " · ")
+        var detail = [stats.line]
+        if !outcome.dropReasons.isEmpty { detail.append("剔除原因 " + outcome.dropReasons.joined(separator: "、")) }
+        let detailLine = detail.filter { !$0.isEmpty }.joined(separator: " · ")
         return finish(OCRRecognition(receipts: receipts, engine: outcome.engine, note: fullNote.isEmpty ? nil : fullNote),
-                      modelMs: modelMs, dropped: outcome.dropped)
+                      modelMs: modelMs, dropped: outcome.dropped, detail: detailLine.isEmpty ? nil : detailLine)
     }
 }

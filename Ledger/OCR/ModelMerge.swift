@@ -45,6 +45,8 @@ enum ModelMerge {
         var skippedTransfers: Int
         /// 回退到规则时的原因（显示给用户的一小行字）
         var fallbackReason: String?
+        /// 丢弃原因统计（只有种类和条数，例如「不在原文 1」），写日志 / 诊断用
+        var dropReasons: [String] = []
     }
 
     /// 运行日志钩子（App 内指向 RunLog；命令行测试为空操作）。只传步骤名和计数，不传文字 / 金额。
@@ -59,14 +61,61 @@ enum ModelMerge {
         v.isFinite && v > 0 && v < maxAmount
     }
 
+    /// 丢弃原因（只用于日志 / 诊断：只写种类，不写金额）
+    enum DropReason: String, CaseIterable {
+        case format, zero, outOfRange, notInText, balanceOnly, duplicate
+        var title: String {
+            switch self {
+            case .format: return "格式无效"
+            case .zero: return "为零"
+            case .outOfRange: return "超出范围"
+            case .notInText: return "不在原文"
+            case .balanceOnly: return "只在余额处"
+            case .duplicate: return "重复"
+            }
+        }
+    }
+
+    /// 金额本身的问题（负数已在调用前取绝对值）；nil = 可用
+    static func amountProblem(_ v: Double) -> DropReason? {
+        guard v.isFinite else { return .format }
+        if v == 0 || abs(v) < 0.005 { return .zero }
+        if v < 0 { return .format }
+        if v >= maxAmount || cents(v) == nil { return .outOfRange }
+        return nil
+    }
+
+    /// 「不在原文」时的粗略分类，帮助判断是格式问题还是模型编造（不含金额本身）
+    static func nearMissHint(_ v: Double, _ numbers: Set<Int>) -> String {
+        guard let c = cents(v) else { return "无法换算" }
+        if numbers.contains(c * 10) || numbers.contains(c * 100) || (c % 10 == 0 && numbers.contains(c / 10)) || (c % 100 == 0 && numbers.contains(c / 100)) {
+            return "小数位不同"
+        }
+        if numbers.contains(where: { abs($0 - c) <= 1 }) { return "相差 1 分" }
+        return "原文无相近数字"
+    }
+
     /// 匹配数字串：长数字串（订单号 / 卡号 / 流水号）不会被当成金额
     private static let numberPattern = try! NSRegularExpression(pattern: #"\d{1,3}(?:,\d{3})+(?:\.\d{1,2})?|\d+(?:\.\d{1,2})?"#)
     /// 去掉千分位后超过这个长度的数字串直接忽略（远大于 maxAmount）
     private static let maxNumberLength = 15
 
     /// 原文里出现过的全部数字（去掉千分位、全角、货币符号），保留两位小数
+    private static let spacedThousands = try! NSRegularExpression(pattern: #"(\d)\s*,\s+(\d{3})(?!\d)"#)
+    private static let spacedDecimal = try! NSRegularExpression(pattern: #"(\d)\s+\.\s*(\d{1,2})(?!\d)"#)
+
+    /// 金额匹配前的规范化：全角 → 半角（ReceiptParser.normalize），再合并「1, 234.50」「12 .50」这类 OCR 空格
+    static func normalizeAmounts(_ text: String) -> String {
+        var s = ReceiptParser.normalize(text)
+        for r in [spacedThousands, spacedDecimal] {
+            let sep = r === spacedThousands ? "," : "."
+            s = r.stringByReplacingMatches(in: s, range: NSRange(location: 0, length: (s as NSString).length), withTemplate: "$1\(sep)$2")
+        }
+        return s
+    }
+
     static func numbers(in text: String) -> Set<Int> {
-        let normalized = ReceiptParser.normalize(text)
+        let normalized = normalizeAmounts(text)
         let ns = normalized as NSString
         var result = Set<Int>()
         for m in numberPattern.matches(in: normalized, range: NSRange(location: 0, length: ns.length)) {
@@ -101,7 +150,7 @@ enum ModelMerge {
         let re = numberPattern
         var occurrences = 0
         for raw in lines {
-            let line = ReceiptParser.normalize(raw)
+            let line = normalizeAmounts(raw)
             let ns = line as NSString
             for m in re.matches(in: line, range: NSRange(location: 0, length: ns.length)) {
                 let raw = ns.substring(with: m.range).replacingOccurrences(of: ",", with: "")
@@ -135,6 +184,7 @@ enum ModelMerge {
         r.score = 100
         r.rawText = ctx.lines.joined(separator: "\n")
         var kind = t.kind.lowercased()
+        if kind == "repay" { kind = "cardrepayment" }
         let localizedText = EnglishBankTerms.localize(ctx.lines.joined(separator: " "))
         // 原文明确是信用卡还款（还款 + 信用卡 / 银行），模型却判为普通支出：按还款处理（截图证据优先于模型的分类）
         if kind == "expense", !t.isRefund,
@@ -226,22 +276,35 @@ enum ModelMerge {
         var skipped = 0
         var seen = Set<String>()
         var usedRules = Set<Int>()
+        var reasons: [String: Int] = [:]
         for (i, t) in model.enumerated() {
             trace("model-item", "第 \(i + 1) 笔：类型 \(t.kind.prefix(16))，付款账户\(t.fromAccountHint.isEmpty || t.fromAccountHint == "未知" ? "无" : "有")"
                   + "，收款账户\(t.toAccountHint.isEmpty || t.toAccountHint == "未知" ? "无" : "有")，尾号 \(t.fromCardTail.isEmpty ? 0 : 1)+\(t.toCardTail.isEmpty ? 0 : 1)"
                   + "，银行 \(t.bankNames.count) 个，理由 \(t.reason.count) 字")
-            guard isValidAmount(t.amount), let c = cents(t.amount) else {
-                trace("model-validate", "第 \(i + 1) 笔：金额无效，丢弃"); dropped += 1; continue
+            var t = t
+            // 模型照抄了「-26.00」这类带负号的金额：取绝对值（是否为收入由 kind 决定）
+            if t.amount.isFinite && t.amount < 0 {
+                t.amount = -t.amount
+                trace("model-validate", "第 \(i + 1) 笔：负数金额取绝对值")
             }
+            if let problem = amountProblem(t.amount) {
+                trace("model-validate", "第 \(i + 1) 笔：金额无效（\(problem.title)），丢弃")
+                dropped += 1; reasons[problem.title, default: 0] += 1; continue
+            }
+            let c = cents(t.amount)!
             guard textNumbers.contains(c) else {
-                trace("model-validate", "第 \(i + 1) 笔：金额不在原文中，丢弃"); dropped += 1; continue
+                trace("model-validate", "第 \(i + 1) 笔：金额不在原文中，丢弃（\(nearMissHint(t.amount, textNumbers))）")
+                dropped += 1; reasons[DropReason.notInText.title, default: 0] += 1; continue
             }
             guard !onlyInBalanceLines(t.amount, lines: ctx.lines) else {
-                trace("model-validate", "第 \(i + 1) 笔：只出现在余额处，丢弃"); dropped += 1; continue
+                trace("model-validate", "第 \(i + 1) 笔：只出现在余额处，丢弃")
+                dropped += 1; reasons[DropReason.balanceOnly.title, default: 0] += 1; continue
             }
             if t.kind.lowercased() == "transfer" { trace("model-validate", "第 \(i + 1) 笔：账户间转账，跳过"); skipped += 1; continue }
             let key = "\(c)|\(t.merchant)|\(t.dateText)"
-            guard seen.insert(key).inserted else { trace("model-dedupe", "第 \(i + 1) 笔：重复，丢弃"); dropped += 1; continue }
+            guard seen.insert(key).inserted else {
+                trace("model-dedupe", "第 \(i + 1) 笔：重复，丢弃"); dropped += 1; reasons[DropReason.duplicate.title, default: 0] += 1; continue
+            }
             // 同金额、未被占用的规则结果，用来补充日期和付款方式
             let idx = ruleItems.indices.first { j in
                 guard !usedRules.contains(j), let a = ruleItems[j].amount, let rc = cents(a) else { return false }
@@ -252,89 +315,22 @@ enum ModelMerge {
             valid.append(receipt(from: t, ctx: ctx, ruleMatch: idx.map { ruleItems[$0] }))
             trace("model-convert", "第 \(i + 1) 笔：已转换")
         }
-        trace("merge", "有效 \(valid.count) 笔，丢弃 \(dropped)，转账 \(skipped)")
+        let reasonList = DropReason.allCases.compactMap { r in reasons[r.title].map { "\(r.title) \($0)" } }
+        trace("merge", "有效 \(valid.count) 笔，丢弃 \(dropped)\(reasonList.isEmpty ? "" : "（" + reasonList.joined(separator: "，") + "）")，转账 \(skipped)")
         if valid.isEmpty {
             let reason = skipped > 0 && dropped == 0 && ruleItems.isEmpty
                 ? "Apple 智能判断为账户间转账，未记账"
                 : "Apple 智能未给出有效结果，已用规则识别"
             if skipped > 0 && dropped == 0 && ruleItems.isEmpty {
-                return Outcome(receipts: rules, engine: .appleIntelligence, dropped: 0, skippedTransfers: skipped, fallbackReason: reason)
+                return Outcome(receipts: rules, engine: .appleIntelligence, dropped: 0, skippedTransfers: skipped, fallbackReason: reason, dropReasons: reasonList)
             }
-            return Outcome(receipts: rules, engine: .rules, dropped: dropped, skippedTransfers: skipped, fallbackReason: reason)
+            return Outcome(receipts: rules, engine: .rules, dropped: dropped, skippedTransfers: skipped, fallbackReason: reason, dropReasons: reasonList)
         }
         // 模型有编造（金额不在原文）且规则识别出更多笔：更信任规则
         if dropped > 0 && ruleItems.count > valid.count {
             return Outcome(receipts: rules, engine: .rules, dropped: dropped, skippedTransfers: skipped,
-                           fallbackReason: "Apple 智能结果未通过校验，已用规则识别")
+                           fallbackReason: "Apple 智能结果未通过校验，已用规则识别", dropReasons: reasonList)
         }
-        return Outcome(receipts: valid, engine: .appleIntelligence, dropped: dropped, skippedTransfers: skipped, fallbackReason: nil)
-    }
-
-    // MARK: 提示词（尽量短：端侧模型冷启动 + 生成都与输入长度相关）
-
-    /// 只保留可能与交易有关的行：去掉状态栏（顶部 4.5% 内）、纯时间 / 电量 / 符号行，最多 40 行
-    static func relevantLines(_ lines: [OCRLine]) -> [OCRLine] {
-        let timeOnly = try! NSRegularExpression(pattern: #"^\d{1,2}:\d{2}$"#)
-        var out: [OCRLine] = []
-        for l in lines {
-            let t = l.text.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !t.isEmpty else { continue }
-            if l.height > 0 && l.midY < 0.045 { continue }
-            let ns = t as NSString
-            if timeOnly.firstMatch(in: t, range: NSRange(location: 0, length: ns.length)) != nil && out.isEmpty { continue }
-            guard t.unicodeScalars.contains(where: { CharacterSet.letters.contains($0) || CharacterSet.decimalDigits.contains($0) }) else { continue }
-            out.append(l)
-            if out.count >= 40 { break }
-        }
-        return out
-    }
-
-    /// 给模型的 OCR 文本：带行号、纵向位置和大字标记，截断到 maxChars
-    static func promptText(_ lines: [OCRLine], maxChars: Int = 1200) -> String {
-        var out: [String] = []
-        var total = 0
-        for (i, l) in lines.enumerated() {
-            let t = l.text.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !t.isEmpty else { continue }
-            var tag = String(format: "L%02d", i + 1)
-            if l.height > 0 {
-                tag += String(format: " y=%.2f", l.midY)
-                if l.height >= 0.03 { tag += " 大字" }
-            }
-            let line = "\(tag) | \(t)"
-            total += line.count + 1
-            if total > maxChars { break }
-            out.append(line)
-        }
-        return out.joined(separator: "\n")
-    }
-
-    static let compactInstructionsHeader = """
-    The person's locale is zh_CN.
-    你是记账助手：从支付截图的 OCR 文字中提取交易，只输出结构化结果。
-    """
-
-    static func instructions(categories: [String], incomeCategories: [String], accounts: [String],
-                             accountDetails: [String] = []) -> String {
-        let expense = Array(categories.filter { !incomeCategories.contains($0) }.prefix(30))
-        let income = Array(incomeCategories.prefix(15))
-        let accts = Array((accountDetails.count == accounts.count && !accountDetails.isEmpty ? accountDetails : accounts).prefix(20))
-        return compactInstructionsHeader + """
-
-        规则：
-        1. 先理解截图语义再填写。金额必须是原文里出现的数字，不得编造或计算；忽略余额、可用额度、优惠、积分、广告、状态栏时间、订单号 / 流水号 / 卡号。
-        2. 类型：对方已收款/支付成功/付款/消费 = expense；收款/到账/收入 = income；退款 = income 且 isRefund=true；信用卡还款/还信用卡/花呗还款/Repay/Repayment = cardRepayment；余额宝/零钱通转入转出、充值、提现、自己账户互转 = transfer；转账给他人 = expense。
-        3. 英文界面（云闪付 / 银行 App）：Repay、Repayment = 还款；Payment Method / Payment Card / Paid with = 付款账户；Credit Card Number / Repay card = 被还款的信用卡；Order Amount / Amount = 金额；Order Time / Transaction Time = 时间；Debit / Savings card = 储蓄卡；Credit card = 信用卡。银行缩写：CMB 招商银行，CMBC 民生银行，ICBC 工商银行，CCB 建设银行，ABC 农业银行，BOC 中国银行，BOCOM/BCM 交通银行，CIB 兴业银行，CEB 光大银行，SPDB 浦发银行，CITIC 中信银行，PSBC 邮储银行，GDB/CGB 广发银行，PAB 平安银行。
-        4. 还款 / 转账：fromAccountHint 填付款账户，toAccountHint 填被还款的卡或收款账户；fromCardTail / toCardTail 填截图上对应卡号的最后 4 位；bankNames 填截图中出现的银行。必须选同一家银行、同一卡种的账户；不确定填「未知」，不要选别家银行的卡。
-        5. 银行短信：支出/消费/扣款 = expense，存入/收入 = income。多笔按从上到下分别输出，不要重复。
-        6. categoryName 只能选：支出 \(expense.joined(separator: "、"))；收入 \(income.joined(separator: "、"))。还款不用填分类。
-        7. 账户名只能从下列选择（〔〕内是说明，只填〔〕前的名字），或「未知」：\(accts.isEmpty ? "（无）" : accts.joined(separator: "、"))
-        8. dateText 原样抄写日期时间文字，没有留空。reason 用不超过 15 个字说明判断依据。
-
-        示例（虚构）：
-        「Repay:CCB Credit card / ¥88.00 / Payment Method CCB Debit card[1111] / Credit Card Number CCB Credit card[2222] / Order Time 2026.01.02 10:00:00」→ kind=cardRepayment amount=88 fromCardTail=1111 toCardTail=2222 bankNames=[建设银行] dateText=2026.01.02 10:00:00
-        「微信支付 / 示例面馆 / -26.00 / 支付成功 / 支付方式 零钱」→ kind=expense amount=26 merchant=示例面馆 categoryName=餐饮
-        「支付宝 / 账单详情 / 信用卡还款 / -500.00 / 还款到 工商银行信用卡(3333) / 付款方式 余额宝」→ kind=cardRepayment amount=500 toCardTail=3333 bankNames=[工商银行]
-        """
+        return Outcome(receipts: valid, engine: .appleIntelligence, dropped: dropped, skippedTransfers: skipped, fallbackReason: nil, dropReasons: reasonList)
     }
 }

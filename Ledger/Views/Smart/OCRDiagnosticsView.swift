@@ -11,7 +11,7 @@ struct OCRDiagnosticsView: View {
                 LabeledContent("Apple 智能", value: status.title)
                 LabeledContent("识别引擎", value: OCREngineSetting.preferAppleIntelligence ? "自动（优先 Apple 智能）" : "仅规则")
                 LabeledContent("快捷指令中使用", value: OCREngineSetting.useInShortcuts ? "开启" : "关闭")
-                LabeledContent("超时", value: "App 内 \(Int(OCREngineSetting.inAppTimeout)) 秒 · 快捷指令 \(Int(OCREngineSetting.shortcutTimeout)) 秒")
+                LabeledContent("超时（最多）", value: "App 内 \(Int(OCREngineSetting.inAppTimeout)) 秒 · 快捷指令 \(Int(OCREngineSetting.shortcutTimeout)) 秒")
             } header: {
                 Text("当前状态")
             }
@@ -34,6 +34,9 @@ struct OCRDiagnosticsView: View {
                             Text(timing(d)).font(.caption.monospacedDigit())
                             if let r = d.fallbackReason, !r.isEmpty {
                                 Text(r).font(.caption).foregroundStyle(.orange)
+                            }
+                            if let m = d.modelDetail, !m.isEmpty {
+                                Text(m).font(.caption2).foregroundStyle(.secondary)
                             }
                             Text("Apple 智能状态：\(d.aiStatus)").font(.caption2).foregroundStyle(.secondary)
                         }
