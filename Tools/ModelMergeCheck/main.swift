@@ -233,13 +233,13 @@ check(AccountResolver.normalizeTail("[2468]") == "2468" && AccountResolver.norma
 // ===== 2.0 (4)：提示词瘦身 / 预算 / 错误分类 / 金额格式（全部为合成数据）=====
 
 // 英文云闪付（合成）：附英文字段说明、只附出现过的银行缩写、还款示例
-let upLines = [OCRLine("9:41", midY: 0.02, height: 0.015), OCRLine("Repay:CMB Credit card", midY: 0.2, height: 0.03),
+let upPromptLines = [OCRLine("9:41", midY: 0.02, height: 0.015), OCRLine("Repay:CMB Credit card", midY: 0.2, height: 0.03),
                OCRLine("¥268.10", midY: 0.25, height: 0.05), OCRLine("Payment Method", midY: 0.4, height: 0.02),
                OCRLine("CMB Debit card[1357]", midY: 0.42, height: 0.02), OCRLine("Credit Card Number", midY: 0.45, height: 0.02),
                OCRLine("CMB Credit card[2468]", midY: 0.47, height: 0.02), OCRLine("Order Time 2026.01.02 10:00:00", midY: 0.5, height: 0.02),
                OCRLine("Order Number 1234567890123456789012345678", midY: 0.55, height: 0.02), OCRLine("Customer Service", midY: 0.9, height: 0.02)]
 let upIns = ModelPromptBuilder.instructions(expenseCategories: expenseCats, incomeCategories: incomeCats, accounts: accounts, level: .normal)
-let up = ModelPromptBuilder.build(lines: upLines, instructions: upIns, level: .normal)
+let up = ModelPromptBuilder.build(lines: upPromptLines, instructions: upIns, level: .normal)
 check(up.prompt.contains("Payment Method/Paid with") && up.prompt.contains("CMB=招商银行") && !up.prompt.contains("ICBC"),
       "英文截图：附英文字段说明，只列出现过的银行缩写")
 check(up.prompt.contains("kind=repay") && up.prompt.contains("[2468]") && up.prompt.contains("[1357]"), "还款截图：附示例，保留尾号")
