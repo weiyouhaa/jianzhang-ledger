@@ -620,7 +620,8 @@ struct RecordEditorView: View {
     }
 
     static func receiptTitle(_ r: ParsedReceipt) -> String {
-        var parts = [(r.isCardRepayment ? "信用卡还款 " : (r.isIncome ? "收入 " : "支出 ")) + Money.format(r.amount ?? 0)]
+        var parts = [(r.isCardRepayment ? "信用卡还款 " : r.isSelfTransfer ? "转账 " : (r.isIncome ? "收入 " : "支出 ")) + Money.format(r.amount ?? 0)]
+        if r.isSelfTransfer, let n = r.transferNote, !n.isEmpty { parts.append(n) }
         if let m = r.merchant, !m.isEmpty { parts.append(m) }
         if let d = r.date { parts.append(DateText.monthDayTime.string(from: d)) }
         return parts.joined(separator: " · ")
@@ -649,6 +650,22 @@ struct RecordEditorView: View {
             return
         }
         repayMode = false
+        if parsed.isSelfTransfer {
+            // 钱包充值 / 提现 / 余额宝转入转出：自己账户之间的转账
+            kind = .transfer
+            amountText = String(format: "%.2f", amount)
+            if let d = parsed.date { date = d }
+            let from = DataStore.account(matching: parsed.transferFrom, modelName: parsed.transferFromName, role: .single, in: context)
+            let to = DataStore.account(matching: parsed.transferTo, modelName: parsed.transferToName, role: .single,
+                                       excluding: from?.id, in: context)
+            if let from { accountID = from.id }
+            toAccountID = to?.id == accountID ? nil : to?.id
+            if note.isEmpty, let n = parsed.transferNote { note = n }
+            ocrAccountTail = parsed.transferFrom?.cardTail
+            ocrCardTail = parsed.transferTo?.cardTail
+            source = "ocr"
+            return
+        }
         kind = parsed.isIncome ? .income : .expense
         amountText = String(format: "%.2f", amount)
         if let m = parsed.merchant { merchant = m }

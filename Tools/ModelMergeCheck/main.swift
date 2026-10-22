@@ -88,7 +88,11 @@ check(r8?.repaymentCard?.cardTail == "1024" && r8?.accountHint?.cardTail == "668
 
 // 8. 自有账户转账跳过；模型返回 nil（不可用）→ 规则并带原因
 let o9 = ModelMerge.merge(model: [ModelTransaction(amount: 1000, kind: "transfer", merchant: "零钱通")], rules: [], ctx: ctx(["转入零钱通", "¥1000.00"]))
-check(o9.skippedTransfers == 1 && o9.receipts.isEmpty, "账户间转账跳过")
+check(o9.skippedTransfers == 0 && o9.receipts.count == 1 && o9.receipts[0].isSelfTransfer && o9.receipts[0].transferToName == "零钱通"
+      && o9.receipts[0].transferFrom?.type == "wechat", "转入零钱通 → 记成自己账户间转账（零钱 → 零钱通）")
+let o9b = ModelMerge.merge(model: [ModelTransaction(amount: 200, kind: "transfer"), ModelTransaction(amount: 300, kind: "transfer")],
+                           rules: [], ctx: ctx(["示例", "¥200.00", "¥300.00"]))
+check(o9b.skippedTransfers == 2 && o9b.receipts.isEmpty, "原文看不出是自己账户间转账 → 仍跳过")
 let o10 = ModelMerge.merge(model: nil, rules: rules1, ctx: ctx(wechat), unavailableReason: "设备不支持 Apple 智能")
 check(o10.engine == .rules && o10.receipts == rules1 && o10.fallbackReason == "设备不支持 Apple 智能", "模型不可用 → 规则结果原样返回")
 
@@ -318,6 +322,83 @@ check(ModelMerge.nearMissHint(8.8, ModelMerge.numbers(in: "¥88.00")) == "小数
       "不在原文：区分小数位不同 / 编造")
 let mr4 = ModelMerge.merge(model: [ModelTransaction(amount: 500, kind: "repay")], rules: [], ctx: ctx(["信用卡还款", "¥500.00"]))
 check(mr4.receipts.first?.isCardRepayment == true, "kind=repay 识别为还款")
+
+
+// ===== 2.0 (5)：微信 / 支付宝中英文界面（合成数据）=====
+func mergeWith(_ lines: [String], _ m: [ModelTransaction]) -> ModelMerge.Outcome {
+    ModelMerge.merge(model: m, rules: ReceiptParser.parseAll(lines: lines, now: now, calendar: cal), ctx: ctx(lines))
+}
+
+// 英文支付宝：模型给英文分类 → 对齐到用户分类
+let aliEn = ["Bill Details", "Sample Bistro", "-32.00", "Successful", "Payment Method", "Huabei", "Category", "Food & Beverage", "Alipay"]
+let a1 = mergeWith(aliEn, [ModelTransaction(amount: 32, kind: "expense", merchant: "Sample Bistro >", categoryName: "Food & Beverage")])
+check(a1.engine == .appleIntelligence && a1.receipts.first?.categoryName == "餐饮" && a1.receipts.first?.merchant == "Sample Bistro",
+      "英文分类 Food & Beverage → 餐饮，商户去掉 >（\(a1.receipts.first?.categoryName ?? "nil")）")
+check(a1.receipts.first?.accountHint?.type == "consumerCredit", "Huabei 付款 → 花呗类账户线索")
+let a2 = mergeWith(["Bill Details", "Sample Store", "-15.00", "Successful", "Category", "Transportation", "Alipay"],
+                   [ModelTransaction(amount: 15, kind: "expense", merchant: "Sample Store", categoryName: "Transportation")])
+check(a2.receipts.first?.categoryName == "交通", "Transportation → 交通")
+
+// 模型把充值判为支出：规则认出是充值 → 记成转账
+let topUp = ["WeChat Pay", "Transaction Details", "Balance Top-up", "+500.00", "Status", "Successful", "Top-up Bank", "China Merchants Bank(1357)"]
+let t1 = mergeWith(topUp, [ModelTransaction(amount: 500, kind: "expense", merchant: "Balance Top-up", categoryName: "其他")])
+check(t1.receipts.count == 1 && t1.receipts[0].isSelfTransfer && t1.receipts[0].transferFrom?.cardTail == "1357"
+      && t1.receipts[0].transferTo?.type == "wechat" && t1.receipts[0].categoryName == nil, "模型判为支出的零钱充值 → 转账（银行卡 1357 → 零钱）")
+let t2 = mergeWith(topUp, [ModelTransaction(amount: 500, kind: "transfer")])
+check(t2.receipts.count == 1 && t2.receipts[0].isSelfTransfer && t2.skippedTransfers == 0, "模型判为 transfer 的充值 → 转账")
+let wd = ["Bill Details", "Withdraw", "-500.00", "Successful", "Withdraw to", "CCB Debit Card(2468)", "Alipay"]
+let t3 = mergeWith(wd, [ModelTransaction(amount: 500, kind: "transfer", fromAccountHint: "支付宝")])
+check(t3.receipts.first?.transferFrom?.type == "alipay" && t3.receipts.first?.transferTo?.bankName == "建设银行"
+      && t3.receipts.first?.transferTo?.cardTail == "2468", "支付宝提现 → 余额 → 建设银行 2468")
+let yeb = ["账单详情", "转入余额宝", "-2,000.00", "交易成功", "付款方式 招商银行储蓄卡(1357)"]
+let t4 = mergeWith(yeb, [ModelTransaction(amount: 2000, kind: "expense", merchant: "余额宝")])
+check(t4.receipts.first?.isSelfTransfer == true && t4.receipts.first?.transferToName == "余额宝", "转入余额宝 → 转账（模型判为支出也改正）")
+
+// 退款 / 收款 / 红包仍是收入
+let rf = mergeWith(["Transaction Details", "Sample Mall", "+59.00", "Status", "Refunded", "Refund Method", "Balance", "WeChat Pay"],
+                   [ModelTransaction(amount: 59, kind: "income", merchant: "Sample Mall", isRefund: true)])
+check(rf.receipts.first?.isIncome == true && rf.receipts.first?.categoryName == "退款" && rf.receipts.first?.isSelfTransfer == false, "英文退款 → 收入·退款")
+let rp = mergeWith(["Red Packet from Sample Friend", "88.88 CNY", "Deposited to Balance"],
+                   [ModelTransaction(amount: 88.88, kind: "income", merchant: "Sample Friend", categoryName: "红包")])
+check(rp.receipts.first?.isIncome == true && rp.receipts.first?.categoryName == "红包", "英文红包（88.88 CNY）→ 收入·红包")
+// 话费充值不是转账
+let phone = mergeWith(["账单详情", "手机充值", "-50.00", "当前状态 充值成功", "支付方式 零钱"],
+                      [ModelTransaction(amount: 50, kind: "expense", merchant: "手机充值", categoryName: "生活缴费")])
+check(phone.receipts.first?.isSelfTransfer == false && phone.receipts.first?.categoryName == "生活缴费", "话费充值仍是支出")
+
+// 金额写法：CNY / RMB / HK$ / 26.00 CNY 都能在原文里找到
+for raw in ["CNY 26.00", "RMB26.00", "HK$26.00", "26.00 CNY", "-¥26.00", "¥ 26.00"] {
+    let o = mergeWith(["Payment Successful", raw, "Merchant", "Sample Cafe"], [ModelTransaction(amount: 26, kind: "expense", merchant: "Sample Cafe")])
+    check(o.engine == .appleIntelligence && o.dropped == 0, "金额写法 \(raw) 通过原文校验")
+}
+// 订单号里的数字不能当尾号
+let idTail = ["Bill Details", "Sample Shop", "-8.00", "Order No.", "2026101722001400001357", "Transaction ID 9753", "Payment Method", "CMB Debit Card", "Alipay"]
+check(ModelMerge.verifiedTail("1357", ctx: ctx(idTail)) == nil, "尾号不能取自订单号的末 4 位")
+check(ModelMerge.verifiedTail("9753", ctx: ctx(idTail)) == nil, "尾号不能取自 Transaction ID 那一行")
+check(ModelMerge.verifiedTail("2468", ctx: ctx(["Payment Method", "CMB Debit Card(2468)"])) == "2468", "付款方式里的尾号可以")
+check(ModelMerge.verifiedTail("2468", ctx: ctx(["¥12,468.00"])) == nil, "金额里的数字不能当尾号")
+
+// 提示词：识别来源，英文微信 / 支付宝附简短说明，中文不附；仍在预算内
+let insW = ModelPromptBuilder.instructions(expenseCategories: expenseCats, incomeCategories: incomeCats, accounts: accounts, level: .normal)
+let pw = ModelPromptBuilder.build(lines: topUp.map { OCRLine($0) }, instructions: insW, level: .normal)
+check(pw.source == "微信·英文" && pw.glossary && pw.prompt.contains("来源：微信·英文") && pw.prompt.contains("Balance=零钱"), "英文微信：来源标签 + 说明（\(pw.source)）")
+check(!pw.prompt.contains("Repay/Repayment"), "非还款的英文微信不附还款说明（省 token）")
+let pa = ModelPromptBuilder.build(lines: aliEn.map { OCRLine($0) }, instructions: insW, level: .normal)
+check(pa.source == "支付宝·英文" && pa.prompt.contains("Huabei=花呗") && pa.prompt.contains("Food & Beverage=餐饮"), "英文支付宝：说明含花呗 / 分类")
+let pz = ModelPromptBuilder.build(lines: ["微信支付", "支付成功", "¥26.00", "收款方", "示例面馆"].map { OCRLine($0) }, instructions: insW, level: .normal)
+check(pz.source == "微信·中文" && !pz.glossary && pz.prompt.contains("来源：微信·中文"), "中文微信：只有来源标签")
+let pu = ModelPromptBuilder.build(lines: ["示例", "¥1.00"].map { OCRLine($0) }, instructions: insW, level: .normal)
+check(!pu.prompt.contains("来源："), "来源不明：不加标签")
+let pm = ModelPromptBuilder.build(lines: aliEn.map { OCRLine($0) }, instructions: insW, level: .minimal)
+check(pm.glossary && !pm.prompt.contains("Food & Beverage=餐饮"), "minimal 级别只保留核心说明")
+let bigEn = (0..<400).map { OCRLine("Sample Row \($0) Payment Method Balance ¥\($0).00") } + [OCRLine("Alipay")]
+for level in [PromptLevel.normal, .compact, .minimal] {
+    let i = ModelPromptBuilder.instructions(expenseCategories: expenseCats, incomeCategories: incomeCats, accounts: accounts, level: level)
+    let b = ModelPromptBuilder.build(lines: bigEn, instructions: i, level: level)
+    check(b.estimatedTokens + level.maxResponseTokens + ModelPromptBuilder.safetyMargin <= ModelPromptBuilder.contextTokens,
+          "英文长截图 + 说明仍在 4k 预算内（\(level.title)：约 \(b.estimatedTokens) tokens）")
+}
+check(pw.summary.contains("来源 微信·英文") && !pw.summary.contains("Top-up"), "诊断摘要只有来源标签，不含原文")
 
 print(failures == 0 ? "ALL PASSED" : "\(failures) FAILED")
 exit(failures == 0 ? 0 : 1)

@@ -79,6 +79,8 @@ struct ReviewItem: Identifiable {
     var accountTail: String? = nil
     var payerTail: String? = nil
     var cardTail: String? = nil
+    /// 自己账户之间的转账（钱包充值 / 提现 / 余额宝转入转出），不是信用卡还款
+    var isSelfTransfer = false
 
     /// 还款 / 转账必须两个账户都已选定
     var isComplete: Bool { kind != .transfer || (accountID != nil && toAccountID != nil) }
@@ -112,7 +114,7 @@ enum ReviewFormatter {
         let isTransfer = item.kind == .transfer
         let toAccount = isTransfer ? item.toAccountID.flatMap { DataStore.account(id: $0, in: context) } : nil
         // 还没选卡的还款也按「信用卡还款」显示
-        let isRepay = isTransfer && (toAccount == nil || toAccount?.type.isLiability == true)
+        let isRepay = isTransfer && !item.isSelfTransfer && (toAccount == nil || toAccount?.type.isLiability == true)
         return ReviewRow(
             index: index,
             isIncome: item.kind == .income,

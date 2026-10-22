@@ -38,9 +38,13 @@ struct ModelPrompt: Equatable, Sendable {
     var noiseLines: Int
     var truncatedLines: Int
     var estimatedTokens: Int
+    /// 截图来源标签（「微信·英文」），只含来源和语言，不含文字
+    var source: String = PaymentScreen().tag
+    /// 是否附上了微信 / 支付宝英文界面说明
+    var glossary = false
 
     var summary: String {
-        "级别 \(level.title) · 指令 \(instructions.count) 字 · 文字 \(prompt.count) 字（\(totalLines) 行 → \(keptLines) 行，去噪 \(noiseLines)"
+        "来源 \(source)\(glossary ? "（附英文说明）" : "") · 级别 \(level.title) · 指令 \(instructions.count) 字 · 文字 \(prompt.count) 字（\(totalLines) 行 → \(keptLines) 行，去噪 \(noiseLines)"
             + (truncatedLines > 0 ? "，截断 \(truncatedLines)" : "") + "）· 约 \(estimatedTokens) tokens（含结构 \(ModelPromptBuilder.schemaTokenEstimate)，输出上限 \(level.maxResponseTokens)）"
     }
 }
@@ -186,10 +190,33 @@ enum ModelPromptBuilder {
 
     // MARK: 提示词（OCR 文字 + 按需附加的说明）
 
-    static func hints(lines: [String], level: PromptLevel) -> String {
+    /// 微信 / 支付宝英文界面的简短对照（只在识别出这类截图时附上，约 150 tokens）
+    static func glossary(for screen: PaymentScreen, level: PromptLevel) -> String? {
+        guard screen.english, screen.app == .wechat || screen.app == .alipay else { return nil }
+        var s: String
+        if screen.app == .wechat {
+            s = "微信英文：Paid/Payment Successful/Transfer/Pending=expense；Received/Deposited/Red Packet from=income（红包）；Refund/Refunded=income 且 refund=true；Balance=零钱，Mini Fund=零钱通；Top-up/Withdraw/Mini Fund 转入转出=transfer；Payee/Merchant=商户；Payment Method=付款账户。"
+        } else {
+            s = "支付宝英文：金额带-或 Paid=expense；带+或 Received=income；Refund=income 且 refund=true；Huabei=花呗，Balance=余额，Yu'e Bao=余额宝；Top Up/Withdraw/Yu'e Bao 转入转出=transfer；Payment Method/Pay with=付款账户。"
+        }
+        s += "Order No./Transaction ID 是单号，不是金额或尾号。"
+        if level != .minimal {
+            s += screen.app == .alipay
+                ? "Category：Food & Beverage=餐饮，Transportation=交通，Daily Necessities/Shopping=购物，Recharge & Payment=生活缴费。"
+                : "Oct 21, 2026 8:05 PM=2026-10-21 20:05。"
+        }
+        return s
+    }
+
+    static func hints(lines: [String], level: PromptLevel, screen: PaymentScreen = PaymentScreen()) -> String {
         var parts: [String] = []
+        if screen.app != .unknown { parts.append("来源：\(screen.tag)") }
+        let gloss = glossary(for: screen, level: level)
+        if let gloss { parts.append(gloss) }
         if isEnglishHeavy(lines) {
-            parts.append("英文：Repay/Repayment=还款；Payment Method/Paid with=付款账户(from)；Credit Card Number/Repay card=被还款卡(to)；Order Amount/Amount=金额；Order Time/Transaction Time=时间；Debit/Savings card=储蓄卡；Credit card=信用卡。")
+            if gloss == nil || looksLikeRepayment(lines) {
+                parts.append("英文：Repay/Repayment=还款；Payment Method/Paid with=付款账户(from)；Credit Card Number/Repay card=被还款卡(to)；Order Amount/Amount=金额；Order Time/Transaction Time=时间；Debit/Savings card=储蓄卡；Credit card=信用卡。")
+            }
             let banks = banksMentioned(lines)
             if !banks.isEmpty { parts.append("银行：" + banks.map { "\($0.0)=\($0.1)" }.joined(separator: "，") + "。") }
         }
@@ -200,10 +227,11 @@ enum ModelPromptBuilder {
     }
 
     /// 组装提示词：去噪 → 每行限长 → 按级别限行数 / 字数 → 总 token 超预算时继续去掉尾部行
-    static func build(lines raw: [OCRLine], instructions: String, level: PromptLevel) -> ModelPrompt {
+    static func build(lines raw: [OCRLine], instructions: String, level: PromptLevel, screen: PaymentScreen? = nil) -> ModelPrompt {
         let cleaned = clean(raw)
         let texts = cleaned.lines.map(\.text)
-        let hint = hints(lines: texts, level: level)
+        let scr = screen ?? PaymentScreenDetector.detect(raw.map(\.text))
+        let hint = hints(lines: texts, level: level, screen: scr)
         var body: [String] = []
         var chars = 0
         var truncated = 0
@@ -225,7 +253,8 @@ enum ModelPromptBuilder {
         }
         return ModelPrompt(level: level, instructions: instructions, prompt: prompt, totalLines: raw.count,
                            keptLines: body.count, noiseLines: cleaned.noise, truncatedLines: truncated,
-                           estimatedTokens: estimateTokens(instructions) + schemaTokenEstimate + estimateTokens(prompt))
+                           estimatedTokens: estimateTokens(instructions) + schemaTokenEstimate + estimateTokens(prompt),
+                           source: scr.tag, glossary: glossary(for: scr, level: level) != nil)
     }
 }
 

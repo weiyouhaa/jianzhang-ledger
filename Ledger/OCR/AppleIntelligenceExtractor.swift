@@ -230,7 +230,8 @@ enum AppleIntelligenceExtractor {
     }
 
     static func extract(lines: [OCRLine], vocabulary: OCRVocabulary, timeout: Double,
-                        prepared: PreparedModelSession? = nil, stats: ModelRunStats = ModelRunStats()) async -> Result<[ModelTransaction], Failure> {
+                        prepared: PreparedModelSession? = nil, stats: ModelRunStats = ModelRunStats(),
+                        screen: PaymentScreen? = nil) async -> Result<[ModelTransaction], Failure> {
         #if canImport(FoundationModels)
         if #available(iOS 26.0, *) {
             // 上一次（超时后）仍在后台运行：不再叠加请求，直接用规则
@@ -249,7 +250,7 @@ enum AppleIntelligenceExtractor {
                 var attempt = 1
                 while true {
                     let ins = (attempt == 1 && prepared?.level == level) ? prepared!.instructions : instructions(vocabulary: vocabulary, level: level)
-                    let built = ModelPromptBuilder.build(lines: lines, instructions: ins, level: level)
+                    let built = ModelPromptBuilder.build(lines: lines, instructions: ins, level: level, screen: screen)
                     stats.set(prompt: built.summary)
                     stats.add(attempt: "第 \(attempt) 次 \(level.title) 约 \(built.estimatedTokens) tokens")
                     RunLog.shared.log(.info, "model-prompt", "第 \(attempt) 次：" + built.summary)

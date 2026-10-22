@@ -192,6 +192,22 @@ enum ModelMerge {
             kind = "cardrepayment"
             trace("model-kind", "模型判为支出，原文是信用卡还款 → 改为还款")
         }
+        // 自己账户间转账（充值 / 提现 / 余额宝）：规则已认出时以规则的转出 / 转入为准
+        if kind != "income", kind != "cardrepayment", !t.isRefund, let rule = ruleMatch, rule.isSelfTransfer {
+            if kind != "transfer" { trace("model-kind", "模型判为\(kind == "expense" ? "支出" : "其他")，原文是账户间转账 → 改为转账") }
+            r.isSelfTransfer = true
+            r.isIncome = false
+            r.transferFrom = rule.transferFrom
+            r.transferTo = rule.transferTo
+            r.transferFromName = rule.transferFromName
+            r.transferToName = rule.transferToName
+            r.transferNote = rule.transferNote
+            r.accountHint = rule.transferFrom
+            r.date = rule.date
+            if !t.dateText.isEmpty, let d = ReceiptParser.date(lines: [String(t.dateText.prefix(60))], now: ctx.now, calendar: ctx.calendar),
+               abs(d.timeIntervalSince(ctx.now)) < 20 * 366 * 86_400 { r.date = d }
+            return r
+        }
         r.isIncome = kind == "income" || t.isRefund
         r.isCardRepayment = kind == "cardrepayment" && !t.isRefund
         // 模型给的文字字段限长，避免异常长输出进入后续处理
@@ -235,7 +251,7 @@ enum ModelMerge {
             let pool = r.isIncome ? ctx.incomeCategories : ctx.categories.filter { !ctx.incomeCategories.contains($0) }
             if t.isRefund, pool.contains("退款") {
                 r.categoryName = "退款"
-            } else if let c = align(t.categoryName, to: pool) {
+            } else if let c = align(PlatformCategory.map(t.categoryName) ?? t.categoryName, to: pool) {
                 r.categoryName = c
             } else {
                 r.categoryName = CategoryGuesser.guess(text: r.merchant ?? "", isIncome: r.isIncome)
@@ -245,10 +261,33 @@ enum ModelMerge {
         return r
     }
 
-    /// 模型给的尾号：必须是 4 位数字且在原文中出现过（防止编造）
+    /// 模型给的尾号：必须是 4 位数字，且在原文中单独出现过（前后不是数字、不在订单号 / 交易单号那一行），防止编造或取自订单号
     static func verifiedTail(_ raw: String, ctx: Context) -> String? {
         guard let tail = AccountResolver.normalizeTail(raw), raw.filter(\.isNumber).count == 4 else { return nil }
-        return ctx.lines.contains(where: { $0.contains(tail) }) ? tail : nil
+        let lines = ReceiptParser.prepare(ctx.lines.map { OCRLine($0) }).map(\.text)
+        let pattern = "(?<!\\d)\(tail)(?!\\d)"
+        for (i, l) in lines.enumerated() {
+            if ReceiptParser.isIDLine(l) { continue }
+            if i > 0, ReceiptParser.isIDLabelOnly(lines[i - 1]), ReceiptParser.isIDValue(l) { continue }
+            if l.range(of: pattern, options: .regularExpression) != nil { return tail }
+        }
+        return nil
+    }
+
+    /// 原文整体是一笔自己账户间的转账（充值 / 提现 / 余额宝转入转出）时，给出规则版的转账结果
+    static func selfTransfer(ctx: Context) -> ParsedReceipt? {
+        let raw = ctx.lines.map { OCRLine($0) }
+        let screen = ReceiptParser.screen(raw)
+        let text = EnglishBankTerms.localize(ReceiptParser.prepare(raw, screen: screen).map(\.text).joined(separator: " "))
+        guard let t = SelfTransferDetector.detect(text: text, app: screen.app) else { return nil }
+        var r = ParsedReceipt()
+        r.isSelfTransfer = true
+        r.transferFrom = t.from
+        r.transferTo = t.to
+        r.transferFromName = t.fromName
+        r.transferToName = t.toName
+        r.transferNote = t.note
+        return r
     }
 
     /// 文字里的银行名（英文缩写先转中文）
@@ -300,15 +339,31 @@ enum ModelMerge {
                 trace("model-validate", "第 \(i + 1) 笔：只出现在余额处，丢弃")
                 dropped += 1; reasons[DropReason.balanceOnly.title, default: 0] += 1; continue
             }
-            if t.kind.lowercased() == "transfer" { trace("model-validate", "第 \(i + 1) 笔：账户间转账，跳过"); skipped += 1; continue }
-            let key = "\(c)|\(t.merchant)|\(t.dateText)"
-            guard seen.insert(key).inserted else {
-                trace("model-dedupe", "第 \(i + 1) 笔：重复，丢弃"); dropped += 1; reasons[DropReason.duplicate.title, default: 0] += 1; continue
-            }
             // 同金额、未被占用的规则结果，用来补充日期和付款方式
             let idx = ruleItems.indices.first { j in
                 guard !usedRules.contains(j), let a = ruleItems[j].amount, let rc = cents(a) else { return false }
                 return rc == c
+            }
+            if t.kind.lowercased() == "transfer" {
+                // 充值 / 提现 / 余额宝：规则也认出是自己账户间转账（或整张截图只有这一笔且原文是转账）→ 记成转账；其余仍跳过
+                let rule = idx.map { ruleItems[$0] }
+                var transferRule: ParsedReceipt? = rule?.isSelfTransfer == true ? rule : nil
+                if transferRule == nil, model.count == 1, rule == nil || ruleItems.count <= 1, var st = selfTransfer(ctx: ctx) {
+                    st.amount = (t.amount * 100).rounded() / 100
+                    st.date = rule?.date
+                    transferRule = st
+                }
+                guard let transferRule else {
+                    trace("model-validate", "第 \(i + 1) 笔：账户间转账，跳过"); skipped += 1; continue
+                }
+                if let j = idx { usedRules.insert(j) }
+                valid.append(receipt(from: t, ctx: ctx, ruleMatch: transferRule))
+                trace("model-convert", "第 \(i + 1) 笔：自己账户间转账")
+                continue
+            }
+            let key = "\(c)|\(t.merchant)|\(t.dateText)"
+            guard seen.insert(key).inserted else {
+                trace("model-dedupe", "第 \(i + 1) 笔：重复，丢弃"); dropped += 1; reasons[DropReason.duplicate.title, default: 0] += 1; continue
             }
             if let idx { usedRules.insert(idx) }
             trace("rules-apply", "第 \(i + 1) 笔：\(idx == nil ? "无" : "有")同金额规则结果")

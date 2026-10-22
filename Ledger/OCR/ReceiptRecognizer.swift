@@ -136,6 +136,9 @@ enum ReceiptRecognizer {
 
     static func extract(lines: [OCRLine], now: Date, vocabulary: OCRVocabulary?, context: OCRRunContext,
                         ocrMs: Int = 0, plan: ModelPlan? = nil, startedAt: Date? = nil) async -> OCRRecognition {
+        // 截图来源（微信 / 支付宝 / 银行 / 云闪付，中文或英文界面）：日志只记标签，不记文字
+        let screen = ReceiptParser.screen(lines)
+        RunLog.shared.log(.info, "screen", "来源：\(screen.tag)")
         let tRules = Date()
         // 规则结果同样过金额上限（例如把长数字串误识别成金额），后续换算 / 预算计算都不会溢出
         let rules = sanitize(ruleReceipts(lines, now: now))
@@ -152,7 +155,8 @@ enum ReceiptRecognizer {
             OCRDiagnostic.record(OCRDiagnostic(context: context, engine: r.engine.title, aiStatus: checkedStatus?.title ?? "未检查（未启用）",
                                                ocrMs: ocrMs, modelMs: modelMs, lineCount: lines.count,
                                                resultCount: r.receipts.filter { ($0.amount ?? 0) > 0 }.count,
-                                               dropped: dropped, fallbackReason: reason ?? r.note, modelDetail: detail))
+                                               dropped: dropped, fallbackReason: reason ?? r.note,
+                                               modelDetail: ["来源 \(screen.tag)", detail].compactMap { $0 }.joined(separator: " · ")))
             return r
         }
         guard OCREngineSetting.preferAppleIntelligence else {
@@ -174,7 +178,7 @@ enum ReceiptRecognizer {
         guard status.isAvailable else {
             return finish(OCRRecognition(receipts: rules, engine: .rules, note: "Apple 智能\(status.shortReason)"))
         }
-        let prepared = ReceiptParser.prepare(lines)
+        let prepared = ReceiptParser.prepare(lines, screen: screen)
         guard prepared.contains(where: { $0.text.rangeOfCharacter(from: .decimalDigits) != nil }) else {
             return finish(OCRRecognition(receipts: rules, engine: .rules, note: nil), reason: "截图中没有数字")
         }
@@ -190,7 +194,7 @@ enum ReceiptRecognizer {
         RunLog.shared.log(.info, "model-start", "端侧模型开始（超时 \(String(format: "%.1f", timeout)) 秒，已用 \(String(format: "%.1f", elapsed)) 秒，\(prepared.count) 行）")
         let stats = ModelRunStats()
         let result = await AppleIntelligenceExtractor.extract(lines: prepared, vocabulary: vocab, timeout: timeout,
-                                                              prepared: plan?.prepared, stats: stats)
+                                                              prepared: plan?.prepared, stats: stats, screen: screen)
         let modelMs = Int(Date().timeIntervalSince(t1) * 1000)
         switch result {
         case .success(let txns): RunLog.shared.log(.info, "model-end", "模型完成，用时 \(modelMs) ms，\(txns.count) 笔")

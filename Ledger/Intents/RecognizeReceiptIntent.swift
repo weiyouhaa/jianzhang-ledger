@@ -174,6 +174,24 @@ struct RecognizeReceiptIntent: AppIntent {
                 item.cardTail = p.repaymentCard?.cardTail
                 RunLog.shared.log(.info, "repayment", "第 \(index + 1) 笔：信用卡还款，付款账户\(payer == nil ? "未定" : "已定")，信用卡\(card == nil ? "未定（需选择）" : "已定")")
             }
+            // 钱包充值 / 提现 / 余额宝转入转出：自己账户之间的转账（不计入收支）
+            if p.isSelfTransfer, !p.isCardRepayment, kind == nil, category == nil {
+                let fromID = account?.id ?? IntentRecorder.resolveAccount(hint: p.transferFrom, modelName: p.transferFromName,
+                                                                          role: .single, label: "转出账户")?.id
+                let to = IntentRecorder.resolveAccount(hint: p.transferTo, modelName: p.transferToName, role: .single,
+                                                       excluding: fromID, label: "转入账户")
+                item.kind = .transfer
+                item.isSelfTransfer = true
+                item.categoryID = nil
+                item.accountID = fromID
+                item.toAccountID = to?.id == fromID ? nil : to?.id
+                item.merchant = ""
+                item.note = note ?? p.transferNote ?? ""
+                item.accountTail = nil
+                item.payerTail = p.transferFrom?.cardTail
+                item.cardTail = p.transferTo?.cardTail
+                RunLog.shared.log(.info, "self-transfer", "第 \(index + 1) 笔：账户间转账，转出账户\(item.accountID == nil ? "未定" : "已定")，转入账户\(item.toAccountID == nil ? "未定（需选择）" : "已定")")
+            }
             // 去重：同金额、同商户、时间相差 2 分钟内的已有记录
             RunLog.shared.log(.info, "dedupe", "第 \(index + 1) 笔：查重")
             item.isDuplicate = item.dateRecognized
@@ -474,6 +492,7 @@ struct RecognizeReceiptIntent: AppIntent {
                 switch pickedKind {
                 case "expense", "income":
                     let newKind: RecordKind = pickedKind == "income" ? .income : .expense
+                    item.isSelfTransfer = false
                     if newKind != item.kind {
                         let wasTransfer = item.kind == .transfer
                         item.kind = newKind
@@ -507,12 +526,13 @@ struct RecognizeReceiptIntent: AppIntent {
                     _ = try await chooseTransferAccounts(&item, repayment: true, number: number, steps: &steps, context: context)
                 } else if let id = UUID(uuidString: key), let c = DataStore.category(id: id, in: context) {
                     if item.kind == .transfer { item.toAccountID = nil }
+                    item.isSelfTransfer = false
                     item.categoryID = c.id
                     item.kind = c.kind
                     item.categoryEdited = true
                 }
             case .account where item.kind == .transfer:
-                let isRepay = item.toAccountID.flatMap { DataStore.account(id: $0, in: context) }?.type.isLiability ?? true
+                let isRepay = !item.isSelfTransfer && (item.toAccountID.flatMap { DataStore.account(id: $0, in: context) }?.type.isLiability ?? true)
                 _ = try await chooseTransferAccounts(&item, repayment: isRepay, number: number, steps: &steps, context: context)
             case .account:
                 let list = DataStore.accounts(in: context).map { AccountEntity($0) }
@@ -540,6 +560,7 @@ struct RecognizeReceiptIntent: AppIntent {
         switch item.kind {
         case .income: return "收入"
         case .transfer:
+            if item.isSelfTransfer { return "转账" }
             let to = item.toAccountID.flatMap { DataStore.account(id: $0, in: context) }
             return to == nil || to?.type.isLiability == true ? "信用卡还款" : "转账"
         default: return "支出"
@@ -576,6 +597,7 @@ struct RecognizeReceiptIntent: AppIntent {
         item.toAccountID = toID
         item.merchant = ""
         item.accountEdited = true
+        item.isSelfTransfer = !repayment
         return true
     }
 

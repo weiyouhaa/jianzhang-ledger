@@ -232,5 +232,229 @@ for (raw, want) in [("C 阿芳", "阿芳"), ("é阿芳", "阿芳"), ("© 美团�
     if got == want { print("✅ 商户清理 \(raw) → \(got)") } else { failures += 1; print("❌ 商户清理 \(raw) → \(got)") }
 }
 
+
+// ===== 2.0 (5)：微信 / 支付宝中英文界面（全部为自造的合成数据：示例商户、虚构金额与尾号）=====
+
+struct W {
+    var amount: Double
+    var income = false
+    var merchant: String? = nil
+    var category: String? = nil
+    var date: String? = nil
+    var accountType: String? = nil
+    var tail: String? = nil
+    var bank: String? = nil
+    /// 自己账户间转账：(转出类型, 转入类型)，nil 表示不是转账；"?" 表示该端不确定
+    var transfer: (String, String)? = nil
+    var transferTail: String? = nil
+    var toName: String? = nil
+    var repay = false
+}
+
+func describeT(_ r: ParsedReceipt) -> String {
+    r.isSelfTransfer ? " 转账 \(r.transferFrom?.type ?? r.transferFromName ?? "?")→\(r.transferTo?.type ?? r.transferToName ?? "?")" : ""
+}
+
+func verify(_ r: ParsedReceipt, _ e: W) -> [String] {
+    var p: [String] = []
+    if r.amount != e.amount { p.append("amount \(String(describing: r.amount))") }
+    if e.transfer == nil, !e.repay, r.isIncome != e.income { p.append("income \(r.isIncome)") }
+    if let m = e.merchant, r.merchant != m { p.append("merchant \(r.merchant ?? "nil")") }
+    if let c = e.category, r.categoryName != c { p.append("category \(r.categoryName ?? "nil")") }
+    if let d = e.date, fmt(r.date) != d { p.append("date \(fmt(r.date))") }
+    if let t = e.accountType, r.accountHint?.type != t { p.append("account \(r.accountHint?.type ?? "nil")") }
+    if let t = e.tail, r.accountHint?.cardTail != t { p.append("tail \(r.accountHint?.cardTail ?? "nil")") }
+    if let b = e.bank, r.accountHint?.bankName != b { p.append("bank \(r.accountHint?.bankName ?? "nil")") }
+    if e.repay != r.isCardRepayment { p.append("repay \(r.isCardRepayment)") }
+    if let (from, to) = e.transfer {
+        if !r.isSelfTransfer { p.append("不是转账") }
+        let f = r.transferFrom?.type ?? "?", t = r.transferTo?.type ?? "?"
+        if f != from { p.append("from \(f)") }
+        if t != to { p.append("to \(t)") }
+        if let tt = e.transferTail, (r.transferFrom?.cardTail ?? r.transferTo?.cardTail) != tt { p.append("transferTail") }
+        if let n = e.toName, r.transferToName != n { p.append("toName \(r.transferToName ?? "nil")") }
+    } else if r.isSelfTransfer { p.append("误判为转账") }
+    return p
+}
+
+func checkW(_ name: String, _ lines: [String], _ e: W) {
+    let r = ReceiptParser.parse(lines: lines, now: now, calendar: cal)
+    let errs = verify(r, e)
+    if errs.isEmpty { print("✅ \(name): ¥\(r.amount ?? -1) \(r.isIncome ? "收入" : "支出") \(r.merchant ?? "-") \(r.categoryName ?? "-") \(fmt(r.date)) \(r.accountHint?.type ?? "-")\(describeT(r))") }
+    else { failures += 1; print("❌ \(name): " + errs.joined(separator: "; ")) }
+}
+
+func checkList(_ name: String, _ lines: [String], _ es: [W]) {
+    let rs = ReceiptParser.parseAll(lines: lines, now: now, calendar: cal)
+    var errs: [String] = []
+    if rs.count != es.count { errs.append("count \(rs.count) != \(es.count)") }
+    for (i, (r, e)) in zip(rs, es).enumerated() {
+        let p = verify(r, e)
+        if !p.isEmpty { errs.append("#\(i + 1): " + p.joined(separator: ", ")) }
+    }
+    if errs.isEmpty { print("✅ \(name): " + rs.map { "¥\($0.amount ?? -1)\($0.isIncome ? "+" : "")\(describeT($0))" }.joined(separator: " / ")) }
+    else { failures += 1; print("❌ \(name): " + errs.joined(separator: "; ")) }
+}
+
+// --- 微信 · 中文 ---
+checkW("微信支付成功", ["9:41", "微信支付", "支付成功", "¥26.00", "收款方", "示例面馆", "支付方式", "招商银行储蓄卡(1357)", "支付时间", "2026年10月17日 12:30:05", "完成"],
+       W(amount: 26, merchant: "示例面馆", category: "餐饮", date: "2026-10-17 12:30", accountType: "debit", tail: "1357", bank: "招商银行"))
+checkW("微信账单详情", ["账单详情", "示例便利店", "-12.50", "当前状态 支付成功", "支付时间 2026年10月17日 08:15:20", "商品 饮料",
+                     "商户全称 示例便利店有限公司", "支付方式 零钱", "交易单号 4200001234567890123456789012", "商户单号 1234567890123"],
+       W(amount: 12.5, merchant: "示例便利店有限公司", category: "购物", date: "2026-10-17 08:15", accountType: "wechat"))
+checkW("微信转账（对方已收款）", ["转账", "¥200.00", "对方已收款", "转账时间 2026年10月16日 20:00:00", "收款时间 2026年10月16日 20:01:00"],
+       W(amount: 200, date: "2026-10-16 20:00"))
+checkW("微信转账（已收款）", ["已收款", "¥88.00", "转账时间 2026年10月16日 21:00:00", "收款时间 2026年10月16日 21:00:30", "已存入零钱"],
+       W(amount: 88, income: true, date: "2026-10-16 21:00"))
+checkW("微信转账（待对方收款）", ["待对方收款", "¥50.00", "转账时间 2026年10月17日 10:00:00"], W(amount: 50))
+checkW("微信红包（收到）", ["微信红包", "示例同学的红包", "88.88元", "已存入零钱，可直接消费"], W(amount: 88.88, income: true, category: "红包"))
+checkW("微信退款", ["账单详情", "示例商城", "+59.00", "当前状态 已全额退款", "退款时间 2026年10月17日 14:00:00", "退款方式 退回零钱"],
+       W(amount: 59, income: true, category: "退款"))
+checkW("微信零钱充值", ["账单详情", "零钱充值", "+500.00", "当前状态 充值成功", "充值时间 2026年10月17日 09:00:00", "充值银行 招商银行(1357)"],
+       W(amount: 500, transfer: ("debit", "wechat"), transferTail: "1357"))
+checkW("微信零钱提现", ["账单详情", "零钱提现", "-300.00", "当前状态 已到账", "提现银行 招商银行(1357)", "服务费 ¥0.30"],
+       W(amount: 300, transfer: ("wechat", "debit"), transferTail: "1357"))
+checkW("微信话费充值是支出", ["账单详情", "手机充值", "-50.00", "当前状态 充值成功", "支付方式 零钱"], W(amount: 50, category: "通讯", accountType: "wechat"))
+checkList("微信账单列表", ["全部账单", "2026年10月", "支出 ¥1,234.00 收入 ¥500.00", "扫二维码付款-给示例水果店", "-15.80", "10月17日 18:20",
+                         "示例打车", "-23.00", "10月17日 08:30", "零钱充值-来自招商银行", "+200.00", "10月16日 12:00"],
+          [W(amount: 15.8, merchant: "示例水果店", date: "2026-10-17 18:20"), W(amount: 23, category: "交通", date: "2026-10-17 08:30"),
+           W(amount: 200, transfer: ("debit", "wechat"))])
+
+// --- 微信 · 英文 ---
+checkW("WeChat 支付成功", ["9:41", "WeChat Pay", "Payment Successful", "¥26.00", "Payee", "Sample Noodle House", "Payment Method",
+                         "China Merchants Bank Debit Card(1357)", "Payment Time", "Oct 17, 2026 12:30:05", "Done"],
+       W(amount: 26, merchant: "Sample Noodle House", category: "餐饮", date: "2026-10-17 12:30", accountType: "debit", tail: "1357", bank: "招商银行"))
+checkW("WeChat Transaction Details", ["Transaction Details", "Sample Mart", "-12.50", "Status", "Successful", "Payment Time", "2026-10-17 08:15:20",
+                                      "Product", "Drinks", "Merchant Full Name", "Sample Convenience Store Co., Ltd.", "Payment Method", "Balance",
+                                      "Transaction ID", "4200001234567890123456789012", "Merchant Order No.", "ABC123456789", "WeChat Pay"],
+       W(amount: 12.5, merchant: "Sample Convenience Store", category: "购物", date: "2026-10-17 08:15", accountType: "wechat"))
+checkW("WeChat Transfer 已被接收", ["Transfer", "¥200.00", "Received by recipient", "Transfer Time", "Oct 16, 2026 8:00 PM"],
+       W(amount: 200, date: "2026-10-16 20:00"))
+checkW("WeChat Transfer Received", ["Received", "¥88.00", "Transfer Time", "Oct 16, 2026 9:00 PM", "Received Time", "Oct 16, 2026 9:00 PM", "Deposited to Balance"],
+       W(amount: 88, income: true, date: "2026-10-16 21:00"))
+checkW("WeChat Transfer Pending", ["Transfer", "¥50.00", "Waiting for Sample Friend to accept", "Transfer Time", "Oct 17, 2026 10:00 AM"],
+       W(amount: 50, date: "2026-10-17 10:00"))
+checkW("WeChat Red Packet", ["Red Packet from Sample Friend", "88.88 CNY", "Deposited to Balance"], W(amount: 88.88, income: true, category: "红包"))
+checkW("WeChat Refund", ["Transaction Details", "Sample Mall", "+59.00", "Status", "Refunded", "Refund Time", "Oct 17, 2026 2:00 PM", "Refund Method", "Balance"],
+       W(amount: 59, income: true, category: "退款", date: "2026-10-17 14:00"))
+checkW("WeChat Balance Top-up", ["WeChat Pay", "Transaction Details", "Balance Top-up", "+500.00", "Status", "Successful", "Top-up Bank", "China Merchants Bank(1357)"],
+       W(amount: 500, transfer: ("debit", "wechat"), transferTail: "1357"))
+checkW("WeChat Withdraw", ["Withdraw", "-300.00", "Status", "Credited", "Withdraw to", "CMB Debit Card(1357)", "Service Fee", "¥0.30", "WeChat Pay"],
+       W(amount: 300, transfer: ("wechat", "debit"), transferTail: "1357"))
+checkW("来源不明的 Balance Top-up：不猜钱包", ["Balance Top-up", "+500.00", "Successful", "Payment Method", "CMB Debit Card(1357)"],
+       W(amount: 500, transfer: ("debit", "?")))
+checkList("WeChat Bills", ["Bills", "Oct 2026", "Expenses ¥1,234.00 Income ¥500.00", "Sample Fruit Shop", "-15.80", "Oct 17 18:20",
+                          "Sample Taxi", "-23.00", "Oct 17 8:30 AM", "Balance Top-up", "+200.00", "Oct 16 12:00"],
+          [W(amount: 15.8, merchant: "Sample Fruit Shop", date: "2026-10-17 18:20"), W(amount: 23, category: "交通", date: "2026-10-17 08:30"),
+           W(amount: 200, transfer: ("?", "?"))])
+checkW("WeChat HK$ 7-Eleven", ["Payment Successful", "HK$38.00", "Merchant", "7-Eleven (Sample Branch) >", "Payment Method", "Balance", "WeChat Pay"],
+       W(amount: 38, merchant: "7-Eleven (Sample Branch)", category: "购物", accountType: "wechat"))
+checkW("WeChat Metro", ["Payment Successful", "¥3.00", "Merchant", "Sample City Metro", "WeChat Pay"], W(amount: 3, category: "交通"))
+
+// --- 支付宝 · 中文 ---
+checkW("支付宝账单详情（花呗）", ["账单详情", "示例咖啡", "-32.00", "交易成功", "支付时间 2026-10-17 15:20:11", "付款方式 花呗", "商品说明 拿铁",
+                            "账单分类 餐饮美食", "订单号 2026101722001400000000000001", "商家订单号 T20261017000001"],
+       W(amount: 32, category: "餐饮", date: "2026-10-17 15:20", accountType: "consumerCredit"))
+checkW("支付宝余额付款", ["账单详情", "示例超市", "-88.00", "交易成功", "付款方式 余额", "账单分类 日用百货"],
+       W(amount: 88, merchant: "示例超市", category: "购物", accountType: "alipay"))
+checkW("支付宝平台分类兜底", ["账单详情", "示例小铺", "-15.00", "交易成功", "账单分类 交通出行"], W(amount: 15, merchant: "示例小铺", category: "交通"))
+checkW("支付宝收款", ["账单详情", "示例朋友", "+66.00", "交易成功", "收款方式 余额", "转账备注 饭钱"], W(amount: 66, income: true))
+checkW("支付宝退款", ["账单详情", "示例店铺", "+19.90", "退款成功", "退款方式 花呗"], W(amount: 19.9, income: true, category: "退款"))
+checkW("支付宝充值", ["账单详情", "充值-余额", "+1,000.00", "交易成功", "付款方式 建设银行储蓄卡(2468)"],
+       W(amount: 1000, transfer: ("debit", "alipay"), transferTail: "2468"))
+checkW("支付宝提现", ["账单详情", "余额提现", "-500.00", "交易成功", "提现到 建设银行储蓄卡(2468)", "支付宝"],
+       W(amount: 500, transfer: ("alipay", "debit"), transferTail: "2468"))
+checkW("转入余额宝", ["账单详情", "转入余额宝", "-2,000.00", "交易成功", "付款方式 招商银行储蓄卡(1357)"],
+       W(amount: 2000, transfer: ("debit", "?"), transferTail: "1357", toName: "余额宝"))
+checkW("花呗还款", ["账单详情", "花呗还款", "-1,200.00", "还款成功", "付款方式 余额宝"], W(amount: 1200, repay: true))
+checkList("支付宝账单列表", ["账单", "2026年10月", "支出 ¥2,000.00 收入 ¥100.00", "示例奶茶店", "-18.00", "今天 10:05", "示例地铁", "-4.00", "昨天 08:12",
+                          "示例朋友", "+100.00", "10-16 19:30"],
+          [W(amount: 18, category: "餐饮", date: "2026-10-18 10:05"), W(amount: 4, category: "交通", date: "2026-10-17 08:12"),
+           W(amount: 100, income: true, date: "2026-10-16 19:30")])
+
+// --- 支付宝 · 英文 ---
+checkW("Alipay Bill Details（Huabei）", ["Bill Details", "Sample Coffee", "-32.00", "Successful", "Payment Time", "Oct 17, 2026 3:20 PM", "Payment Method",
+                                       "Huabei", "Product Description", "Latte", "Category", "Food & Beverage", "Order No.",
+                                       "2026101722001400000000000001", "Merchant Order No.", "T20261017000001", "Alipay"],
+       W(amount: 32, category: "餐饮", date: "2026-10-17 15:20", accountType: "consumerCredit"))
+checkW("Alipay Balance", ["Bill Details", "Sample Supermarket", "-88.00", "Completed", "Payment Method", "Balance", "Category", "Daily Necessities", "Alipay"],
+       W(amount: 88, merchant: "Sample Supermarket", category: "购物", accountType: "alipay"))
+checkW("Alipay Paid to（交通银行信用卡）", ["Alipay", "Paid", "CNY 45.60", "Paid to", "Sample Pharmacy", "Pay with",
+                                        "Bank of Communications Credit Card (9753)", "Time", "17 Oct 2026 10:53"],
+       W(amount: 45.6, merchant: "Sample Pharmacy", category: "医疗", date: "2026-10-17 10:53", accountType: "credit", tail: "9753", bank: "交通银行"))
+checkW("Alipay Received", ["Bill Details", "Sample Friend", "+66.00", "Successful", "Received with", "Balance", "Alipay"], W(amount: 66, income: true))
+checkW("Alipay Refund", ["Bill Details", "Sample Shop", "+19.90", "Refund Successful", "Refund Method", "Huabei", "Alipay"],
+       W(amount: 19.9, income: true, category: "退款"))
+checkW("Alipay Top Up", ["Bill Details", "Top Up - Balance", "+1,000.00", "Successful", "Payment Method", "CCB Debit Card(2468)", "Alipay"],
+       W(amount: 1000, transfer: ("debit", "alipay"), transferTail: "2468"))
+checkW("Alipay Withdraw", ["Bill Details", "Withdraw", "-500.00", "Successful", "Withdraw to", "CCB Debit Card(2468)", "Alipay"],
+       W(amount: 500, transfer: ("alipay", "debit"), transferTail: "2468"))
+checkW("Alipay Yu'e Bao", ["Bill Details", "Transfer to Yu'e Bao", "-2,000.00", "Successful", "Payment Method", "CMB Debit Card(1357)", "Alipay"],
+       W(amount: 2000, transfer: ("debit", "?"), transferTail: "1357", toName: "余额宝"))
+checkW("Alipay Huabei Repayment", ["Bill Details", "Huabei Repayment", "-1,200.00", "Successful", "Payment Method", "Yu'e Bao", "Alipay"],
+       W(amount: 1200, repay: true))
+checkList("Alipay Bills", ["Bills", "Oct 2026", "Expenses ¥2,000.00 Income ¥100.00", "Sample Milk Tea", "-18.00", "Today 10:05", "Sample Metro", "-4.00",
+                          "Yesterday 08:12", "Sample Friend", "+100.00", "Oct 16 7:30 PM", "Alipay"],
+          [W(amount: 18, category: "餐饮", date: "2026-10-18 10:05"), W(amount: 4, category: "交通", date: "2026-10-17 08:12"),
+           W(amount: 100, income: true, date: "2026-10-16 19:30")])
+checkList("Alipay Bills（名称与金额同一行）", ["Bills", "Sample Bakery -9.90", "Oct 17 07:50", "Sample Bus Line -2.00", "Oct 17 08:00"],
+          [W(amount: 9.9, merchant: "Sample Bakery", category: "餐饮", date: "2026-10-17 07:50"), W(amount: 2, date: "2026-10-17 08:00")])
+checkW("Alipay Taobao", ["Bill Details", "Taobao - Sample Store", "-129.00", "Successful", "Alipay"], W(amount: 129, category: "购物"))
+
+do {
+    let r = ReceiptParser.parse(lines: ["Bill Details", "Withdraw", "-500.00", "Successful", "Withdraw to", "CCB Debit Card(2468)", "Alipay"], now: now, calendar: cal)
+    if r.transferTo?.bankName == "建设银行" { print("✅ 提现到账银行只取银行名") } else { failures += 1; print("❌ 提现到账银行：\(r.transferTo?.bankName ?? "nil")") }
+}
+
+// --- 金额写法 / 商户关键词 ---
+for (raw, want) in [("-¥26.00", 26.0), ("¥ 26.00", 26), ("RMB26.00", 26), ("HK$26.00", 26), ("26.00 CNY", 26), ("CNY 1,026.50", 1026.5)] {
+    checkW("金额写法 \(raw)", ["Payment Successful", raw, "Merchant", "Sample Cafe"], W(amount: want, merchant: "Sample Cafe", category: "餐饮"))
+}
+for (merchant, cat) in [("Starbucks (Sample Plaza)", "餐饮"), ("McDonald's Sample Rd", "餐饮"), ("KFC Sample Store", "餐饮"), ("Meituan", "餐饮"),
+                        ("DiDi Chuxing", "交通"), ("Didi", "交通"), ("MTR", "交通"), ("Taobao", "购物"), ("JD.com", "购物"), ("Pinduoduo", "购物"),
+                        ("7-Eleven", "购物"), ("FamilyMart", "购物"), ("China Mobile", "通讯"), ("Trip.com", "旅行")] {
+    checkW("关键词 \(merchant)", ["Payment Successful", "-¥10.00", "Merchant", merchant], W(amount: 10, merchant: merchant, category: cat))
+}
+for text in ["Small Shop", "Fetch Store", "JDK Studio"] {
+    let c = CategoryGuesser.guess(text: text, isIncome: false)
+    if c == nil { print("✅ 整词匹配：\(text) 无分类") } else { failures += 1; print("❌ 整词匹配：\(text) → \(c!)") }
+}
+
+// --- 订单号不能当金额 / 尾号 ---
+checkW("订单号不当金额（标签与值分行）", ["Bill Details", "Sample Shop", "Order No.", "20261017123", "-8.00", "Transaction ID", "1234", "Payment Method", "Balance", "Alipay"],
+       W(amount: 8, accountType: "alipay"))
+do {
+    let r = ReceiptParser.parse(lines: ["账单详情", "示例店", "-8.00", "订单号 2026101722001400001357", "付款方式 招商银行储蓄卡"], now: now, calendar: cal)
+    if r.accountHint?.cardTail == nil { print("✅ 订单号末 4 位不当尾号") } else { failures += 1; print("❌ 订单号末 4 位被当成尾号") }
+}
+
+// --- 本地化 / 来源识别 ---
+for (raw, want) in [("Oct 21, 2026 10:53", "2026-10-21 10:53"), ("21 Oct 2026", "2026-10-21"), ("Oct 2026", "2026年10月"),
+                    ("Today 3:25 PM", "今天 15:25"), ("Oct 17 12:05 AM", "10月17日 00:05"), ("2026-10-21 10:53:12", "2026-10-21 10:53:12"),
+                    ("Payment Method", "付款方式"), ("China Merchants Bank Debit Card (1234)", "招商银行储蓄卡 (1234)"),
+                    ("CMB Credit Card(1234)", "招商银行信用卡(1234)"), ("Yu'e Bao", "余额宝"), ("Huabei", "花呗"), ("Starbucks", "Starbucks")] {
+    let got = PaymentTerms.localize(raw, app: .unknown)
+    if got == want { print("✅ 本地化 \(raw) → \(got)") } else { failures += 1; print("❌ 本地化 \(raw) → \(got)（应为 \(want)）") }
+}
+for (app, want) in [(PaymentApp.wechat, "零钱"), (.alipay, "账户余额")] {
+    let got = PaymentTerms.localize("Balance", app: app)
+    if got == want { print("✅ Balance（\(app.title)）→ \(got)") } else { failures += 1; print("❌ Balance（\(app.title)）→ \(got)") }
+}
+for (lines, app, english) in [(["微信支付", "支付成功", "¥1.00"], PaymentApp.wechat, false), (["WeChat Pay", "Payment Successful", "¥1.00", "Payment Method", "Balance"], .wechat, true),
+                              (["支付宝", "账单详情"], .alipay, false), (["Bill Details", "Payment Method", "Huabei", "Alipay"], .alipay, true),
+                              (["云闪付", "还款"], .unionpay, false), (["【招商银行】您账户1234于10月12日消费人民币45.60元"], .bank, false),
+                              (["示例", "¥1.00"], .unknown, false)] {
+    let s = PaymentScreenDetector.detect(lines)
+    if s.app == app && s.english == english { print("✅ 来源 \(s.tag)") } else { failures += 1; print("❌ 来源 \(s.tag)（应为 \(app.title)·\(english ? "英文" : "中文")）") }
+}
+
+// --- 商户清理（英文 / 箭头 / 省略号 / 微信标题前缀）---
+for (raw, want) in [("Sample Shop >", "Sample Shop"), ("Merchant: Sample Cafe", "Sample Cafe"), ("示例便利店…", "示例便利店"),
+                    ("Sample Store...", "Sample Store"), ("扫二维码付款-给示例水果店", "示例水果店"), ("Sample Foods Co., Ltd.", "Sample Foods"),
+                    ("示例科技有限公司", "示例科技有限公司")] {
+    let got = ReceiptParser.cleanMerchant(raw)
+    if got == want { print("✅ 商户清理 \(raw) → \(got)") } else { failures += 1; print("❌ 商户清理 \(raw) → \(got)") }
+}
+
 print(failures == 0 ? "ALL PASSED" : "\(failures) FAILED")
 exit(failures == 0 ? 0 : 1)
