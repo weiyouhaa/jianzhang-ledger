@@ -155,7 +155,7 @@ struct RecognizeReceiptIntent: AppIntent {
                                                   accountID: account?.id ?? modelAccount?.id,
                                                   accountHint: p.accountHint)
             var item = ReviewItem(amount: p.amount ?? 0, kind: k, categoryID: resolved.category?.id,
-                                  merchant: merchant, note: note ?? "", accountID: resolved.account?.id,
+                                  merchant: merchant, note: note ?? p.discountNote ?? "", accountID: resolved.account?.id,
                                   date: p.date ?? Date(), dateRecognized: p.date != nil)
             item.accountTail = p.isCardRepayment ? nil : p.accountHint?.cardTail
             // 信用卡还款截图：付款账户 → 信用卡 的转账（未指定类型 / 分类时）。

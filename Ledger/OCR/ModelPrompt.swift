@@ -177,7 +177,7 @@ enum ModelPromptBuilder {
         let accts = accounts.prefix(level.maxAccounts).map { short($0, 14) }
         var s = """
         你是记账助手，从支付截图的 OCR 文字提取交易。
-        - amount：原文中的交易金额，取正数，不得计算；忽略余额、额度、优惠、积分、广告、单号、卡号。
+        - amount：实际支付金额（大字 / 带 ± 的金额 / 实付 / Actual Payment / Paid），取正数，不得计算；有订单金额与实付时取实付；忽略余额、额度、优惠立减、积分、广告、单号、卡号；优惠不要记成另一笔。
         - kind：付款/消费/支付成功/转给他人=expense；收款/到账=income；退款=income 且 refund=true；信用卡/花呗还款=repay；余额宝/零钱通转入转出、充值、提现、自己账户互转=transfer。
         - 还款/转账：from=付款账户，to=被还款卡或收款账户，fromTail/toTail=对应卡号末 4 位，banks=截图中的银行；要同银行同卡种，不确定就留空。
         - 多笔按从上到下各输出一次。★ 表示大字。没有的字段留空。
@@ -190,14 +190,19 @@ enum ModelPromptBuilder {
 
     // MARK: 提示词（OCR 文字 + 按需附加的说明）
 
-    /// 微信 / 支付宝英文界面的简短对照（只在识别出这类截图时附上，约 150 tokens）
+    /// 微信 / 支付宝 / 云闪付界面的简短对照（只在识别出这类截图时附上）
     static func glossary(for screen: PaymentScreen, level: PromptLevel) -> String? {
+        if screen.app == .unionpay {
+            var s = "云闪付：amount=大字实付（如 -¥14.96），不要用 Order Amount/订单金额；merchant=金额上方的中文商户名（详情区是英文也要取中文名）；Payment Method CMB Debit card[5858]=招行储蓄卡尾号；优惠/立减只作备注、不要另记一笔；Order Time=时间。"
+            if level != .minimal { s += "Current Status Transaction Successful=支出成功。" }
+            return s
+        }
         guard screen.english, screen.app == .wechat || screen.app == .alipay else { return nil }
         var s: String
         if screen.app == .wechat {
-            s = "微信英文：Paid/Payment Successful/Transfer/Pending=expense；Received/Deposited/Red Packet from=income（红包）；Refund/Refunded=income 且 refund=true；Balance=零钱，Mini Fund=零钱通；Top-up/Withdraw/Mini Fund 转入转出=transfer；Payee/Merchant=商户；Payment Method=付款账户。"
+            s = "微信英文：Paid/Payment Successful/Transfer/Pending=expense；Received/Deposited/Red Packet from=income（红包）；Refund/Refunded=income 且 refund=true；Balance=零钱，Mini Fund=零钱通；Top-up/Withdraw/Mini Fund 转入转出=transfer；Payee/Merchant=商户；Payment Method=付款账户；有 Order Amount 与大字实付时取实付。"
         } else {
-            s = "支付宝英文：金额带-或 Paid=expense；带+或 Received=income；Refund=income 且 refund=true；Huabei=花呗，Balance=余额，Yu'e Bao=余额宝；Top Up/Withdraw/Yu'e Bao 转入转出=transfer；Payment Method/Pay with=付款账户。"
+            s = "支付宝英文：金额带-或 Paid=expense；带+或 Received=income；Refund=income 且 refund=true；Huabei=花呗，Balance=余额，Yu'e Bao=余额宝；Top Up/Withdraw/Yu'e Bao 转入转出=transfer；Payment Method/Pay with=付款账户；有 Order Amount 与实付时取实付。"
         }
         s += "Order No./Transaction ID 是单号，不是金额或尾号。"
         if level != .minimal {
@@ -215,7 +220,7 @@ enum ModelPromptBuilder {
         if let gloss { parts.append(gloss) }
         if isEnglishHeavy(lines) {
             if gloss == nil || looksLikeRepayment(lines) {
-                parts.append("英文：Repay/Repayment=还款；Payment Method/Paid with=付款账户(from)；Credit Card Number/Repay card=被还款卡(to)；Order Amount/Amount=金额；Order Time/Transaction Time=时间；Debit/Savings card=储蓄卡；Credit card=信用卡。")
+                parts.append("英文：Repay/Repayment=还款；Payment Method/Paid with=付款账户(from)；Credit Card Number/Repay card=被还款卡(to)；金额取大字实付/Actual Payment，Order Amount 是订单原价（有优惠时别当实付）；Order Time/Transaction Time=时间；Debit/Savings card=储蓄卡；Credit card=信用卡；商户取金额上方中文名。")
             }
             let banks = banksMentioned(lines)
             if !banks.isEmpty { parts.append("银行：" + banks.map { "\($0.0)=\($0.1)" }.joined(separator: "，") + "。") }

@@ -29,6 +29,8 @@ struct ParsedReceipt: Equatable {
     var transferToName: String?
     /// 「零钱充值」「余额提现」「转入余额宝」，作为备注
     var transferNote: String?
+    /// 优惠信息短备注（如「随机立减 0.04」），不另记一笔
+    var discountNote: String?
 }
 
 /// 识别引擎：Apple 智能（端侧模型抽取 + 校验）或本地规则
@@ -322,6 +324,7 @@ enum ReceiptParser {
         for i in candidates.indices where heroes.contains(candidates[i].lineIndex) {
             candidates[i].score += 40   // 大字金额
         }
+        preferActualPaid(&candidates, lines: lines)
         let best = candidates.max { a, b in
             if a.score == b.score { return a.lineIndex > b.lineIndex } // 同分取靠上的
             return a.score < b.score
@@ -336,6 +339,7 @@ enum ReceiptParser {
         result.isIncome = IncomeDetector.isIncome(text: fullText, sign: best?.sign ?? "")
 
         result.merchant = merchant(lines: lines, amountLineIndex: best?.lineIndex)
+        result.discountNote = discountNote(lines: lines)
         // 英文界面（Repay:CMB Credit card 等）先转成中文再找账户线索 / 还款
         let hintText = EnglishBankTerms.localize(fullText)
         // 付款方式那一行最准（整段文字里可能还有「微信支付」标题、广告里的银行名）
@@ -436,9 +440,12 @@ enum ReceiptParser {
         var sign: String   // "+", "-", ""
     }
 
-    static let strongKeywords = ["实付款", "实付金额", "实付", "实收金额", "实收", "付款金额", "支付金额", "交易金额",
-                                 "消费金额", "订单金额", "应付金额", "应付", "合计", "总计", "总金额", "总价",
+    /// 实付 / 实际成交（优先于订单金额）
+    static let strongKeywords = ["实付款", "实付金额", "实付", "实际支付", "实际付款", "实收金额", "实收",
+                                 "付款金额", "支付金额", "交易金额", "消费金额", "合计", "总计", "总金额", "总价",
                                  "支出金额", "转账金额", "收款金额", "到账金额", "退款金额", "扣款金额"]
+    /// 订单原价 / 应付：有实付或大字带符号金额时让位
+    static let orderKeywords = ["订单金额", "应付金额", "应付"]
     static let weakKeywords = ["金额", "价格", "消费", "支出", "付款", "支付", "交易", "扣款", "收款", "到账", "人民币"]
     static let negativeKeywords = ["优惠", "折扣", "立减", "减免", "抵扣", "积分", "余额", "可用", "限额", "额度",
                                    "原价", "运费", "配送费", "包装费", "手续费", "找零", "返现", "券", "满", "单价",
@@ -519,6 +526,8 @@ enum ReceiptParser {
 
                 if strongKeywords.contains(where: { label.contains($0) }) {
                     score += 60; hasKeyword = true
+                } else if orderKeywords.contains(where: { label.contains($0) }) {
+                    score += 28; hasKeyword = true   // 低于带符号的整行金额
                 } else if weakKeywords.contains(where: { label.contains($0) }) {
                     score += 30; hasKeyword = true
                 }
@@ -527,21 +536,25 @@ enum ReceiptParser {
                    index > 0, !lineHadCandidates[index - 1] {
                     let prev = lines[index - 1]
                     if strongKeywords.contains(where: { prev.contains($0) }) { score += 45; hasKeyword = true }
+                    else if orderKeywords.contains(where: { prev.contains($0) }) { score += 22; hasKeyword = true }
                     else if weakKeywords.contains(where: { prev.contains($0) }) { score += 20; hasKeyword = true }
-                    if negativeKeywords.contains(where: { prev.contains($0) }) { score -= 30 }
+                    if negativeKeywords.contains(where: { prev.contains($0) }) { score -= 55 }
                 }
                 // 只看紧邻金额前面的一小段做负向判断，避免整行误伤
                 let nearLabel = String(label.suffix(8))
-                if negativeKeywords.contains(where: { nearLabel.contains($0) }) { score -= 45 }
+                if negativeKeywords.contains(where: { nearLabel.contains($0) }) { score -= 55 }
 
                 if hasCurrency { score += 30 }
                 if decPart.count == 3 { score += 20 } else if decPart.count == 2 { score += 10 }
                 if sign == "-" || sign == "+" { score += 25 }
 
-                // 整行只有这个金额（微信/支付宝支付成功页的大字金额）
+                // 整行只有这个金额（微信/支付宝/云闪付详情页的大字金额）
                 let rest = ns.replacingCharacters(in: m.range, with: "")
                     .trimmingCharacters(in: CharacterSet.whitespaces.union(CharacterSet(charactersIn: ":-+")))
-                if rest.isEmpty { score += 20 }
+                let amountOnly = rest.isEmpty
+                if amountOnly { score += 20 }
+                // 带正负号的整行金额（如「-¥14.96」）优先于下方「订单金额」
+                if amountOnly && (sign == "-" || sign == "+") { score += 15 }
 
                 if decPart.isEmpty && !hasCurrency {
                     score -= 15
@@ -565,6 +578,74 @@ enum ReceiptParser {
         return all
     }
 
+
+    /// 同时出现「订单金额 / 应付」与带符号整行金额（或实付）且差额≈优惠时，抬高实付候选
+    private static func preferActualPaid(_ candidates: inout [AmountCandidate], lines: [String]) {
+        guard candidates.count >= 2 else { return }
+        func looksOrder(_ c: AmountCandidate) -> Bool {
+            let i = c.lineIndex
+            if orderKeywords.contains(where: { lines[i].contains($0) }) { return true }
+            if i > 0, orderKeywords.contains(where: { lines[i - 1].contains($0) }) { return true }
+            return false
+        }
+        func looksPaid(_ c: AmountCandidate) -> Bool {
+            if signedAmountOnly(c, lines: lines) { return true }
+            let i = c.lineIndex
+            if strongKeywords.contains(where: { lines[i].contains($0) }) { return true }
+            if i > 0, strongKeywords.contains(where: { lines[i - 1].contains($0) }) { return true }
+            return false
+        }
+        func looksDiscount(_ c: AmountCandidate) -> Bool {
+            let i = c.lineIndex
+            let near = lines[i] + (i > 0 ? lines[i - 1] : "")
+            return negativeKeywords.contains(where: { near.contains($0) })
+        }
+        guard let order = candidates.filter(looksOrder).max(by: { $0.score < $1.score }) else { return }
+        let discountVal = candidates.filter(looksDiscount).map(\.value).max() ?? 0
+        let expected = ((order.value - discountVal) * 100).rounded() / 100
+        let paids = candidates.filter(looksPaid)
+        guard let paid = paids.min(by: { abs($0.value - expected) < abs($1.value - expected) }) else { return }
+        let paidR = (paid.value * 100).rounded() / 100
+        let closeToExpected = abs(paidR - expected) < 0.021
+        let sameAsOrderAbove = discountVal == 0 && abs(paidR - order.value) < 0.021 && paid.lineIndex < order.lineIndex
+        guard closeToExpected || sameAsOrderAbove else { return }
+        if let idx = candidates.firstIndex(where: { $0.lineIndex == paid.lineIndex && abs($0.value - paid.value) < 0.001 }) {
+            candidates[idx].score += 50
+        }
+    }
+
+    private static func signedAmountOnly(_ c: AmountCandidate, lines: [String]) -> Bool {
+        guard c.sign == "-" || c.sign == "+" else { return false }
+        let cleaned = cleanForAmounts(lines[c.lineIndex])
+        let ns = cleaned as NSString
+        guard let m = amountPattern.firstMatch(in: cleaned, range: NSRange(location: 0, length: ns.length)) else { return false }
+        let rest = ns.replacingCharacters(in: m.range, with: "")
+            .trimmingCharacters(in: CharacterSet.whitespaces.union(CharacterSet(charactersIn: ":-+")))
+        return rest.isEmpty
+    }
+
+    /// 「优惠信息 / 满2随机立减 -¥0.04」→「随机立减 0.04」
+    static func discountNote(lines: [String]) -> String? {
+        let join = lines.joined(separator: " ")
+        guard join.contains("优惠") || join.contains("立减") || join.contains("满减") || join.contains("折扣") else { return nil }
+        let specs: [(String, String)] = [
+            (#"随机立减\s*[:：]?\s*[¥￥\-]*\s*(\d+(?:\.\d{1,2})?)"#, "随机立减"),
+            (#"满\d+(?:\.\d+)?(?:元)?(?:随机)?立减\s*[:：]?\s*[¥￥\-]*\s*(\d+(?:\.\d{1,2})?)"#, "随机立减"),
+            (#"(?:优惠|立减|满减|折扣)[^\d]{0,16}(\d+\.\d{1,2})"#, "优惠"),
+        ]
+        for (pat, label) in specs {
+            guard let re = try? NSRegularExpression(pattern: pat) else { continue }
+            let ns = join as NSString
+            if let m = re.firstMatch(in: join, range: NSRange(location: 0, length: ns.length)), m.numberOfRanges > 1 {
+                let amt = ns.substring(with: m.range(at: 1))
+                if let v = Double(amt), v > 0, v < 10_000 {
+                    return "\(label) \(amt)"
+                }
+            }
+        }
+        return nil
+    }
+
     // MARK: - 商户
 
     static let merchantKeywords = ["商户全称", "商户名称", "商家名称", "收款方全称", "收款商户", "收款方", "收款人",
@@ -576,7 +657,9 @@ enum ReceiptParser {
                                     "账单分类", "订单号", "交易单号", "商户单号", "支付时间", "交易时间", "创建时间",
                                     "备注", "查看", "联系", "申请", "电子小票", "全部账单", "微信支付", "支付宝",
                                     "待收货", "已完成", "零钱", "储蓄卡", "信用卡", "交易状态", "留言", "我的账单",
-                                    "支付服务", "账单服务", "付款成功", "对方已收款", "退款成功", "退款方式"]
+                                    "支付服务", "账单服务", "付款成功", "对方已收款", "退款成功", "退款方式",
+                                    "优惠信息", "优惠详情", "活动优惠", "随机立减", "满减", "云闪付", "订单金额",
+                                    "优惠", "立减", "折扣"]
 
     static func merchant(lines: [String], amountLineIndex: Int?) -> String? {
         for key in merchantKeywords {
@@ -928,8 +1011,14 @@ enum TransactionSegmenter {
         }
         if heroSet.isEmpty {
             for i in 0..<n where matches(yenAmountOnlyPattern, texts[i]) {
+                // 「订单金额 / 应付」旁的金额不是大字实付
+                if i > 0, ReceiptParser.orderKeywords.contains(where: { texts[i - 1].contains($0) }) { continue }
+                if i > 0, ReceiptParser.negativeKeywords.contains(where: { texts[i - 1].contains($0) }) { continue }
                 let above = texts[max(0, i - 2)..<i]
-                if above.contains(where: isPayLine) { heroSet.insert(i) }
+                let signed = texts[i].hasPrefix("-") || texts[i].hasPrefix("+")
+                    || texts[i].contains("¥-") || texts[i].contains("$-")
+                // 带 ± 的整行金额（云闪付 / 支付宝详情大字）视为 hero；或上方有支付相关字
+                if signed || above.contains(where: isPayLine) { heroSet.insert(i) }
             }
         }
 

@@ -669,6 +669,7 @@ struct RecordEditorView: View {
         kind = parsed.isIncome ? .income : .expense
         amountText = String(format: "%.2f", amount)
         if let m = parsed.merchant { merchant = m }
+        if note.isEmpty, let n = parsed.discountNote { note = n }
         if let d = parsed.date { date = d }
         let list = allCategories.filter { $0.kind == kind }
         let hit = RuleStore.match(merchant: parsed.merchant ?? "", kind: kind, in: context, countHit: false)

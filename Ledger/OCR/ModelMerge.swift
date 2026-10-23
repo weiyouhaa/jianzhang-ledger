@@ -213,6 +213,13 @@ enum ModelMerge {
         // 模型给的文字字段限长，避免异常长输出进入后续处理
         let merchant = ReceiptParser.cleanMerchant(String(t.merchant.trimmingCharacters(in: .whitespacesAndNewlines).prefix(60)))
         r.merchant = merchant.isEmpty ? ruleMatch?.merchant : merchant
+        r.discountNote = ruleMatch?.discountNote
+        // 规则已取实付（有优惠备注）且与模型金额不同：优先规则实付（避免 Order Amount）
+        if let rule = ruleMatch, let ra = rule.amount, isValidAmount(ra),
+           rule.discountNote != nil, let ma = r.amount, abs(ra - ma) > 0.001 {
+            r.amount = (ra * 100).rounded() / 100
+            trace("model-amount", "规则实付 \(ra) 覆盖模型订单金额 \(ma)")
+        }
         let dateText = String(t.dateText.prefix(60))
         if !dateText.isEmpty, let d = ReceiptParser.date(lines: [dateText], now: ctx.now, calendar: ctx.calendar),
            abs(d.timeIntervalSince(ctx.now)) < 20 * 366 * 86_400 {
@@ -340,9 +347,15 @@ enum ModelMerge {
                 dropped += 1; reasons[DropReason.balanceOnly.title, default: 0] += 1; continue
             }
             // 同金额、未被占用的规则结果，用来补充日期和付款方式
-            let idx = ruleItems.indices.first { j in
+            var idx = ruleItems.indices.first { j in
                 guard !usedRules.contains(j), let a = ruleItems[j].amount, let rc = cents(a) else { return false }
                 return rc == c
+            }
+            // 金额对不上时：仅剩一笔未占用规则 → 仍用其补商户 / 账户 / 优惠备注
+            // （模型常把 Order Amount / 订单金额当成实付，与规则实付差几分钱）
+            if idx == nil {
+                let unused = ruleItems.indices.filter { !usedRules.contains($0) }
+                if unused.count == 1 { idx = unused[0] }
             }
             if t.kind.lowercased() == "transfer" {
                 // 充值 / 提现 / 余额宝：规则也认出是自己账户间转账（或整张截图只有这一笔且原文是转账）→ 记成转账；其余仍跳过

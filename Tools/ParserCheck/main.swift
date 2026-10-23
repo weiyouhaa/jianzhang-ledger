@@ -448,6 +448,39 @@ for (lines, app, english) in [(["微信支付", "支付成功", "¥1.00"], Payme
     if s.app == app && s.english == english { print("✅ 来源 \(s.tag)") } else { failures += 1; print("❌ 来源 \(s.tag)（应为 \(app.title)·\(english ? "英文" : "中文")）") }
 }
 
+
+// ===== 2.0 (6)：云闪付 / 订单金额 vs 实付（全部为自造的合成数据）=====
+checkW("云闪付 中英混合 实付优先",
+       ["云闪付交易详情", "示例青秀区清风坊餐饮店", "-¥14.96", "优惠信息", "满2随机立减-¥0.04",
+        "Current Status", "Transaction Successful", "Order Amount", "¥15.00",
+        "Payment Method", "CMB Debit card[5858]", "Order Time", "2026.10.17 13:45:43"],
+       W(amount: 14.96, merchant: "示例青秀区清风坊餐饮店", category: "餐饮",
+         date: "2026-10-17 13:45", accountType: "debit", tail: "5858", bank: "招商银行"))
+do {
+    let r = ReceiptParser.parse(lines: ["云闪付交易详情", "示例青秀区清风坊餐饮店", "-¥14.96", "优惠信息", "满2随机立减-¥0.04",
+                                        "Order Amount", "¥15.00", "Payment Method", "CMB Debit card[5858]",
+                                        "Order Time", "2026.10.17 13:45:43"], now: now, calendar: cal)
+    if r.discountNote == "随机立减 0.04" { print("✅ 云闪付优惠备注：\(r.discountNote!)") }
+    else { failures += 1; print("❌ 云闪付优惠备注：\(r.discountNote ?? "nil")") }
+}
+checkW("支付宝 订单金额 vs 实付",
+       ["账单详情", "示例面馆", "交易成功", "实付 ¥28.50", "订单金额 ¥30.00", "优惠 -¥1.50",
+        "付款方式 余额", "支付时间 2026-10-17 12:00:00"],
+       W(amount: 28.5, merchant: "示例面馆", category: "餐饮", date: "2026-10-17 12:00", accountType: "alipay"))
+checkW("微信 大字实付优先于订单金额",
+       ["微信支付", "支付成功", "示例咖啡馆", "-¥19.90", "订单金额 ¥20.00", "优惠立减 ¥0.10",
+        "支付方式 零钱", "支付时间 2026年10月17日 09:10:00"],
+       W(amount: 19.9, merchant: "示例咖啡馆", category: "餐饮", date: "2026-10-17 09:10", accountType: "wechat"))
+checkW("云闪付 英文 Payment Method 括号尾号",
+       ["云闪付", "示例便利店", "-¥8.00", "Transaction Successful", "Order Amount ¥8.00",
+        "Payment Method", "CMB Debit Card (4242)", "Order Time", "2026.10.17 18:00:00"],
+       W(amount: 8, merchant: "示例便利店", category: "购物", date: "2026-10-17 18:00",
+         accountType: "debit", tail: "4242", bank: "招商银行"))
+// 仅有订单金额、无实付时仍取订单金额
+checkW("仅订单金额",
+       ["账单详情", "示例潮玩店", "订单金额 ¥45.00", "交易成功", "付款方式 零钱"],
+       W(amount: 45, merchant: "示例潮玩店", accountType: "wechat"))
+
 // --- 商户清理（英文 / 箭头 / 省略号 / 微信标题前缀）---
 for (raw, want) in [("Sample Shop >", "Sample Shop"), ("Merchant: Sample Cafe", "Sample Cafe"), ("示例便利店…", "示例便利店"),
                     ("Sample Store...", "Sample Store"), ("扫二维码付款-给示例水果店", "示例水果店"), ("Sample Foods Co., Ltd.", "Sample Foods"),

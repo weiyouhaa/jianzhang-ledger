@@ -400,5 +400,42 @@ for level in [PromptLevel.normal, .compact, .minimal] {
 }
 check(pw.summary.contains("来源 微信·英文") && !pw.summary.contains("Top-up"), "诊断摘要只有来源标签，不含原文")
 
+
+// ===== 2.0 (6)：云闪付实付 / 商户合并（合成）=====
+let upPayLines = ["云闪付交易详情", "示例青秀区清风坊餐饮店", "-¥14.96", "优惠信息", "满2随机立减-¥0.04",
+                  "Current Status", "Transaction Successful", "Order Amount", "¥15.00",
+                  "Payment Method", "CMB Debit card[5858]", "Order Time", "2026.10.17 13:45:43"]
+let upPayRules = ReceiptParser.parseAll(lines: upPayLines, now: now, calendar: cal)
+check(upPayRules.count == 1 && upPayRules[0].amount == 14.96 && upPayRules[0].merchant == "示例青秀区清风坊餐饮店",
+      "规则：云闪付取实付 14.96 与中文商户（不取订单金额 15）")
+check(upPayRules[0].accountHint?.cardTail == "5858" && upPayRules[0].accountHint?.bankName == "招商银行",
+      "规则：CMB Debit card[5858] → 招行储蓄卡尾号")
+check(upPayRules[0].discountNote == "随机立减 0.04", "规则：优惠备注")
+// 模型误取订单金额 → 校验失败回退规则（15 不在「作为交易金额」的原文数字集合？15.00 在原文中）
+// 15.00 在原文，模型若只交 15 会被当成有效；用规则与模型金额不一致时看合并策略：模型金额在原文则采用模型。
+// 这里验证：模型正确取 14.96 + 商户 → 合并保留
+let upModel = ModelTransaction(amount: 14.96, kind: "expense", merchant: "示例青秀区清风坊餐饮店", categoryName: "餐饮",
+                               accountHint: "招商银行储蓄卡", dateText: "2026.10.17 13:45:43")
+let upOut = ModelMerge.merge(model: [upModel], rules: upPayRules, ctx: ctx(upPayLines))
+check(upOut.engine == .appleIntelligence && upOut.receipts.count == 1 && upOut.receipts[0].amount == 14.96,
+      "合并：模型实付 14.96 有效")
+check(upOut.receipts[0].merchant == "示例青秀区清风坊餐饮店" && upOut.receipts[0].discountNote == "随机立减 0.04",
+      "合并：商户与优惠备注来自规则补充")
+// 模型误用订单金额 15、漏商户 → 金额在原文仍有效；规则商户补上
+let upBad = ModelTransaction(amount: 15.00, kind: "expense", merchant: "", categoryName: "餐饮",
+                             accountHint: "招商银行储蓄卡", dateText: "2026.10.17 13:45:43")
+let upBadOut = ModelMerge.merge(model: [upBad], rules: upPayRules, ctx: ctx(upPayLines))
+check(upBadOut.receipts.count == 1 && upBadOut.receipts[0].amount == 14.96
+          && upBadOut.receipts[0].merchant == "示例青秀区清风坊餐饮店"
+          && upBadOut.receipts[0].discountNote == "随机立减 0.04",
+      "合并：模型漏商户时用规则商户")
+// 提示词：云闪付来源附实付说明
+let upPayPrompt = ModelPromptBuilder.build(lines: upPayLines.map { OCRLine($0) },
+    instructions: ModelPromptBuilder.instructions(expenseCategories: expenseCats, incomeCategories: incomeCats, accounts: accounts, level: .normal),
+    level: .normal)
+check(upPayPrompt.source.contains("云闪付") && upPayPrompt.glossary && upPayPrompt.prompt.contains("实付")
+      && upPayPrompt.prompt.contains("Order Amount") && upPayPrompt.prompt.contains("商户"),
+      "云闪付提示词：说明取实付与中文商户")
+
 print(failures == 0 ? "ALL PASSED" : "\(failures) FAILED")
 exit(failures == 0 ? 0 : 1)
