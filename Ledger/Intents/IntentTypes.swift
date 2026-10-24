@@ -281,18 +281,19 @@ enum IntentRecorder {
         return guessed ?? (kind == .income ? "其他收入" : "其他")
     }
 
-    /// 重复判断：金额相同、商户相同、时间相差 2 分钟以内（重复识别同一张截图时不重复记账）
+    /// 重复判断：金额相同，且（同商户 2 分钟内，或同账户 / 商户相近 5 分钟内）。
+    /// 同一笔交易的银行推送、支付助手、云闪付详情截图只记一次
     @MainActor
-    static func isDuplicate(amount: Double, merchant: String, date: Date) -> Bool {
+    static func isDuplicate(amount: Double, merchant: String, date: Date, accountID: UUID? = nil) -> Bool {
         let context = DataStore.shared.mainContext
-        let start = date.addingTimeInterval(-120), end = date.addingTimeInterval(120)
+        let start = date.addingTimeInterval(-DuplicateMatcher.window), end = date.addingTimeInterval(DuplicateMatcher.window)
         let descriptor = FetchDescriptor<LedgerRecord>(predicate: #Predicate<LedgerRecord> { $0.date >= start && $0.date <= end })
         let list = (try? context.fetch(descriptor)) ?? []
-        let rounded = (amount * 100).rounded() / 100
-        let m = merchant.trimmingCharacters(in: .whitespaces)
-        return list.contains { r in
-            abs(r.amount - rounded) < 0.005 && r.merchant.trimmingCharacters(in: .whitespaces) == m
-        }
+        let entry = DuplicateMatcher.Entry(amount: (amount * 100).rounded() / 100, merchant: merchant, date: date,
+                                           account: accountID?.uuidString)
+        return DuplicateMatcher.isDuplicate(entry, among: list.map {
+            DuplicateMatcher.Entry(amount: $0.amount, merchant: $0.merchant, date: $0.date, account: $0.accountRef?.id.uuidString)
+        })
     }
 
     static func summary(of record: LedgerRecord) -> String {

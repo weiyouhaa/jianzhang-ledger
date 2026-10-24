@@ -185,7 +185,9 @@ enum ModelMerge {
         r.rawText = ctx.lines.joined(separator: "\n")
         var kind = t.kind.lowercased()
         if kind == "repay" { kind = "cardrepayment" }
-        let localizedText = EnglishBankTerms.localize(ctx.lines.joined(separator: " "))
+        // 先去掉「Go to Repay」「还款福利」这类按钮 / 菜单，避免误判为还款
+        let localizedText = EnglishBankTerms.localize(ctx.lines.map { EnglishBankTerms.splitGlued(ReceiptParser.stripNoise($0)) }.joined(separator: " "))
+        let layout = ScreenLayouts.detect(ctx.lines)
         // 原文明确是信用卡还款（还款 + 信用卡 / 银行），模型却判为普通支出：按还款处理（截图证据优先于模型的分类）
         if kind == "expense", !t.isRefund,
            ruleMatch?.isCardRepayment == true || RepaymentDetector.isCardRepayment(text: localizedText) {
@@ -211,9 +213,19 @@ enum ModelMerge {
         r.isIncome = kind == "income" || t.isRefund
         r.isCardRepayment = kind == "cardrepayment" && !t.isRefund
         // 模型给的文字字段限长，避免异常长输出进入后续处理
-        let merchant = ReceiptParser.cleanMerchant(String(t.merchant.trimmingCharacters(in: .whitespacesAndNewlines).prefix(60)))
+        var merchant = ReceiptParser.cleanMerchant(String(t.merchant.trimmingCharacters(in: .whitespacesAndNewlines).prefix(60)))
+        // 「美团-示例牛肉饭」：平台进备注；模型只给了平台名（美团）时用规则的商户
+        let split = ReceiptParser.splitPlatform(merchant)
+        merchant = split.merchant
+        var platform = split.platform
+        if ReceiptParser.platformNames.contains(merchant) {
+            if let rm = ruleMatch?.merchant, !rm.isEmpty { platform = merchant; merchant = "" }
+        }
         r.merchant = merchant.isEmpty ? ruleMatch?.merchant : merchant
         r.discountNote = ruleMatch?.discountNote
+        if let p = platform, !(r.discountNote ?? "").contains(p) {
+            r.discountNote = [p, r.discountNote].compactMap { $0 }.joined(separator: " · ")
+        }
         // 规则已取实付（有优惠备注）且与模型金额不同：优先规则实付（避免 Order Amount）
         if let rule = ruleMatch, let ra = rule.amount, isValidAmount(ra),
            rule.discountNote != nil, let ma = r.amount, abs(ra - ma) > 0.001 {
@@ -264,6 +276,20 @@ enum ModelMerge {
                 r.categoryName = CategoryGuesser.guess(text: r.merchant ?? "", isIncome: r.isIncome)
                     ?? ruleMatch?.categoryName
             }
+        }
+        // 聊天转账气泡 / 银行推送的交易类型：收支方向以气泡状态、交易类型为准
+        if let rule = ruleMatch, layout == .chatTransfer || layout == .bankPush, !rule.isSelfTransfer,
+           rule.isIncome != r.isIncome || rule.isCardRepayment != r.isCardRepayment {
+            trace("model-kind", "\(layout.title ?? "")：收支方向以规则（气泡状态 / 交易类型）为准")
+            var fixed = rule
+            fixed.engine = .appleIntelligence
+            if !rule.isCardRepayment, rule.merchant == nil { fixed.merchant = r.merchant }
+            return fixed
+        }
+        if let rule = ruleMatch, layout == .chatTransfer {
+            if r.accountHint == nil { r.accountHint = rule.accountHint }
+            if r.discountNote == nil { r.discountNote = rule.discountNote }
+            if r.date == nil { r.date = rule.date }
         }
         return r
     }
@@ -393,6 +419,15 @@ enum ModelMerge {
                 return Outcome(receipts: rules, engine: .appleIntelligence, dropped: 0, skippedTransfers: skipped, fallbackReason: reason, dropReasons: reasonList)
             }
             return Outcome(receipts: rules, engine: .rules, dropped: dropped, skippedTransfers: skipped, fallbackReason: reason, dropReasons: reasonList)
+        }
+        // 银行推送 / 支付助手这类多卡片列表：模型漏掉的卡片用规则结果补上
+        let layout = ScreenLayouts.detect(ctx.lines)
+        if dropped == 0, layout == .bankPush || layout == .payAssistant || layout == .chatTransfer, ruleItems.count > valid.count {
+            let missing = ruleItems.indices.filter { !usedRules.contains($0) }.map { ruleItems[$0] }
+            if !missing.isEmpty {
+                trace("merge", "\(layout.title ?? "")：模型漏了 \(missing.count) 张卡片，用规则补上")
+                valid.append(contentsOf: missing)
+            }
         }
         // 模型有编造（金额不在原文）且规则识别出更多笔：更信任规则
         if dropped > 0 && ruleItems.count > valid.count {

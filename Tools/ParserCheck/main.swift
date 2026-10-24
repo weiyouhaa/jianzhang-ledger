@@ -489,5 +489,129 @@ for (raw, want) in [("Sample Shop >", "Sample Shop"), ("Merchant: Sample Cafe", 
     if got == want { print("✅ 商户清理 \(raw) → \(got)") } else { failures += 1; print("❌ 商户清理 \(raw) → \(got)") }
 }
 
+
+// ===== 2.0 (7)：四种版式（全部为合成数据：示例商户 / 示例金额 / 尾号 8831）=====
+func expect(_ ok: Bool, _ msg: String) {
+    if ok { print("✅ \(msg)") } else { failures += 1; print("❌ \(msg)") }
+}
+let df7 = DateFormatter(); df7.timeZone = cal.timeZone; df7.dateFormat = "yyyy-MM-dd HH:mm"
+func d7(_ d: Date?) -> String { d.map { df7.string(from: $0) } ?? "nil" }
+func scr7(_ l: [String]) -> PaymentScreen { ReceiptParser.screen(l.map { OCRLine($0) }) }
+
+// A. 银行公众号推送列表
+let pushA = ["11:19", "浦发银行信用卡", "「积分当钱花」示例活动开兑!", "星期四 下午4:23", "交易提醒", "银行卡号: 尾号8831",
+             "交易时间: 10月15日 16:23", "交易类型: 消费", "交易金额: 人民币23.45元", "商户名称: 美团-示例鲜品科技有限公司", "查看详情 >",
+             "上午8:08", "交易提醒", "银行卡号: 尾号8831", "交易时间: 10月18日 08:08", "交易类型: 消费", "交易金额: 人民币12.34元",
+             "商户名称: 美团-示例牛肉饭(示例大厦…", "查看详情 >", "账户服务 借钱额度 还款福利"]
+let rA = ReceiptParser.parseAll(lines: pushA, now: now, calendar: cal)
+expect(scr7(pushA).tag == "银行公众号", "A 银行公众号：版式识别")
+expect(rA.count == 2, "A 银行公众号：两张交易提醒 → 2 笔（横幅 / 菜单不算）")
+if rA.count == 2 {
+    expect(rA[0].amount == 23.45 && !rA[0].isIncome && rA[0].merchant == "示例鲜品科技有限公司" && rA[0].discountNote == "美团"
+           && d7(rA[0].date) == "2026-10-15 16:23", "A 第 1 笔：金额 / 商户去平台前缀 / 平台进备注 / 交易时间")
+    expect(rA[1].amount == 12.34 && rA[1].merchant == "示例牛肉饭" && rA[1].categoryName == "餐饮" && d7(rA[1].date) == "2026-10-18 08:08",
+           "A 第 2 笔：截断的分店名去掉、分类餐饮")
+    expect(rA.allSatisfy { $0.accountHint?.bankName == "浦发银行" && $0.accountHint?.type == "credit" && $0.accountHint?.cardTail == "8831" && !$0.isCardRepayment },
+           "A 账户：标题浦发银行信用卡 + 尾号 8831；菜单「还款福利」不算还款")
+}
+let pushRefund = ["浦发银行信用卡", "交易提醒", "银行卡号: 尾号8831", "交易时间: 10月16日 10:00", "交易类型: 退货",
+                  "交易金额: 人民币12.34元", "商户名称: 美团-示例牛肉饭"]
+let rAr = ReceiptParser.parseAll(lines: pushRefund, now: now, calendar: cal)
+expect(rAr.count == 1 && rAr[0].isIncome && rAr[0].categoryName == "退款", "A 交易类型 退货 → 退款收入")
+let pushRepay = ["浦发银行信用卡", "交易提醒", "银行卡号: 尾号8831", "交易时间: 10月16日 10:00", "交易类型: 还款",
+                 "交易金额: 人民币880.00元"]
+let rArp = ReceiptParser.parseAll(lines: pushRepay, now: now, calendar: cal)
+expect(rArp.count == 1 && rArp[0].isCardRepayment && rArp[0].repaymentCard?.cardTail == "8831" && rArp[0].repaymentCard?.bankName == "浦发银行",
+       "A 交易类型 还款 → 信用卡还款（被还卡浦发尾号 8831）")
+let pushFuture = ["浦发银行信用卡", "交易提醒", "银行卡号: 尾号8831", "交易时间: 12月25日 10:00", "交易类型: 消费",
+                  "交易金额: 人民币23.45元", "商户名称: 示例书店"]
+expect(d7(ReceiptParser.parseAll(lines: pushFuture, now: now, calendar: cal).first?.date) == "2025-12-25 10:00", "A 未来日期退回去年")
+
+// B. 微信聊天转账气泡
+let chatB = ["有空再弄吧", "昨天 晚上7:00", "等你消息", "昨天 晚上7:10", "¥880.00", "已收款", "转账", "好了吗?给你3个", "还没",
+             "昨天 晚上7:23", "按住 说话"]
+let rB = ReceiptParser.parseAll(lines: chatB, now: now, calendar: cal)
+expect(scr7(chatB).tag == "微信聊天转账", "B 聊天转账：版式识别")
+expect(rB.count == 1 && rB[0].amount == 880 && rB[0].isIncome && rB[0].categoryName == "其他收入"
+       && rB[0].accountHint?.type == "wechat" && d7(rB[0].date) == "2026-10-17 19:10",
+       "B 已收款 → 收入 880 / 其他收入 / 微信零钱 / 昨天 19:10（聊天里的数字不算）")
+let chatOut = ["星期四 下午4:23", "¥34.56", "已被接收", "转账", "收到"]
+let rBo = ReceiptParser.parseAll(lines: chatOut, now: now, calendar: cal)
+expect(rBo.count == 1 && !rBo[0].isIncome && rBo[0].amount == 34.56 && d7(rBo[0].date) == "2026-10-15 16:23", "B 已被接收 → 支出、星期四 16:23")
+let chatPending = ["9:18", "示例好友", "08:30", "¥12.34", "请收款", "微信转账"]
+let rBp = ReceiptParser.parseAll(lines: chatPending, now: now, calendar: cal)
+expect(rBp.count == 1 && rBp[0].isIncome && rBp[0].discountNote == "待收款" && d7(rBp[0].date) == "2026-10-18 08:30", "B 请收款 → 仍记一笔，备注待收款")
+let chatDetail = ["转账", "¥880.00", "已收款", "转账时间 2026年10月17日 19:10:00", "收款时间 2026年10月17日 19:11:00"]
+expect(scr7(chatDetail).layout != .chatTransfer, "B 转账详情页不按聊天气泡处理")
+
+// C. 微信支付助手卡片
+let payC = ["9:18", "搜索消息号", "服务通知 支付消息 精彩动态", "08:30", "支付助手", "付款成功", "¥34.56",
+            "交易对象 示例煲仔饭(示例大厦店)", "交易账户 浦发银行银联信用卡[8831]", "See details >",
+            "Yesterday 19:15", "支付助手", "付款成功", "¥7.80", "交易对象 示例便利店", "交易账户 浦发银行银联信用卡[8831]"]
+let rC = ReceiptParser.parseAll(lines: payC, now: now, calendar: cal)
+expect(scr7(payC).tag == "支付助手", "C 支付助手：版式识别（不当成云闪付）")
+expect(rC.count == 2, "C 两张卡片 → 2 笔（标签 / 搜索不算）")
+if rC.count == 2 {
+    expect(rC[0].amount == 34.56 && rC[0].merchant == "示例煲仔饭(示例大厦店)" && d7(rC[0].date) == "2026-10-18 08:30"
+           && rC[0].accountHint?.bankName == "浦发银行" && rC[0].accountHint?.type == "credit" && rC[0].accountHint?.cardTail == "8831",
+           "C 第 1 笔：交易对象 / 单独的 08:30 = 今天 / 浦发信用卡尾号 8831")
+    expect(rC[1].amount == 7.8 && rC[1].merchant == "示例便利店" && d7(rC[1].date) == "2026-10-17 19:15", "C 第 2 笔：Yesterday 19:15")
+}
+let payLate = ["支付消息", "服务通知", "23:50", "支付助手", "付款成功", "¥12.34", "交易对象 示例书店"]
+expect(d7(ReceiptParser.parseAll(lines: payLate, now: now, calendar: cal).first?.date) == "2026-10-17 23:50", "C 标题时间晚于现在 → 昨天")
+
+// D. 云闪付英文 Transaction details
+let upD = ["9:18", "Transaction details", "美团", "-¥34.56", "Discount Info UnionPay Discount-¥5.67", "Payee 示例煲仔饭(示例大厦店)",
+           "Card Number SPDBCredit card[8831]", "Transaction Time 2026-10-17 11:08:41", "Order amount ¥40.23",
+           "Transaction Category Consumption", "Category Other Categories-Other", "Payment Network UnionPay", "More",
+           "Transactions at this merchant", "Go to Repay", "快捷管理银行卡 一键查"]
+let upD2 = ["9:18", "Transaction details", "美团", "-¥34.56", "Discount Info", "UnionPay Discount-¥5.67", "Payee", "示例煲仔饭(示例大厦店)",
+            "Card Number", "SPDBCredit card[8831]", "Transaction", "Time 2026-10-17 11:08:41", "Order amount", "¥40.23",
+            "Transaction", "Category Consumption", "More", "Go to Repay"]
+for (name, l) in [("D 单行", upD), ("D 分行", upD2)] {
+    let r = ReceiptParser.parseAll(lines: l, now: now, calendar: cal)
+    expect(r.count == 1 && r[0].amount == 34.56 && !r[0].isIncome && !r[0].isCardRepayment && r[0].merchant == "示例煲仔饭(示例大厦店)"
+           && r[0].discountNote == "美团 · 云闪付立减 5.67" && r[0].categoryName == "餐饮" && d7(r[0].date) == "2026-10-17 11:08"
+           && r[0].accountHint?.bankName == "浦发银行" && r[0].accountHint?.type == "credit" && r[0].accountHint?.cardTail == "8831",
+           "\(name)：实付 34.56（非订单金额）/ Payee 商户 / 美团+立减进备注 / SPDBCredit → 浦发信用卡 / Go to Repay 不算还款")
+}
+expect(scr7(upD).tag == "云闪付·英文", "D 诊断标签：云闪付·英文")
+expect(EnglishBankTerms.splitGlued("CMBDebit card[1234]") == "CMB Debit card[1234]", "粘连银行代码：CMBDebit → CMB Debit")
+expect(AccountHintParser.parse(text: "浦发银行银联信用卡[8831]")?.cardTail == "8831", "交易账户 浦发银行银联信用卡[8831] → 尾号")
+
+// 平台前缀
+for (raw, m, p) in [("美团-示例牛肉饭", "示例牛肉饭", "美团"), ("饿了么-示例粥铺", "示例粥铺", "饿了么"), ("Meituan-示例面馆", "示例面馆", "美团"),
+                    ("京东-示例数码", "示例数码", "京东"), ("示例便利店", "示例便利店", nil)] as [(String, String, String?)] {
+    let got = ReceiptParser.splitPlatform(raw)
+    expect(got.merchant == m && got.platform == p, "平台前缀 \(raw) → \(got.merchant) / \(got.platform ?? "无")")
+}
+
+// 跨截图查重：同一笔 34.56 的银行推送 + 支付助手 + 云闪付详情 → 后两张为重复
+let base = cal.date(from: DateComponents(year: 2026, month: 10, day: 17, hour: 11, minute: 8))!
+let shots: [DuplicateMatcher.Entry] = [
+    .init(amount: 34.56, merchant: "示例煲仔饭(示例大厦…", date: base, account: "pf8831"),
+    .init(amount: 34.56, merchant: "示例煲仔饭(示例大厦店)", date: base.addingTimeInterval(60), account: "pf8831"),
+    .init(amount: 34.56, merchant: "示例煲仔饭(示例大厦店)", date: base.addingTimeInterval(41), account: "pf8831"),
+]
+var seen7: [DuplicateMatcher.Entry] = []
+var dupFlags: [Bool] = []
+for e in shots { dupFlags.append(DuplicateMatcher.isDuplicate(e, among: seen7)); seen7.append(e) }
+expect(dupFlags == [false, true, true], "查重：同一笔三张截图 → 记 1 笔、2 笔标重复")
+expect(DuplicateMatcher.matches(.init(amount: 12.34, merchant: "美团-示例牛肉饭", date: base, account: nil),
+                                .init(amount: 12.34, merchant: "示例牛肉饭(示例大厦店)", date: base.addingTimeInterval(240), account: "pf8831")),
+       "查重：平台前缀 / 分店不同、4 分钟内、一侧无账户 → 重复")
+expect(!DuplicateMatcher.matches(.init(amount: 34.56, merchant: "示例煲仔饭", date: base, account: "pf8831"),
+                                 .init(amount: 34.56, merchant: "示例煲仔饭", date: base.addingTimeInterval(200), account: "cmb1234")),
+       "查重：不同账户 → 不算重复")
+expect(!DuplicateMatcher.matches(.init(amount: 34.56, merchant: "示例煲仔饭", date: base, account: "pf8831"),
+                                 .init(amount: 34.56, merchant: "示例书店", date: base.addingTimeInterval(100), account: "pf8831")),
+       "查重：商户明显不同 → 不算重复")
+expect(!DuplicateMatcher.matches(.init(amount: 34.56, merchant: "示例煲仔饭", date: base, account: "pf8831"),
+                                 .init(amount: 34.56, merchant: "示例煲仔饭", date: base.addingTimeInterval(900), account: "pf8831")),
+       "查重：相隔 15 分钟 → 不算重复")
+expect(DuplicateMatcher.matches(.init(amount: 30, merchant: "示例面馆", date: base, account: nil),
+                                .init(amount: 30, merchant: "示例面馆", date: base.addingTimeInterval(90), account: nil)),
+       "查重：旧规则（同商户 2 分钟内）仍有效")
+
 print(failures == 0 ? "ALL PASSED" : "\(failures) FAILED")
 exit(failures == 0 ? 0 : 1)

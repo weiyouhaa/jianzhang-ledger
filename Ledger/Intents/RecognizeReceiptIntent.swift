@@ -192,11 +192,23 @@ struct RecognizeReceiptIntent: AppIntent {
                 item.cardTail = p.transferTo?.cardTail
                 RunLog.shared.log(.info, "self-transfer", "第 \(index + 1) 笔：账户间转账，转出账户\(item.accountID == nil ? "未定" : "已定")，转入账户\(item.toAccountID == nil ? "未定（需选择）" : "已定")")
             }
-            // 去重：同金额、同商户、时间相差 2 分钟内的已有记录
+            // 去重：同金额 + 同商户 2 分钟内，或同账户 / 商户相近 5 分钟内的已有记录
             RunLog.shared.log(.info, "dedupe", "第 \(index + 1) 笔：查重")
             item.isDuplicate = item.dateRecognized
-                && IntentRecorder.isDuplicate(amount: item.amount, merchant: item.merchant, date: item.date)
+                && IntentRecorder.isDuplicate(amount: item.amount, merchant: item.merchant, date: item.date, accountID: item.accountID)
             return item
+        }
+
+        // 同一批截图里的同一笔（银行推送 + 支付助手 + 云闪付详情）：后出现的标为重复
+        var seen: [DuplicateMatcher.Entry] = []
+        for i in items.indices where items[i].kind != .transfer && items[i].dateRecognized {
+            let e = DuplicateMatcher.Entry(amount: items[i].amount, merchant: items[i].merchant, date: items[i].date,
+                                           account: items[i].accountID?.uuidString)
+            if !items[i].isDuplicate, DuplicateMatcher.isDuplicate(e, among: seen) {
+                items[i].isDuplicate = true
+                log.log(.info, "dedupe", "第 \(i + 1) 笔：与本批前面的截图是同一笔，标为重复")
+            }
+            seen.append(e)
         }
 
         log.log(.info, "items", "待处理 \(items.count) 笔，重复 \(items.filter(\.isDuplicate).count) 笔，转账 \(items.filter { $0.kind == .transfer }.count) 笔")
@@ -549,7 +561,7 @@ struct RecognizeReceiptIntent: AppIntent {
                 break
             }
             if !item.isManual {
-                item.isDuplicate = IntentRecorder.isDuplicate(amount: item.amount, merchant: item.merchant, date: item.date)
+                item.isDuplicate = IntentRecorder.isDuplicate(amount: item.amount, merchant: item.merchant, date: item.date, accountID: item.accountID)
                 if !item.isDuplicate { item.saveDuplicate = false }
             }
         }

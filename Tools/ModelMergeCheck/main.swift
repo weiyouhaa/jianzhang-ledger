@@ -437,5 +437,58 @@ check(upPayPrompt.source.contains("云闪付") && upPayPrompt.glossary && upPayP
       && upPayPrompt.prompt.contains("Order Amount") && upPayPrompt.prompt.contains("商户"),
       "云闪付提示词：说明取实付与中文商户")
 
+
+// ===== 2.0 (7)：四种版式的模型合并（合成：示例商户 / 尾号 8831）=====
+let ins7 = ModelPromptBuilder.instructions(expenseCategories: expenseCats, incomeCategories: incomeCats, accounts: accounts + ["浦发信用卡"], level: .normal)
+func prompt7(_ l: [String]) -> ModelPrompt { ModelPromptBuilder.build(lines: l.map { OCRLine($0) }, instructions: ins7, level: .normal) }
+
+// A. 银行推送两张卡片，模型只给了一笔 → 漏掉的用规则补上；模型商户「美团-…」去前缀
+let push7 = ["11:19", "浦发银行信用卡", "「积分当钱花」示例活动开兑!", "星期四 下午4:23", "交易提醒", "银行卡号: 尾号8831",
+             "交易时间: 10月15日 16:23", "交易类型: 消费", "交易金额: 人民币23.45元", "商户名称: 美团-示例鲜品科技有限公司", "查看详情 >",
+             "上午8:08", "交易提醒", "银行卡号: 尾号8831", "交易时间: 10月18日 08:08", "交易类型: 消费", "交易金额: 人民币12.34元",
+             "商户名称: 美团-示例牛肉饭(示例大厦…", "查看详情 >", "账户服务 借钱额度 还款福利"]
+let push7Out = mergeWith(push7, [ModelTransaction(amount: 12.34, kind: "expense", merchant: "美团-示例牛肉饭(示例大厦", categoryName: "餐饮",
+                                                  accountHint: "", dateText: "10月18日 08:08")])
+check(push7Out.engine == .appleIntelligence && push7Out.receipts.count == 2, "A 合并：模型漏了一张卡片 → 规则补上，共 2 笔")
+check(push7Out.receipts.first?.merchant == "示例牛肉饭" && push7Out.receipts.first?.discountNote == "美团"
+      && push7Out.receipts.first?.accountHint?.cardTail == "8831" && push7Out.receipts.first?.isCardRepayment == false,
+      "A 合并：模型商户去平台前缀、平台进备注、「还款福利」不算还款")
+let push7P = prompt7(push7)
+check(push7P.source == "银行公众号" && push7P.prompt.contains("交易提醒") && push7P.estimatedTokens <= ModelPromptBuilder.contextTokens,
+      "A 提示词：银行公众号说明，在 4k 预算内")
+
+// B. 聊天转账：模型误判为支出 → 以「已收款」为准记收入
+let chat7 = ["有空再弄吧", "昨天 晚上7:10", "¥880.00", "已收款", "转账", "好了吗?给你3个"]
+let chat7Out = mergeWith(chat7, [ModelTransaction(amount: 880, kind: "expense", merchant: "", categoryName: "其他", accountHint: "微信", dateText: "")])
+check(chat7Out.receipts.count == 1 && chat7Out.receipts[0].isIncome && chat7Out.receipts[0].categoryName == "其他收入"
+      && fmt(chat7Out.receipts[0].date) == "2026-10-17 19:10", "B 合并：已收款 → 收入 / 其他收入 / 昨天 19:10")
+let chat7Bad = mergeWith(chat7, [ModelTransaction(amount: 3, kind: "expense", merchant: "", categoryName: "其他", accountHint: "微信", dateText: "")])
+check(chat7Bad.receipts.count == 1 && chat7Bad.receipts[0].amount == 880, "B 合并：模型取了聊天里的数字 → 用气泡金额")
+check(prompt7(chat7).source == "微信聊天转账" && prompt7(chat7).prompt.contains("气泡"), "B 提示词：只记气泡金额")
+
+// C. 支付助手两张卡片，模型只给一笔 → 补齐
+let pay7 = ["9:18", "搜索消息号", "服务通知 支付消息 精彩动态", "08:30", "支付助手", "付款成功", "¥34.56",
+            "交易对象 示例煲仔饭(示例大厦店)", "交易账户 浦发银行银联信用卡[8831]", "See details >",
+            "Yesterday 19:15", "支付助手", "付款成功", "¥7.80", "交易对象 示例便利店", "交易账户 浦发银行银联信用卡[8831]"]
+let pay7Out = mergeWith(pay7, [ModelTransaction(amount: 34.56, kind: "expense", merchant: "示例煲仔饭(示例大厦店)", categoryName: "餐饮",
+                                                accountHint: "", dateText: "")])
+check(pay7Out.receipts.count == 2 && fmt(pay7Out.receipts[0].date) == "2026-10-18 08:30"
+      && pay7Out.receipts[0].accountHint?.bankName == "浦发银行" && pay7Out.receipts[1].amount == 7.8,
+      "C 合并：模型漏卡片用规则补；时间 / 账户来自规则")
+check(prompt7(pay7).source == "支付助手" && prompt7(pay7).prompt.contains("交易对象"), "C 提示词：交易对象 / 单独时间说明")
+
+// D. 云闪付英文：模型取订单金额、商户只给「美团」→ 实付 34.56、Payee 商户、备注；Go to Repay 不改成还款
+let up7 = ["9:18", "Transaction details", "美团", "-¥34.56", "Discount Info UnionPay Discount-¥5.67", "Payee 示例煲仔饭(示例大厦店)",
+           "Card Number SPDBCredit card[8831]", "Transaction Time 2026-10-17 11:08:41", "Order amount ¥40.23",
+           "Transaction Category Consumption", "Category Other Categories-Other", "Payment Network UnionPay", "More",
+           "Transactions at this merchant", "Go to Repay"]
+let up7Out = mergeWith(up7, [ModelTransaction(amount: 40.23, kind: "expense", merchant: "美团", categoryName: "其他",
+                                              accountHint: "", dateText: "2026-10-17 11:08:41")])
+check(up7Out.receipts.count == 1 && up7Out.receipts[0].amount == 34.56 && up7Out.receipts[0].merchant == "示例煲仔饭(示例大厦店)"
+      && up7Out.receipts[0].isCardRepayment == false && up7Out.receipts[0].discountNote == "美团 · 云闪付立减 5.67"
+      && up7Out.receipts[0].accountHint?.bankName == "浦发银行" && up7Out.receipts[0].accountHint?.cardTail == "8831",
+      "D 合并：实付 34.56 / Payee 商户 / 美团+立减备注 / Go to Repay 不算还款")
+let up7P = prompt7(up7)
+check(up7P.source == "云闪付·英文" && up7P.prompt.contains("Payee") && !up7P.prompt.contains("kind=repay"), "D 提示词：Payee / Go to Repay 说明，无还款示例")
 print(failures == 0 ? "ALL PASSED" : "\(failures) FAILED")
 exit(failures == 0 ? 0 : 1)

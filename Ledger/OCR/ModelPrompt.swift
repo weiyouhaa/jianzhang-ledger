@@ -150,8 +150,11 @@ enum ModelPromptBuilder {
     }
 
     static func looksLikeRepayment(_ lines: [String]) -> Bool {
-        let r = re(#"还款|还信用卡|repay|credit\s*card"#)
-        return lines.contains { r.firstMatch(in: $0, range: NSRange(location: 0, length: ($0 as NSString).length)) != nil }
+        // 「Go to Repay」「还款福利」是按钮 / 菜单；明确是消费（Consumption / 交易类型 消费）时卡号里的 credit card 不算
+        let stripped = lines.map { ReceiptParser.stripNoise($0) }
+        let consumption = stripped.contains { $0.range(of: #"(?i)consumption|交易类型\s*[:：]?\s*消费|付款成功"#, options: .regularExpression) != nil }
+        let r = re(consumption ? #"还款|还信用卡|repay"# : #"还款|还信用卡|repay|credit\s*card"#)
+        return stripped.contains { r.firstMatch(in: $0, range: NSRange(location: 0, length: ($0 as NSString).length)) != nil }
     }
 
     /// 文字中出现的银行英文缩写（整词匹配）
@@ -192,8 +195,22 @@ enum ModelPromptBuilder {
 
     /// 微信 / 支付宝 / 云闪付界面的简短对照（只在识别出这类截图时附上）
     static func glossary(for screen: PaymentScreen, level: PromptLevel) -> String? {
+        switch screen.layout {
+        case .bankPush:
+            var s = "银行公众号推送：每张「交易提醒」卡片各一笔；amount=交易金额 人民币X元；merchant=商户名称（去掉「美团-」等平台前缀）；date=交易时间；account=标题里的银行+卡种+尾号；交易类型 消费=expense，退货/退款=income 且 refund=true，还款=repay。"
+            if level != .minimal { s += "顶部横幅、菜单（含「还款福利」）、日期分隔不是交易。" }
+            return s
+        case .chatTransfer:
+            return "微信聊天转账：只记转账/红包气泡上的 ¥ 金额，聊天文字里的数字不算；已收款=income；已被接收/已被领取/对方已收款=expense；待收款/请收款也记一笔；date=气泡上方最近的时间（昨天 19:10）；account=微信零钱。"
+        case .payAssistant:
+            var s = "微信支付助手：每张「付款成功」卡片各一笔；amount=¥大字；merchant=交易对象；account=交易账户（浦发银行银联信用卡[1234]=浦发信用卡尾号 1234）；卡片上方单独的「11:09」=今天 11:09，Yesterday 19:15=昨天。"
+            if level != .minimal { s += "顶部 服务通知/支付消息 标签和搜索栏不是交易。" }
+            return s
+        case .none:
+            break
+        }
         if screen.app == .unionpay {
-            var s = "云闪付：amount=大字实付（如 -¥14.96），不要用 Order Amount/订单金额；merchant=金额上方的中文商户名（详情区是英文也要取中文名）；Payment Method CMB Debit card[5858]=招行储蓄卡尾号；优惠/立减只作备注、不要另记一笔；Order Time=时间。"
+            var s = "云闪付：amount=大字实付（如 -¥14.96），不要用 Order Amount/订单金额；merchant=Payee 或金额上方的中文商户名（详情区是英文也要取中文名；金额上方的「美团」是平台，不是商户）；Card Number/Payment Method CMB Debit card[5858]、SPDBCredit card[5858]=对应银行卡尾号；UnionPay Discount/优惠/立减只作备注、不要另记一笔；Order/Transaction Time=时间；Transaction Category Consumption=expense；「Go to Repay」是按钮，不是还款。"
             if level != .minimal { s += "Current Status Transaction Successful=支出成功。" }
             return s
         }
@@ -215,7 +232,7 @@ enum ModelPromptBuilder {
 
     static func hints(lines: [String], level: PromptLevel, screen: PaymentScreen = PaymentScreen()) -> String {
         var parts: [String] = []
-        if screen.app != .unknown { parts.append("来源：\(screen.tag)") }
+        if screen.app != .unknown || screen.layout != .none { parts.append("来源：\(screen.tag)") }
         let gloss = glossary(for: screen, level: level)
         if let gloss { parts.append(gloss) }
         if isEnglishHeavy(lines) {
