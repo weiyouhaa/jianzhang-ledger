@@ -110,8 +110,10 @@ enum ReceiptRecognizer {
         RunLog.shared.log(.info, "ai-status", "Apple 智能：\(status.title)")
         guard status.isAvailable else { return ModelPlan(status: status) }
         let vocab = vocabulary ?? OCRVocabulary(expenseCategories: [], incomeCategories: [], accounts: [])
-        let prepared = AppleIntelligenceExtractor.prepareSession(vocabulary: vocab)
-        RunLog.shared.log(.info, "model-prewarm", "预加载会话（与 OCR 并行）：级别 \(prepared.level.title)，指令 \(prepared.instructions.count) 字"
+        // 快捷指令在后台运行，Apple 智能有后台配额：不预加载，只建会话，把配额留给真正的请求
+        let background = context == .shortcut
+        let prepared = AppleIntelligenceExtractor.prepareSession(vocabulary: vocab, prewarm: !background)
+        RunLog.shared.log(.info, "model-prewarm", (background ? "快捷指令（后台）：不预加载，仅创建会话" : "预加载会话（与 OCR 并行）") + "：级别 \(prepared.level.title)，指令 \(prepared.instructions.count) 字"
                           + "，约 \(ModelPromptBuilder.estimateTokens(prepared.instructions)) tokens"
                           + (AppleIntelligenceExtractor.thermalSerious ? "（设备发热，用精简提示词）" : ""))
         return ModelPlan(status: status, prepared: prepared)

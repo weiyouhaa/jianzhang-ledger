@@ -315,7 +315,12 @@ enum ReceiptParser {
             }
         }
         let texts = lines.map(\.text)
-        let segments = TransactionSegmenter.segments(lines: lines)
+        var segments = TransactionSegmenter.segments(lines: lines)
+        // 单笔详情页（交易详情 / 账单详情 / 云闪付 Transaction details）：整页只算一笔，
+        // 订单金额 / 优惠 / 交易时间等字段行不能自成一笔
+        if screen.layout == .none, !segments.isEmpty, segments.count > 1 || segments[0].range != 0..<texts.count, DetailLabels.isDetailPage(texts, heroCount: Set(segments.flatMap(\.heroes)).count) {
+            segments = [TransactionSegmenter.Segment(range: 0..<texts.count, heroes: segments.flatMap(\.heroes))]
+        }
 
         var results: [ParsedReceipt] = []
         var lastHadOwnDate = true
@@ -334,7 +339,7 @@ enum ReceiptParser {
             }
         }
         if screen.layout == .bankPush { ScreenLayouts.applyBankPush(&results, texts: texts) }
-        return results
+        return OrderAmountGuard.filter(results, lines: texts)
     }
 
     /// 截图来源（微信 / 支付宝 / 云闪付 / 银行）与界面语言
@@ -345,10 +350,15 @@ enum ReceiptParser {
     /// 规范化（全角 → 半角）+ 英文界面标签转中文。规则解析、Apple 智能提示词与金额校验都用这份文字
     static func prepare(_ raw: [OCRLine], screen: PaymentScreen? = nil) -> [OCRLine] {
         let app = (screen ?? self.screen(raw)).app
-        return raw.map { l in
+        var lines = raw.map { l -> OCRLine in
             var c = l
-            let t = EnglishBankTerms.splitGlued(stripNoise(normalize(l.text).trimmingCharacters(in: .whitespacesAndNewlines)))
-            c.text = PaymentTerms.localize(t, app: app)
+            c.text = EnglishBankTerms.splitGlued(unglue(stripNoise(normalize(l.text).trimmingCharacters(in: .whitespacesAndNewlines))))
+            return c
+        }.filter { !$0.text.isEmpty }
+        lines = DetailLabels.rejoin(lines)
+        return lines.map { l in
+            var c = l
+            c.text = PaymentTerms.localize(l.text, app: app)
             return c
         }
         .filter { !$0.text.isEmpty }
@@ -360,7 +370,23 @@ enum ReceiptParser {
         #"还款福利|去还款|立即还款"#,
         #"(?i)^\s*(?:view\s+)?(?:all\s+)?transactions?\s+(?:at|with)\s+this\s+merchant\s*[>›]?\s*$"#,
         #"^\s*查看详情\s*[>›]?\s*$"#,
+        // 云闪付底部广告「快捷管理 银行卡 / 云闪付银行卡一键查」（会被当成「快捷管理银行」）
+        #"^\s*快捷管理.*$"#, #"^.*一键查\s*[>›]?\s*$"#,
     ].map { try! NSRegularExpression(pattern: $0) }
+
+    /// OCR 把标签和值粘在一起：「Order amount¥40.23」「Card NumberSPDBCredit card[1234]」
+    private static let gluePatterns: [(NSRegularExpression, String)] = [
+        (try! NSRegularExpression(pattern: #"([a-z])([¥￥$])"#), "$1 $2"),
+        (try! NSRegularExpression(pattern: #"(?i:(card\s*(?:number|no\.?)|payee|order\s*amount|transaction\s*time|payment\s*method))(?=[A-Z0-9\p{Han}])"#), "$1 "),
+    ]
+
+    static func unglue(_ line: String) -> String {
+        var s = line
+        for (re, tpl) in gluePatterns {
+            s = re.stringByReplacingMatches(in: s, range: NSRange(location: 0, length: (s as NSString).length), withTemplate: tpl)
+        }
+        return s
+    }
 
     static func stripNoise(_ line: String) -> String {
         var s = line
@@ -759,14 +785,28 @@ enum ReceiptParser {
                 var value = String(line[r.upperBound...])
                 value = cleanMerchant(value)
                 if value.isEmpty, i + 1 < lines.count { value = cleanMerchant(lines[i + 1]) }
-                if isPlausibleMerchant(value) { return value }
+                if isPlausibleMerchant(value), !DetailLabels.isLabel(value) { return value }
+                // 值在标签上面（OCR 阅读顺序：「示例店 / 收款方 / 浦发银行信用卡[1234]」）
+                if String(line[r.upperBound...]).trimmingCharacters(in: merchantTrim).isEmpty, i > 0, i - 1 != amountLineIndex {
+                    let prev = cleanMerchant(lines[i - 1])
+                    if isPlausibleMerchant(prev), !DetailLabels.isLabel(prev), !platformNames.contains(prev) { return prev }
+                }
             }
         }
         // 兜底：从金额所在行往上找第一行像名称的文本
         if let idx = amountLineIndex, idx > 0 {
             for i in stride(from: idx - 1, through: 0, by: -1) {
                 let v = cleanMerchant(lines[i])
-                if isPlausibleMerchant(v) { return v }
+                guard isPlausibleMerchant(v) else { continue }
+                // 金额上方是平台图标名（美团）且下面有收款方标签：商户在字段区（标签与值分开排列）
+                if platformNames.contains(v), lines.contains(where: { DetailLabels.merchantLabels.contains($0.trimmingCharacters(in: .whitespaces)) }) {
+                    for j in (idx + 1)..<lines.count {
+                        let w = cleanMerchant(lines[j])
+                        if isPlausibleMerchant(w), !DetailLabels.isLabel(w), !platformNames.contains(w), w.unicodeScalars.contains(where: { $0.value >= 0x4E00 && $0.value <= 0x9FFF }),
+                           AccountHintParser.parse(text: w) == nil { return w }
+                    }
+                }
+                return v
             }
         }
         // 金额同一行前面的文字（账单列表「滴滴出行 -23.50」）
@@ -831,7 +871,7 @@ enum ReceiptParser {
                                                 "customer service", "contact merchant", "need help", "view all", "all", "filter", "search",
                                                 "successful", "success", "completed", "paid", "pending", "cny", "rmb"]
 
-    private static func isPlausibleMerchant(_ s: String) -> Bool {
+    static func isPlausibleMerchant(_ s: String) -> Bool {
         guard s.count >= 2, s.count <= 30 else { return false }
         if merchantBlacklist.contains(where: { s.contains($0) }) { return false }
         if englishBlacklist.contains(s.lowercased()) { return false }
@@ -839,6 +879,10 @@ enum ReceiptParser {
         if ["余额", "账户余额", "零钱", "零钱通", "余额宝", "花呗", "微信支付", "支付宝"].contains(s) { return false }
         if s.hasPrefix("使用") && s.contains("支付") { return false }       // 「使用零钱支付」
         if TransactionSegmenter.isDateHeader(s) { return false }
+        // 交易类型 / 分类 / 支付网络的值：「消费」「Consumption」「Other Categories-Other」「UnionPay」
+        if DetailLabels.isLabel(s) { return false }
+        if DetailLabels.fieldValues.contains(s) || DetailLabels.fieldValues.contains(s.lowercased()) { return false }
+        if s.range(of: #"(?i)categor|其他分类|^银联|unionpay"#, options: .regularExpression) != nil { return false }
         let digits = s.filter { $0.isNumber }.count
         if digits >= 3 { return false }
         let letters = s.unicodeScalars.filter { CharacterSet.letters.contains($0) }.count
@@ -1070,7 +1114,9 @@ enum TransactionSegmenter {
         let smsStarts = texts.indices.filter { texts[$0].hasPrefix("【") }
         let billRows = texts.indices.filter { isBillRow(texts[$0]) }
         // 「支付时间」标签下一行的日期是字段值（英文界面常见标签与值分行），不是列表的日期分隔
-        let headers = texts.indices.filter { isDateHeader(texts[$0]) && !($0 > 0 && isTimeLabel(texts[$0 - 1])) }
+        // 交易时间的值（标签在上一行，或 OCR 把值排在标签前、标签在下一行）不是日期标题
+        let headers = texts.indices.filter { isDateHeader(texts[$0]) && !($0 > 0 && isTimeLabel(texts[$0 - 1]))
+            && !($0 + 1 < texts.count && isTimeLabel(texts[$0 + 1]) && !isDateHeader(texts[$0 + 1])) }
         if smsStarts.count >= 2 {
             starts = smsStarts
         } else if billRows.count >= 2 {
@@ -1759,5 +1805,127 @@ enum DuplicateMatcher {
         let ga = grams(a), gb = grams(b)
         let common = ga.intersection(gb).count
         return common >= 2 && Double(common) / Double(min(ga.count, gb.count)) >= 0.5
+    }
+}
+
+// MARK: - 单笔详情页（标签换行 / 值在标签前 / 订单金额）
+
+enum DetailLabels {
+    /// 英文标签被换成两行：「Transaction / Time」「Payment / Network」「Card / Number」
+    static let pairs: [String: [String]] = [
+        "transaction": ["time", "category", "type", "status", "date", "amount", "no.", "no", "number", "details"],
+        "payment": ["network", "method", "time", "account", "details"],
+        "order": ["amount", "time", "no.", "no", "number"],
+        "card": ["number", "no.", "no"],
+        "current": ["status"],
+        "discount": ["info", "information"],
+        "transfer": ["time"],
+    ]
+
+    /// 合并换行的标签：标签首词单独一行（或后面跟着值），后 1–2 行内有单独的第二个词 → 合成一个标签，去掉第二个词那行
+    static func rejoin(_ lines: [OCRLine]) -> [OCRLine] {
+        var out = lines
+        var i = 0
+        while i < out.count {
+            let t = out[i].text.trimmingCharacters(in: .whitespaces)
+            let parts = t.split(separator: " ", maxSplits: 1).map(String.init)
+            guard let first = parts.first, let seconds = pairs[first.lowercased()] else { i += 1; continue }
+            let rest = parts.count > 1 ? parts[1] : ""
+            // 「Transaction Time …」已经完整：跳过
+            if let r = rest.split(separator: " ").first, seconds.contains(r.lowercased()) { i += 1; continue }
+            var merged = false
+            for j in (i + 1)..<min(i + 3, out.count) {
+                let w = out[j].text.trimmingCharacters(in: .whitespaces)
+                if seconds.contains(w.lowercased()) {
+                    out[i].text = first + " " + w + (rest.isEmpty ? "" : " " + rest)
+                    out.remove(at: j)
+                    merged = true
+                    break
+                }
+            }
+            i += merged ? 1 : 1
+        }
+        return out
+    }
+
+    /// 本地化后的字段标签（整行）
+    static let labels: Set<String> = ["收款方", "付款方式", "支付方式", "交易时间", "支付时间", "订单金额", "交易类型", "账单分类", "交易分类",
+                                      "分类", "当前状态", "优惠信息", "优惠", "支付网络", "卡号", "交易账户", "商户", "商户名称", "交易对象", "全部账单",
+                                      "付款卡", "订单号", "交易单号", "商户单号", "备注", "Payment", "Network", "Payment Network", "Category"]
+    static let merchantLabels: Set<String> = ["收款方", "商户", "商户名称", "商户全称", "交易对象", "收款商户", "收款方全称"]
+    /// 字段值，不能当商户名
+    static let fieldValues: Set<String> = ["消费", "支出", "收入", "其他", "其他分类", "银联", "consumption", "purchase", "unionpay",
+                                           "other", "other categories-other", "交易成功", "支付成功", "Consumption", "UnionPay"]
+
+    static func isLabel(_ s: String) -> Bool {
+        let t = s.trimmingCharacters(in: .whitespaces)
+        if labels.contains(t) { return true }
+        return t.range(of: #"^(?:优惠|全部账单)\s*(?:Info|信息)?$"#, options: .regularExpression) != nil
+    }
+
+    private static let titlePattern = try! NSRegularExpression(
+        pattern: #"^(?:云闪付)?(?:交易详情|账单详情|支付详情|订单详情|(?i:transaction|bill|payment|order)\s+(?i:details?))$"#)
+
+    /// 单笔详情页：顶部是「交易详情 / 账单详情 / Transaction details」标题，或只有一个大字金额且有 ≥ 3 个字段标签
+    static func isDetailPage(_ texts: [String], heroCount: Int) -> Bool {
+        let head = texts.prefix(6)
+        if head.contains(where: { titlePattern.firstMatch(in: $0, range: NSRange(location: 0, length: ($0 as NSString).length)) != nil }) {
+            return true
+        }
+        guard heroCount == 1 else { return false }
+        let keys = ["收款方", "付款方式", "支付方式", "订单金额", "交易时间", "支付时间", "当前状态", "交易类型", "账单分类", "优惠信息", "交易单号"]
+        let found = Set(texts.compactMap { t in keys.first { t.hasPrefix($0) } })
+        return found.count >= 3
+    }
+}
+
+/// 同一张截图里「实付」与「订单金额」被拆成两笔时去掉订单金额那笔：
+/// 时间相同（±1 分钟或其一无时间）且 金额 = 另一笔 + 截图上的优惠，或金额只出现在订单金额 / 原价行
+enum OrderAmountGuard {
+    private static let orderLabels = ["订单金额", "原价", "应付", "商品总价", "Order amount", "Order Amount"]
+
+    static func filter(_ list: [ParsedReceipt], lines: [String]) -> [ParsedReceipt] {
+        guard list.count >= 2 else { return list }
+        let discounts = discountValues(lines)
+        let orderAmounts = orderValues(lines)
+        var drop = Set<Int>()
+        for i in list.indices {
+            for j in list.indices where i != j && !drop.contains(j) && !drop.contains(i) {
+                guard let a = list[i].amount, let b = list[j].amount, a > b + 0.004 else { continue }
+                guard list[i].isIncome == list[j].isIncome, !list[i].isCardRepayment, !list[j].isCardRepayment else { continue }
+                let sameTime: Bool = {
+                    guard let da = list[i].date, let db = list[j].date else { return true }
+                    return abs(da.timeIntervalSince(db)) <= 60
+                }()
+                guard sameTime else { continue }
+                let plusDiscount = discounts.contains { abs(b + $0 - a) < 0.005 }
+                let isOrderLine = orderAmounts.contains { abs($0 - a) < 0.005 }
+                if plusDiscount || isOrderLine { drop.insert(i) }
+            }
+        }
+        return list.enumerated().filter { !drop.contains($0.offset) }.map(\.element)
+    }
+
+    private static let money = try! NSRegularExpression(pattern: #"(\d+(?:,\d{3})*\.\d{1,2})"#)
+
+    private static func values(in s: String) -> [Double] {
+        let ns = s as NSString
+        return money.matches(in: s, range: NSRange(location: 0, length: ns.length)).compactMap {
+            Double(ns.substring(with: $0.range(at: 1)).replacingOccurrences(of: ",", with: ""))
+        }
+    }
+
+    static func discountValues(_ lines: [String]) -> [Double] {
+        lines.filter { l in ["优惠", "立减", "满减", "折扣", "Discount", "抵扣", "红包抵扣"].contains { l.contains($0) } }.flatMap(values)
+    }
+
+    /// 订单金额标签同一行或相邻行（值在标签前 / 后）的金额
+    static func orderValues(_ lines: [String]) -> [Double] {
+        var out: [Double] = []
+        for (i, l) in lines.enumerated() where orderLabels.contains(where: { l.contains($0) }) {
+            out += values(in: l)
+            for k in [i - 1, i + 1] where k >= 0 && k < lines.count && TransactionSegmenter.isAmountOnly(lines[k]) { out += values(in: lines[k]) }
+        }
+        return out
     }
 }

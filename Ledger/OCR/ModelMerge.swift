@@ -434,6 +434,15 @@ enum ModelMerge {
             return Outcome(receipts: rules, engine: .rules, dropped: dropped, skippedTransfers: skipped,
                            fallbackReason: "Apple 智能结果未通过校验，已用规则识别", dropReasons: reasonList)
         }
-        return Outcome(receipts: valid, engine: .appleIntelligence, dropped: dropped, skippedTransfers: skipped, fallbackReason: nil, dropReasons: reasonList)
+        // 同一张截图：订单金额（= 实付 + 优惠）被当成另一笔 → 去掉；单笔详情页最多一笔
+        var final = OrderAmountGuard.filter(valid, lines: ctx.lines)
+        if final.count < valid.count { trace("merge", "去掉订单金额重复的 \(valid.count - final.count) 笔") }
+        if final.count > 1, layout == .none, DetailLabels.isDetailPage(ctx.lines, heroCount: 1) {
+            let ruleAmount = ruleItems.count == 1 ? ruleItems[0].amount : nil
+            let keep = ruleAmount.flatMap { a in final.first { abs(($0.amount ?? 0) - a) < 0.005 } } ?? final[0]
+            trace("merge", "单笔详情页：只保留 1 笔（模型给了 \(final.count) 笔）")
+            final = [keep]
+        }
+        return Outcome(receipts: final, engine: .appleIntelligence, dropped: dropped, skippedTransfers: skipped, fallbackReason: nil, dropReasons: reasonList)
     }
 }

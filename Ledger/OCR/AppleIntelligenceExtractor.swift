@@ -216,13 +216,15 @@ enum AppleIntelligenceExtractor {
     }
 
     /// 识图开始时调用（在 OCR 之前）：按词表与温度创建会话并预加载，OCR 期间模型同时加载
-    static func prepareSession(vocabulary: OCRVocabulary) -> PreparedModelSession {
+    /// prewarm = false：快捷指令（后台）里只建会话不预加载。后台调用有系统配额（rateLimited 只在后台出现），
+    /// 预加载也会占用模型资源，可能和真正的请求一起被计入，后台里不做
+    static func prepareSession(vocabulary: OCRVocabulary, prewarm: Bool = true) -> PreparedModelSession {
         let level = PromptLevel.initial(thermalSerious: thermalSerious)
         let ins = instructions(vocabulary: vocabulary, level: level)
         #if canImport(FoundationModels)
         if #available(iOS 26.0, *) {
             let session = LanguageModelSession(instructions: ins)
-            session.prewarm()
+            if prewarm { session.prewarm() }
             return PreparedModelSession(level: level, instructions: ins, session: session)
         }
         #endif
@@ -271,6 +273,15 @@ enum AppleIntelligenceExtractor {
                         let remaining = deadline.timeIntervalSinceNow
                         RunLog.shared.log(.warn, "model-error", "第 \(attempt) 次失败，用时 \(Int(Date().timeIntervalSince(t) * 1000)) ms："
                             + "\(info.kind.rawValue)（\(info.kind.title)）· \(info.detail) · 剩余 \(String(format: "%.1f", max(0, remaining))) 秒")
+                        // 后台限流（rateLimited）：等 1.5 秒用同级提示词、新会话再试一次（剩余时间够才试）
+                        if attempt == 1, info.kind == .rateLimited, remaining >= ModelBudget.rateLimitRetryDelay + ModelBudget.minRetrySeconds,
+                           !Task.isCancelled {
+                            attempt = 2
+                            RunLog.shared.log(.info, "model-retry", "后台调用受限（第 1 次 \(Int(Date().timeIntervalSince(t) * 1000)) ms 即被拒，"
+                                + "\(reuse != nil ? "用的是预加载会话" : "未预加载")），\(ModelBudget.rateLimitRetryDelay) 秒后新建会话重试一次")
+                            try? await Task.sleep(nanoseconds: UInt64(ModelBudget.rateLimitRetryDelay * 1_000_000_000))
+                            continue
+                        }
                         if attempt == 1, info.kind.retryable, remaining >= ModelBudget.minRetrySeconds, !Task.isCancelled {
                             attempt = 2
                             level = level.smaller

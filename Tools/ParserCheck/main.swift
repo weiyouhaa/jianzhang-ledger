@@ -613,5 +613,57 @@ expect(DuplicateMatcher.matches(.init(amount: 30, merchant: "示例面馆", date
                                 .init(amount: 30, merchant: "示例面馆", date: base.addingTimeInterval(90), account: nil)),
        "查重：旧规则（同商户 2 分钟内）仍有效")
 
+// MARK: 2.0 (8) 云闪付英文 Transaction details：单笔详情页只出一笔（合成数据，OCR 换行 / 粘连 / 值在标签前）
+let top8 = ["11:18", "Transaction details", "美团", "美团", "-¥34.56"]
+let bottom8 = ["More", "Transactions at this merchant", "Go to Repay", "快捷管理 银行卡", "云闪付银行卡一键查"]
+let variants8: [(String, [String])] = [
+    ("标签换行、值夹在两段之间", top8 + ["Discount Info", "UnionPay Discount-¥5.67", "Payee", "示例煲仔饭（示例大厦店）", "Card Number", "SPDBCredit card[8831]",
+        "Transaction", "2026-10-17 11:08:41", "Time", "Order amount¥40.23", "Transaction", "Consumption", "Category", "Category", "Other Categories-Other",
+        "Payment", "UnionPay", "Network"] + bottom8),
+    ("标签与值粘连", top8 + ["Discount Info UnionPay Discount-¥5.67", "Payee 示例煲仔饭（示例大厦店）", "Card NumberSPDBCredit card[8831]",
+        "Transaction 2026-10-17 11:08:41", "Time", "Order amount¥40.23", "Transaction Consumption", "Category", "Category Other Categories-Other",
+        "Payment UnionPay", "Network"] + bottom8),
+    ("值在标签前", top8 + ["UnionPay Discount-¥5.67", "Discount Info", "示例煲仔饭（示例大厦店）", "Payee", "SPDBCredit card[8831]", "Card Number",
+        "2026-10-17 11:08:41", "Transaction", "Time", "¥40.23", "Order amount", "Consumption", "Transaction", "Category",
+        "Other Categories-Other", "Category", "UnionPay", "Payment", "Network"] + bottom8),
+    ("先全部标签后全部值", top8 + ["Discount Info", "Payee", "Card Number", "Transaction", "Time", "Order amount", "Transaction", "Category", "Category",
+        "Payment", "Network", "UnionPay Discount-¥5.67", "示例煲仔饭（示例大厦店）", "SPDBCredit card[8831]", "2026-10-17 11:08:41", "¥40.23",
+        "Consumption", "Other Categories-Other", "UnionPay"] + bottom8),
+]
+for (name, lines) in variants8 {
+    let r = ReceiptParser.parseAll(lines: lines, now: now, calendar: cal)
+    expect(r.count == 1, "2.0(8) \(name)：只识别 1 笔（实际 \(r.count) 笔）")
+    guard let x = r.first else { continue }
+    expect(x.amount == 34.56 && !x.isIncome, "2.0(8) \(name)：金额取大字 34.56（不是订单金额 40.23）")
+    expect(x.merchant == "示例煲仔饭(示例大厦店)", "2.0(8) \(name)：商户取 Payee（实际 \(x.merchant ?? "nil")）")
+    expect(x.accountHint?.type == "credit" && x.accountHint?.cardTail == "8831" && x.accountHint?.bankName == "浦发银行",
+           "2.0(8) \(name)：浦发信用卡 8831（实际 \(String(describing: x.accountHint))）")
+    expect(x.discountNote == "美团 · 云闪付立减 5.67", "2.0(8) \(name)：备注平台 + 立减（实际 \(x.discountNote ?? "nil")）")
+    expect(d7(x.date) == "2026-10-17 11:08", "2.0(8) \(name)：交易时间（实际 \(d7(x.date))）")
+    expect(!x.isCardRepayment, "2.0(8) \(name)：Go to Repay 不算还款")
+}
+// 中文云闪付交易详情同样只一笔
+let cn8 = ["11:18", "交易详情", "美团", "-¥34.56", "云闪付立减 -¥5.67", "收款方", "示例煲仔饭（示例大厦店）", "付款卡", "浦发银行信用卡(8831)",
+           "交易时间", "2026-10-17 11:08:41", "订单金额", "¥40.23", "交易类型", "消费"]
+let rcn8 = ReceiptParser.parseAll(lines: cn8, now: now, calendar: cal)
+expect(rcn8.count == 1 && rcn8.first?.amount == 34.56, "2.0(8) 中文交易详情：只 1 笔 34.56（实际 \(rcn8.map { $0.amount ?? -1 })）")
+expect(rcn8.first?.merchant != "消费", "2.0(8) 中文交易详情：「消费」不当商户")
+// 「消费 / Consumption / Other Categories-Other」不是商户
+for bad in ["消费", "Consumption", "Other Categories-Other", "UnionPay", "交易分类"] {
+    expect(!ReceiptParser.isPlausibleMerchant(bad), "2.0(8) 「\(bad)」不当商户")
+}
+// 审核兜底：同一截图、同一时间，一笔 = 另一笔 + 优惠 → 去掉订单金额那笔
+var g1 = ParsedReceipt(); g1.amount = 34.56; g1.merchant = "示例煲仔饭"; g1.date = cal.date(from: DateComponents(year: 2026, month: 10, day: 17, hour: 11, minute: 8))
+var g2 = ParsedReceipt(); g2.amount = 40.23; g2.merchant = "消费"; g2.date = g1.date!.addingTimeInterval(30)
+let gl = ["-¥34.56", "云闪付立减-¥5.67", "订单金额", "¥40.23"]
+let gf = OrderAmountGuard.filter([g1, g2], lines: gl)
+expect(gf.count == 1 && gf.first?.amount == 34.56, "2.0(8) 兜底：去掉 = 实付 + 优惠 的订单金额那笔")
+var g3 = g2; g3.date = g1.date!.addingTimeInterval(3600)
+expect(OrderAmountGuard.filter([g1, g3], lines: gl).count == 2, "2.0(8) 兜底：时间不同（1 小时）不去重")
+var g4 = g2; g4.amount = 50
+expect(OrderAmountGuard.filter([g1, g4], lines: ["-¥34.56", "-¥50.00"]).count == 2, "2.0(8) 兜底：金额无关的两笔都保留")
+expect(ReceiptParser.unglue("Order amount¥40.23") == "Order amount ¥40.23" && ReceiptParser.unglue("HK$12.00") == "HK$12.00",
+       "2.0(8) 粘连：Order amount¥ 拆开，HK$ 不拆")
+
 print(failures == 0 ? "ALL PASSED" : "\(failures) FAILED")
 exit(failures == 0 ? 0 : 1)

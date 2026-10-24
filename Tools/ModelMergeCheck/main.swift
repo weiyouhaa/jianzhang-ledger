@@ -490,5 +490,19 @@ check(up7Out.receipts.count == 1 && up7Out.receipts[0].amount == 34.56 && up7Out
       "D 合并：实付 34.56 / Payee 商户 / 美团+立减备注 / Go to Repay 不算还款")
 let up7P = prompt7(up7)
 check(up7P.source == "云闪付·英文" && up7P.prompt.contains("Payee") && !up7P.prompt.contains("kind=repay"), "D 提示词：Payee / Go to Repay 说明，无还款示例")
+// 2.0 (8) 云闪付英文详情页：模型把订单金额 + 「消费」当成第二笔 → 合并后只留实付一笔（合成数据）
+let up8raw = ["11:18", "Transaction details", "美团", "美团", "-¥34.56", "UnionPay Discount-¥5.67", "Discount Info", "示例煲仔饭（示例大厦店）", "Payee",
+              "SPDBCredit card[8831]", "Card Number", "2026-10-17 11:08:41", "Transaction", "Time", "¥40.23", "Order amount", "Consumption",
+              "Transaction", "Category", "Other Categories-Other", "Category", "UnionPay", "Payment", "Network"]
+let up8 = ReceiptParser.prepare(up8raw.map { OCRLine($0) }).map(\.text)
+let rules8 = ReceiptParser.parseAll(lines: up8raw, now: now, calendar: cal)
+let o8two = ModelMerge.merge(model: [
+    ModelTransaction(amount: 34.56, kind: "expense", merchant: "示例煲仔饭(示例大厦店)", categoryName: "餐饮", accountHint: "浦发信用卡", dateText: "2026-10-17 11:08:41"),
+    ModelTransaction(amount: 40.23, kind: "expense", merchant: "消费", categoryName: "其他", accountHint: "微信", dateText: "2026-10-17 11:08:41"),
+], rules: rules8, ctx: ctx(up8))
+check(rules8.count == 1, "2.0(8) 规则：云闪付详情页 1 笔（实际 \(rules8.count)）")
+check(o8two.receipts.count == 1 && o8two.receipts.first?.amount == 34.56,
+      "2.0(8) 合并：模型给两笔（含订单金额 40.23）→ 只留实付 34.56（实际 \(o8two.receipts.map { $0.amount ?? -1 })）")
+
 print(failures == 0 ? "ALL PASSED" : "\(failures) FAILED")
 exit(failures == 0 ? 0 : 1)

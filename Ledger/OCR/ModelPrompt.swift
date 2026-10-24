@@ -293,6 +293,8 @@ enum ModelBudget {
     static let inAppMin: Double = 10
     /// 第一次失败后，剩余时间至少这么多才重试
     static let minRetrySeconds: Double = 4
+    /// 后台限流后等待再试的秒数
+    static let rateLimitRetryDelay: Double = 1.5
 
     /// elapsed：识别开始（含 OCR）到现在的秒数
     static func timeout(shortcut: Bool, elapsed: Double) -> Double {
