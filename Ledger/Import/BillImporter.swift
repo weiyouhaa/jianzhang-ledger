@@ -26,6 +26,8 @@ struct ImportItem: Identifiable, Equatable {
     var categorySource: String
     /// 用户在预览里改过分类或账户
     var edited = false
+    /// 疑似重复时匹配到的已有记录
+    var matchedRecordID: UUID?
 
     /// 能否勾选导入
     var canImport: Bool {
@@ -111,10 +113,6 @@ enum BillImporter {
                 let oid = e.orderID
                 if !oid.isEmpty && (existingIDs.contains(oid) || seen.contains(oid)) {
                     status = .imported
-                } else if kind != .transfer, nearby.contains(where: {
-                    $0.kind == kind && abs($0.amount - e.amount) < 0.005 && abs($0.date.timeIntervalSince(e.date)) <= 180
-                }) {
-                    status = .likelyDuplicate("已有一笔时间相近、金额相同的记录")
                 }
             }
             if !e.orderID.isEmpty { seen.insert(e.orderID) }
@@ -128,7 +126,32 @@ enum BillImporter {
             }
             items.append(item)
         }
+        markLikelyDuplicates(&items, nearby: nearby, options: options)
         return items
+    }
+
+    /// 与已有记录（手动 / 识图 / 快捷指令记的，没有订单号）比对：同一匹配器（DedupeEngine），10 分钟窗口，
+    /// 账户 / 商户加减分，转账也比对；一笔已有记录最多对应一行账单
+    private static func markLikelyDuplicates(_ items: inout [ImportItem], nearby: [LedgerRecord], options: ImportOptions) {
+        let candidates = items.indices.filter { items[$0].status == .new }
+        guard !candidates.isEmpty, !nearby.isEmpty else { return }
+        let bills = candidates.map { i -> DedupeRecord in
+            let it = items[i]
+            return DedupeRecord(id: "row\(it.id)", kind: it.kind.rawValue, amount: it.entry.amount, date: it.entry.date,
+                                merchant: it.kind == .transfer ? "" : it.entry.merchant, note: it.entry.memo,
+                                accountID: it.accountID?.uuidString,
+                                toAccountID: it.kind == .transfer ? it.toAccountID?.uuidString : nil,
+                                source: "bill")
+        }
+        let existing = nearby.filter { $0.kind != .adjustment }.map(DedupeService.dedupeRecord)
+        let byID = Dictionary(nearby.map { ($0.id.uuidString, $0) }, uniquingKeysWith: { a, _ in a })
+        let matches = DedupeEngine.matchBills(bills, existing: existing, window: .min10)
+        for i in candidates {
+            guard let m = matches["row\(items[i].id)"], let rec = byID[m.existingID] else { continue }
+            items[i].status = .likelyDuplicate("\(m.confidence.title)：已有「\(rec.deleteSummary)」（\(DedupeEngine.sourceTitle(rec.source))）")
+            items[i].matchedRecordID = rec.id
+            items[i].include = options.includeLikelyDuplicates && items[i].canImport
+        }
     }
 
     /// 写入勾选的记录，返回批次

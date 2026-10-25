@@ -98,6 +98,11 @@ jobs:
             -o "$RUNNER_TEMP/backupcheck"
           "$RUNNER_TEMP/backupcheck" Tests/Fixtures/backup
 
+      - name: Dedupe tests (grouping, confidence, auto-handle, import one-to-one matching)
+        run: |
+          swiftc Ledger/OCR/ReceiptParser.swift Ledger/Dedupe/DedupeEngine.swift Tools/DedupeCheck/main.swift -o "$RUNNER_TEMP/dedupecheck"
+          "$RUNNER_TEMP/dedupecheck"
+
       - name: Install XcodeGen
         run: brew install xcodegen
 

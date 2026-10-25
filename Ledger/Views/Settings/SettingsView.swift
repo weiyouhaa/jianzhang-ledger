@@ -466,6 +466,13 @@ struct SettingsView: View {
                 Label("变动日志", systemImage: "clock.badge.checkmark")
             }
             .accessibilityIdentifier("settings-changelog")
+            NavigationLink {
+                DedupeView()
+            } label: {
+                Label("一键去重", systemImage: "square.on.square.dashed")
+            }
+            .disabled(records.isEmpty)
+            .accessibilityIdentifier("settings-dedupe")
             Button {
                 showCSVWarning = true
             } label: {
@@ -573,5 +580,6 @@ struct SettingsView: View {
             for b in batches { context.delete(b) }
             try? context.save()
         }
+        DedupeUndoStore.clear()
     }
 }

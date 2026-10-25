@@ -4,6 +4,7 @@ import SwiftData
 struct HomeView: View {
     @Environment(\.modelContext) private var context
     @Environment(\.ledgerPrefs) private var prefs
+    @ObservedObject private var session = SessionManager.shared
     /// 预算变化时刷新
     @AppStorage(SettingsKey.monthlyBudget) private var budgetSetting: Double = 0
     @AppStorage(BudgetKey.rollover) private var rolloverSetting = false
@@ -131,6 +132,18 @@ struct HomeView: View {
                         Image(systemName: "magnifyingglass")
                     }
                     .accessibilityIdentifier("home-search")
+                }
+                // 一键去重只看真实账本（防窥会话、编辑防窥数据时都不显示）
+                if !session.isDecoy && ModeDefaults.isRealContext(context) {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        NavigationLink {
+                            DedupeView()
+                        } label: {
+                            Image(systemName: "square.on.square.dashed")
+                        }
+                        .accessibilityLabel("一键去重")
+                        .accessibilityIdentifier("home-dedupe")
+                    }
                 }
                 if !isCurrentMonth {
                     ToolbarItem(placement: .topBarLeading) {
