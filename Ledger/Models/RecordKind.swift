@@ -70,3 +70,83 @@ enum RepaymentSetting {
     static let key = "stats.repaymentAsExpense"
     static func includeInExpense(_ prefs: UserDefaults) -> Bool { prefs.bool(forKey: key) }
 }
+
+/// 账单导入时：日期不晚于账本最新记录的交易，写入后通过调整初始余额保持当前余额不变（2.0 (13)）
+enum ImportBalanceMath {
+    /// 账本为空（没有已有记录）时，导入的每一笔都按「新交易」影响余额
+    static func isHistorical(date: Date, latestExisting: Date?) -> Bool {
+        guard let latestExisting else { return false }
+        return date <= latestExisting
+    }
+
+    /// 把一条记录对各账户的影响累加到 offsets（accountID → 效果合计）
+    static func accumulateEffects(
+        into offsets: inout [String: Double],
+        kind: RecordKind, amount: Double, fee: Double,
+        fromAccountID: String?, toAccountID: String?
+    ) {
+        if let id = fromAccountID {
+            offsets[id, default: 0] += BalanceMath.effect(kind: kind, amount: amount, fee: fee,
+                                                          isSource: true, isTarget: false)
+        }
+        if kind == .transfer, let id = toAccountID {
+            offsets[id, default: 0] += BalanceMath.effect(kind: kind, amount: amount, fee: fee,
+                                                          isSource: false, isTarget: true)
+        }
+    }
+
+    /// 为保持当前余额不变，应加到各账户 initialBalance 上的调整量（= −效果合计）
+    static func initialBalanceAdjustments(fromEffects effects: [String: Double]) -> [String: Double] {
+        effects.compactMapValues { abs($0) < 1e-9 ? nil : -$0 }
+    }
+
+    static func encodeOffsets(_ offsets: [String: Double]) -> String {
+        guard !offsets.isEmpty,
+              let data = try? JSONEncoder().encode(offsets),
+              let s = String(data: data, encoding: .utf8) else { return "" }
+        return s
+    }
+
+    static func decodeOffsets(_ json: String) -> [String: Double] {
+        guard !json.isEmpty, let data = json.data(using: .utf8),
+              let map = try? JSONDecoder().decode([String: Double].self, from: data) else { return [:] }
+        return map
+    }
+
+    /// 模拟：账户初始余额 + 已有记录效果；导入后按规则调整；返回导入后各账户余额
+    static func simulate(
+        initials: [String: Double],
+        existingEffects: [(accountID: String, date: Date, effect: Double)],
+        imported: [(kind: RecordKind, amount: Double, fee: Double, date: Date, from: String?, to: String?)]
+    ) -> (balances: [String: Double], adjustments: [String: Double], preservedCount: Int) {
+        let latest = existingEffects.map(\.date).max()
+        var initialsNow = initials
+        var running: [String: Double] = initials
+        for e in existingEffects { running[e.accountID, default: 0] += e.effect }
+
+        var effectSum: [String: Double] = [:]
+        var preserved = 0
+        for r in imported {
+            if isHistorical(date: r.date, latestExisting: latest) {
+                preserved += 1
+                accumulateEffects(into: &effectSum, kind: r.kind, amount: r.amount, fee: r.fee,
+                                  fromAccountID: r.from, toAccountID: r.to)
+            }
+            if let id = r.from {
+                running[id, default: initials[id] ?? 0] += BalanceMath.effect(kind: r.kind, amount: r.amount, fee: r.fee,
+                                                                              isSource: true, isTarget: false)
+            }
+            if r.kind == .transfer, let id = r.to {
+                running[id, default: initials[id] ?? 0] += BalanceMath.effect(kind: r.kind, amount: r.amount, fee: r.fee,
+                                                                              isSource: false, isTarget: true)
+            }
+        }
+        let adj = initialBalanceAdjustments(fromEffects: effectSum)
+        for (id, d) in adj {
+            initialsNow[id, default: 0] += d
+            running[id, default: 0] += d
+        }
+        // 余额 = 调整后的初始 + 全部效果；上面 running 已含效果，再加 adj 即最终余额
+        return (running.mapValues { ($0 * 100).rounded() / 100 }, adj, preserved)
+    }
+}

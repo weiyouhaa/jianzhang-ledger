@@ -128,7 +128,9 @@ enum BackupService {
             importBatches: batches.map {
                 LedgerBackup.BatchDTO(id: $0.id, source: $0.sourceRaw, fileName: $0.fileName, createdAt: $0.createdAt,
                                       recordCount: $0.recordCount, expenseTotal: $0.expenseTotal, incomeTotal: $0.incomeTotal,
-                                      firstDate: $0.firstDate, lastDate: $0.lastDate)
+                                      firstDate: $0.firstDate, lastDate: $0.lastDate,
+                                      balanceOffsetsJSON: $0.balanceOffsetsJSON.isEmpty ? nil : $0.balanceOffsetsJSON,
+                                      balancePreservedCount: $0.balancePreservedCount == 0 ? nil : $0.balancePreservedCount)
             },
             changeLog: logs.isEmpty ? nil : logs.map(\.dto),
             settings: settings
@@ -335,6 +337,8 @@ enum BackupService {
             b.incomeTotal = dto.incomeTotal
             b.firstDate = dto.firstDate
             b.lastDate = dto.lastDate
+            b.balanceOffsetsJSON = dto.balanceOffsetsJSON ?? ""
+            b.balancePreservedCount = dto.balancePreservedCount ?? 0
             context.insert(b)
         }
 

@@ -41,7 +41,8 @@ struct HomeView: View {
     private var monthRecords: [LedgerRecord] {
         let start = month
         let end = calendar.date(byAdding: .month, value: 1, to: start) ?? start
-        return allRecords.filter { $0.date >= start && $0.date < end }
+        // 余额校准只在账户明细和变动日志里显示（2.0 (13)）
+        return allRecords.filter { $0.date >= start && $0.date < end && $0.kind != .adjustment }
     }
 
     private var dayGroups: [DayGroup] {

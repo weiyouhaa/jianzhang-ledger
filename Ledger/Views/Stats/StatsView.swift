@@ -15,6 +15,11 @@ struct StatsView: View {
     @State private var period: Period = .month
     @State private var anchor: Date = Date()
     @State private var kind: RecordKind = .expense
+    /// 图表点选：构成 / 趋势 / 收支对比
+    @State private var selectedPieID: String?
+    @State private var pieAngle: Double?
+    @State private var selectedTrendDate: Date?
+    @State private var selectedCompareDate: Date?
 
     enum Period: String, CaseIterable, Identifiable {
         case month = "月度"
@@ -119,6 +124,9 @@ struct StatsView: View {
             }
             .background(Color(.systemGroupedBackground))
             .navigationTitle("统计")
+            .onChange(of: period) { _, _ in clearChartSelection() }
+            .onChange(of: kind) { _, _ in clearChartSelection() }
+            .onChange(of: anchor) { _, _ in clearChartSelection() }
         }
     }
 
@@ -158,7 +166,8 @@ struct StatsView: View {
     }
 
     private func pieCard(totals: [CategoryTotal], total: Double) -> some View {
-        card {
+        let selected = totals.first { $0.id == selectedPieID }
+        return card {
             VStack(alignment: .leading, spacing: 12) {
                 Text("\(kind.title)构成").font(.headline)
                 Chart(totals) { item in
@@ -169,28 +178,78 @@ struct StatsView: View {
                     )
                     .cornerRadius(4)
                     .foregroundStyle(item.color)
+                    .opacity(selectedPieID == nil || selectedPieID == item.id ? 1 : 0.35)
                 }
                 .chartLegend(.hidden)
+                .chartAngleSelection(value: $pieAngle)
+                .onChange(of: pieAngle) { _, newValue in
+                    if let item = category(atAngle: newValue, in: totals, total: total) {
+                        selectedPieID = item.id
+                    } else if newValue == nil {
+                        selectedPieID = nil
+                    }
+                }
                 .frame(height: 220)
                 .overlay {
                     VStack(spacing: 2) {
-                        Text("总\(kind.title)").font(.caption).foregroundStyle(.secondary)
-                        Text(Money.format(total))
-                            .font(.system(.headline, design: .rounded))
-                            .lineLimit(1)
-                            .minimumScaleFactor(0.5)
+                        if let selected {
+                            Text(selected.name)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                            Text(Money.format(selected.total))
+                                .font(.system(.headline, design: .rounded))
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.5)
+                            Text(percent(selected.total, of: total))
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        } else {
+                            Text("总\(kind.title)").font(.caption).foregroundStyle(.secondary)
+                            Text(Money.format(total))
+                                .font(.system(.headline, design: .rounded))
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.5)
+                        }
                     }
                     .frame(maxWidth: 120)
+                    .animation(.snappy, value: selectedPieID)
                 }
 
-                // 图例
+                if let selected {
+                    chartCallout(
+                        title: selected.name,
+                        amount: selected.total,
+                        percentText: percent(selected.total, of: total),
+                        count: selected.count,
+                        color: selected.color
+                    )
+                } else {
+                    chartHint
+                }
+
+                // 图例（可点选）
                 LazyVGrid(columns: [GridItem(.adaptive(minimum: 90), alignment: .leading)], alignment: .leading, spacing: 8) {
                     ForEach(totals.prefix(8)) { item in
-                        HStack(spacing: 6) {
-                            Circle().fill(item.color).frame(width: 8, height: 8)
-                            Text(item.name).font(.caption).lineLimit(1)
-                            Text(percent(item.total, of: total)).font(.caption2).foregroundStyle(.secondary)
+                        Button {
+                            withAnimation(.snappy) {
+                                if selectedPieID == item.id {
+                                    selectedPieID = nil
+                                    pieAngle = nil
+                                } else {
+                                    selectedPieID = item.id
+                                }
+                            }
+                        } label: {
+                            HStack(spacing: 6) {
+                                Circle().fill(item.color).frame(width: 8, height: 8)
+                                Text(item.name).font(.caption).lineLimit(1)
+                                    .fontWeight(selectedPieID == item.id ? .semibold : .regular)
+                                Text(percent(item.total, of: total)).font(.caption2).foregroundStyle(.secondary)
+                            }
+                            .opacity(selectedPieID == nil || selectedPieID == item.id ? 1 : 0.45)
                         }
+                        .buttonStyle(.plain)
                     }
                 }
             }
@@ -200,17 +259,27 @@ struct StatsView: View {
     private func trendCard(trend: [TrendPoint]) -> some View {
         let unit: Calendar.Component = period == .month ? .day : .month
         let barColor: Color = kind == .expense ? .orange : .green
+        let selected = nearestTrendPoint(to: selectedTrendDate, in: trend)
         return card {
             VStack(alignment: .leading, spacing: 12) {
                 Text(period == .month ? "每日趋势" : "每月趋势").font(.headline)
-                Chart(trend) { p in
-                    BarMark(
-                        x: .value("日期", p.date, unit: unit),
-                        y: .value("金额", p.total)
-                    )
-                    .foregroundStyle(barColor.gradient)
-                    .cornerRadius(3)
+                Chart {
+                    ForEach(trend) { p in
+                        BarMark(
+                            x: .value("日期", p.date, unit: unit),
+                            y: .value("金额", p.total)
+                        )
+                        .foregroundStyle(barColor.gradient)
+                        .cornerRadius(3)
+                        .opacity(selected == nil || selected?.id == p.id ? 1 : 0.35)
+                    }
+                    if let selected {
+                        RuleMark(x: .value("选中", selected.date, unit: unit))
+                            .foregroundStyle(Color.secondary.opacity(0.35))
+                            .lineStyle(StrokeStyle(lineWidth: 1, dash: [4, 3]))
+                    }
                 }
+                .chartXSelection(value: $selectedTrendDate)
                 .chartYAxis {
                     AxisMarks(position: .leading) { value in
                         AxisGridLine()
@@ -222,6 +291,18 @@ struct StatsView: View {
                     }
                 }
                 .frame(height: 200)
+
+                if let selected {
+                    chartCallout(
+                        title: trendPointTitle(selected.date),
+                        amount: selected.total,
+                        percentText: nil,
+                        count: nil,
+                        color: barColor
+                    )
+                } else {
+                    chartHint
+                }
             }
         }
     }
@@ -269,19 +350,32 @@ struct StatsView: View {
     private func compareCard(records: [LedgerRecord]) -> some View {
         let points = trendPoints(records.filter { $0.countsAsExpense(includeRepayment: repaymentAsExpense) }, kindTitle: "支出")
             + trendPoints(records.filter { $0.kind == .income }, kindTitle: "收入")
+        let selectedKey = selectedCompareDate.map { calendar.startOfMonth(for: $0) }
+        let expenseAmt = selectedKey.flatMap { key in points.first { $0.kindTitle == "支出" && calendar.startOfMonth(for: $0.date) == key }?.total } ?? 0
+        let incomeAmt = selectedKey.flatMap { key in points.first { $0.kindTitle == "收入" && calendar.startOfMonth(for: $0.date) == key }?.total } ?? 0
+        let balanceAmt = incomeAmt - expenseAmt
         return card {
             VStack(alignment: .leading, spacing: 12) {
                 Text("收支对比").font(.headline)
-                Chart(points) { p in
-                    BarMark(
-                        x: .value("月份", p.date, unit: .month),
-                        y: .value("金额", p.total)
-                    )
-                    .foregroundStyle(by: .value("类型", p.kindTitle))
-                    .position(by: .value("类型", p.kindTitle))
-                    .cornerRadius(3)
+                Chart {
+                    ForEach(points) { p in
+                        BarMark(
+                            x: .value("月份", p.date, unit: .month),
+                            y: .value("金额", p.total)
+                        )
+                        .foregroundStyle(by: .value("类型", p.kindTitle))
+                        .position(by: .value("类型", p.kindTitle))
+                        .cornerRadius(3)
+                        .opacity(compareBarOpacity(for: p.date, selectedKey: selectedKey))
+                    }
+                    if let selectedKey {
+                        RuleMark(x: .value("选中", selectedKey, unit: .month))
+                            .foregroundStyle(Color.secondary.opacity(0.35))
+                            .lineStyle(StrokeStyle(lineWidth: 1, dash: [4, 3]))
+                    }
                 }
                 .chartForegroundStyleScale(["支出": Color.orange, "收入": Color.green])
+                .chartXSelection(value: $selectedCompareDate)
                 .chartYAxis {
                     AxisMarks(position: .leading) { value in
                         AxisGridLine()
@@ -293,6 +387,31 @@ struct StatsView: View {
                     }
                 }
                 .frame(height: 220)
+
+                if let selectedKey {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text(DateText.month.string(from: selectedKey))
+                            .font(.subheadline.weight(.medium))
+                        HStack(spacing: 16) {
+                            compareAmountRow(title: "支出", amount: expenseAmt, color: .orange)
+                            compareAmountRow(title: "收入", amount: incomeAmt, color: .green)
+                            Spacer(minLength: 0)
+                            compareAmountRow(
+                                title: "结余",
+                                amount: balanceAmt,
+                                color: balanceAmt >= 0 ? .green : .orange
+                            )
+                        }
+                    }
+                    .padding(10)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            .fill(Color(.tertiarySystemFill))
+                    )
+                } else {
+                    chartHint
+                }
             }
         }
     }
@@ -356,6 +475,96 @@ struct StatsView: View {
         return (calendar.dateComponents([.day], from: r.start, to: end).day ?? 0) + 1
     }
 
+    // MARK: - 图表点选
+
+    private var chartHint: some View {
+        Text("点按图表查看详情")
+            .font(.caption2)
+            .foregroundStyle(.tertiary)
+    }
+
+    private func chartCallout(title: String, amount: Double, percentText: String?, count: Int?, color: Color?) -> some View {
+        HStack(spacing: 10) {
+            if let color {
+                Circle().fill(color).frame(width: 10, height: 10)
+            }
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title).font(.subheadline.weight(.medium))
+                HStack(spacing: 8) {
+                    Text(Money.format(amount))
+                        .font(.system(.body, design: .rounded).weight(.semibold))
+                    if let percentText {
+                        Text(percentText).font(.caption).foregroundStyle(.secondary)
+                    }
+                    if let count {
+                        Text("\(count) 笔").font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(10)
+        .background(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(Color(.tertiarySystemFill))
+        )
+    }
+
+    private func compareAmountRow(title: String, amount: Double, color: Color) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            HStack(spacing: 4) {
+                Circle().fill(color).frame(width: 6, height: 6)
+                Text(title).font(.caption2).foregroundStyle(.secondary)
+            }
+            Text(Money.format(amount))
+                .font(.system(.caption, design: .rounded).weight(.semibold))
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
+        }
+    }
+
+    private func compareBarOpacity(for date: Date, selectedKey: Date?) -> Double {
+        guard let selectedKey else { return 1 }
+        return calendar.startOfMonth(for: date) == selectedKey ? 1 : 0.35
+    }
+
+    private func clearChartSelection() {
+        selectedPieID = nil
+        pieAngle = nil
+        selectedTrendDate = nil
+        selectedCompareDate = nil
+    }
+
+    /// `chartAngleSelection` 返回的是角度域上的累计值（与 SectorMark 的金额同域）
+    private func category(atAngle angle: Double?, in totals: [CategoryTotal], total: Double) -> CategoryTotal? {
+        guard let angle, total > 0, !totals.isEmpty else { return nil }
+        var running = 0.0
+        for item in totals {
+            running += item.total
+            if angle <= running { return item }
+        }
+        return totals.last
+    }
+
+    private func nearestTrendPoint(to date: Date?, in trend: [TrendPoint]) -> TrendPoint? {
+        guard let date, !trend.isEmpty else { return nil }
+        let key = period == .month ? calendar.startOfDay(for: date) : calendar.startOfMonth(for: date)
+        if let exact = trend.first(where: {
+            let k = period == .month ? calendar.startOfDay(for: $0.date) : calendar.startOfMonth(for: $0.date)
+            return k == key
+        }) {
+            return exact
+        }
+        return trend.min(by: { abs($0.date.timeIntervalSince(date)) < abs($1.date.timeIntervalSince(date)) })
+    }
+
+    private func trendPointTitle(_ date: Date) -> String {
+        if period == .month {
+            return DateText.shortDate.string(from: date)
+        }
+        return DateText.month.string(from: date)
+    }
+
     private func percent(_ value: Double, of total: Double) -> String {
         guard total > 0 else { return "0%" }
         return String(format: "%.1f%%", value / total * 100)
@@ -370,15 +579,53 @@ struct StatsView: View {
 }
 
 /// 某分类下的记录列表
+/// 分类排行明细的排序（持久化，下次进入同一页沿用）
+enum CategoryRecordsSort: String, CaseIterable, Identifiable {
+    case dateDesc, dateAsc, amountDesc, amountAsc
+    var id: String { rawValue }
+    var title: String {
+        switch self {
+        case .dateDesc: return "日期（新→旧）"
+        case .dateAsc: return "日期（旧→新）"
+        case .amountDesc: return "金额（大→小）"
+        case .amountAsc: return "金额（小→大）"
+        }
+    }
+    var shortTitle: String {
+        switch self {
+        case .dateDesc, .dateAsc: return "日期"
+        case .amountDesc, .amountAsc: return "金额"
+        }
+    }
+}
+
 struct CategoryRecordsView: View {
     let title: String
     let records: [LedgerRecord]
+    @AppStorage("stats.categoryRecordsSort") private var sortRaw = CategoryRecordsSort.dateDesc.rawValue
     @State private var editing: LedgerRecord?
+
+    private var sort: CategoryRecordsSort {
+        CategoryRecordsSort(rawValue: sortRaw) ?? .dateDesc
+    }
+
+    private var sortedRecords: [LedgerRecord] {
+        switch sort {
+        case .dateDesc:
+            return records.sorted { $0.date != $1.date ? $0.date > $1.date : $0.amount > $1.amount }
+        case .dateAsc:
+            return records.sorted { $0.date != $1.date ? $0.date < $1.date : $0.amount > $1.amount }
+        case .amountDesc:
+            return records.sorted { $0.amount != $1.amount ? $0.amount > $1.amount : $0.date > $1.date }
+        case .amountAsc:
+            return records.sorted { $0.amount != $1.amount ? $0.amount < $1.amount : $0.date > $1.date }
+        }
+    }
 
     var body: some View {
         List {
             Section {
-                ForEach(records) { r in
+                ForEach(sortedRecords) { r in
                     RecordRow(record: r, showDate: true)
                         .onTapGesture { editing = r }
                 }
@@ -389,6 +636,26 @@ struct CategoryRecordsView: View {
         }
         .navigationTitle(title)
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Menu {
+                    ForEach(CategoryRecordsSort.allCases) { option in
+                        Button {
+                            sortRaw = option.rawValue
+                        } label: {
+                            if option == sort {
+                                Label(option.title, systemImage: "checkmark")
+                            } else {
+                                Text(option.title)
+                            }
+                        }
+                    }
+                } label: {
+                    Label("排序", systemImage: "arrow.up.arrow.down.circle")
+                }
+                .accessibilityLabel("排序：\(sort.title)")
+            }
+        }
         .sheet(item: $editing) { r in
             RecordEditorView(record: r)
         }

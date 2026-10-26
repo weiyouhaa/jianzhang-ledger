@@ -26,6 +26,8 @@ struct SearchView: View {
         let end = cal.date(byAdding: .day, value: 1, to: cal.startOfDay(for: toDate)) ?? toDate
 
         return records.filter { r in
+            // 余额校准不进搜索列表，只在账户明细 / 变动日志可见（2.0 (13)）
+            if r.kind == .adjustment { return false }
             if kindFilter == 1 && !r.countsAsExpense(includeRepayment: repaymentAsExpense) { return false }
             if kindFilter == 2 && r.kind != .income { return false }
             if kindFilter == 3 && r.statsKind(includeRepayment: repaymentAsExpense) != nil { return false }

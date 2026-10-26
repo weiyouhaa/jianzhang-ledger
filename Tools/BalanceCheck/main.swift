@@ -51,5 +51,80 @@ check(BalanceMath.statsKind(kind: .expense, toLiability: false, includeRepayment
 check(BalanceMath.statsKind(kind: .adjustment, toLiability: false, includeRepayment: true) == nil, "校准不计入")
 check(BalanceMath.isRepayment(kind: .transfer, toLiability: true) && !BalanceMath.isRepayment(kind: .expense, toLiability: true), "还款识别")
 
+// MARK: - 导入历史账单保持余额（2.0 (13)）
+
+func day(_ s: String) -> Date {
+    let f = DateFormatter(); f.calendar = Calendar(identifier: .gregorian)
+    f.timeZone = TimeZone(identifier: "Asia/Shanghai")!; f.dateFormat = "yyyy-MM-dd"
+    return f.date(from: s)!
+}
+func nearMap(_ a: [String: Double], _ b: [String: Double]) -> Bool {
+    let keys = Set(a.keys).union(b.keys)
+    return keys.allSatisfy { near(a[$0] ?? 0, b[$0] ?? 0) }
+}
+
+check(!ImportBalanceMath.isHistorical(date: day("2026-10-01"), latestExisting: nil), "空账本：导入都算新交易")
+check(ImportBalanceMath.isHistorical(date: day("2026-09-01"), latestExisting: day("2026-10-01")), "早于最新 → 历史")
+check(ImportBalanceMath.isHistorical(date: day("2026-10-01"), latestExisting: day("2026-10-01")), "等于最新 → 历史")
+check(!ImportBalanceMath.isHistorical(date: day("2026-10-02"), latestExisting: day("2026-10-01")), "晚于最新 → 计入余额")
+
+// 空账本：导入支出 50，余额应变
+do {
+    let r = ImportBalanceMath.simulate(initials: ["cash": 1000], existingEffects: [],
+        imported: [(kind: .expense, amount: 50, fee: 0, date: day("2026-10-01"), from: "cash", to: nil)])
+    check(r.preservedCount == 0 && near(r.balances["cash"] ?? 0, 950) && r.adjustments.isEmpty,
+          "空账本导入支出：余额 1000→950，无初始余额调整")
+}
+
+// 有最新记录：导入更早的支出，余额不变，initialBalance 上调
+do {
+    let before = 5000.0
+    let r = ImportBalanceMath.simulate(
+        initials: ["bank": before],
+        existingEffects: [(accountID: "bank", date: day("2026-10-20"), effect: -100)], // 余额已是 4900
+        imported: [(kind: .expense, amount: 80, fee: 0, date: day("2026-10-05"), from: "bank", to: nil)])
+    check(r.preservedCount == 1, "历史导入计为保持余额")
+    check(near(r.adjustments["bank"] ?? 0, 80), "初始余额 +80 抵消历史支出效果")
+    check(near(r.balances["bank"] ?? 0, 4900), "导入历史后当前余额仍为 4900")
+    // 撤销：去掉调整
+    // 更直接：撤销后余额 = 当前 − adj − effect_of_deleted = 4900 − 80 − (−80) = 4900
+    check(near((r.balances["bank"] ?? 0) - (r.adjustments["bank"] ?? 0) - (-80), 4900), "撤销后余额还原为 4900")
+}
+
+// 导入比最新更新的：余额变化、无调整
+do {
+    let r = ImportBalanceMath.simulate(
+        initials: ["bank": 5000],
+        existingEffects: [(accountID: "bank", date: day("2026-10-01"), effect: 0)],
+        imported: [(kind: .expense, amount: 30, fee: 0, date: day("2026-10-15"), from: "bank", to: nil)])
+    check(r.preservedCount == 0 && r.adjustments.isEmpty && near(r.balances["bank"] ?? 0, 4970),
+          "较新导入：余额 5000→4970，无调整")
+}
+
+// 历史转账：转出 / 转入双方都调初始余额
+do {
+    let r = ImportBalanceMath.simulate(
+        initials: ["wechat": 800, "bank": 2000],
+        existingEffects: [
+            (accountID: "wechat", date: day("2026-10-18"), effect: -50),
+            (accountID: "bank", date: day("2026-10-18"), effect: 0)
+        ],
+        imported: [(kind: .transfer, amount: 200, fee: 0, date: day("2026-09-01"), from: "bank", to: "wechat")])
+    check(r.preservedCount == 1, "历史转账计为保持余额")
+    check(near(r.adjustments["bank"] ?? 0, 200) && near(r.adjustments["wechat"] ?? 0, -200),
+          "转账双方初始余额对冲（转出 +200，转入 −200）")
+    check(near(r.balances["bank"] ?? 0, 2000) && near(r.balances["wechat"] ?? 0, 750),
+          "历史转账后当前余额不变（bank 2000，wechat 750）")
+}
+
+// offsets 编解码
+do {
+    let raw = ImportBalanceMath.encodeOffsets(["a": 12.5, "b": -3])
+    let back = ImportBalanceMath.decodeOffsets(raw)
+    check(near(back["a"] ?? 0, 12.5) && near(back["b"] ?? 0, -3), "offsets JSON 往返")
+    check(ImportBalanceMath.decodeOffsets("").isEmpty && ImportBalanceMath.encodeOffsets([:]).isEmpty, "空 offsets")
+}
+
+
 print(failures == 0 ? "ALL PASS" : "\(failures) FAILED")
 exit(failures == 0 ? 0 : 1)

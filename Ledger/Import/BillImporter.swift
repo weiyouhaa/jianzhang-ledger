@@ -28,6 +28,8 @@ struct ImportItem: Identifiable, Equatable {
     var edited = false
     /// 疑似重复时匹配到的已有记录
     var matchedRecordID: UUID?
+    /// 日期不晚于账本最新记录：导入后会调整初始余额，当前余额不变（2.0 (13)）
+    var preservesBalance = false
 
     /// 能否勾选导入
     var canImport: Bool {
@@ -59,6 +61,10 @@ enum BillImporter {
             nearby = DataStore.records(from: lo.addingTimeInterval(-600), to: hi.addingTimeInterval(600), in: context)
                 .filter { $0.externalID.isEmpty }
         }
+        let latestExistingDate: Date? = {
+            let all = (try? context.fetch(FetchDescriptor<LedgerRecord>())) ?? []
+            return all.map(\.date).max()
+        }()
         var seen = Set<String>()
         var items: [ImportItem] = []
 
@@ -119,6 +125,7 @@ enum BillImporter {
 
             var item = ImportItem(entry: e, status: status, include: false, kind: kind, categoryID: categoryID,
                                   accountID: accountID, toAccountID: to?.id, categorySource: categorySource)
+            item.preservesBalance = ImportBalanceMath.isHistorical(date: e.date, latestExisting: latestExistingDate)
             switch status {
             case .new: item.include = item.canImport
             case .likelyDuplicate: item.include = options.includeLikelyDuplicates && item.canImport
@@ -154,21 +161,27 @@ enum BillImporter {
         }
     }
 
-    /// 写入勾选的记录，返回批次
+    /// 写入勾选的记录，返回批次。
+    /// 日期不晚于导入前最新记录的交易会写入账本（统计 / 明细可见），但通过调整相关账户的 initialBalance 保持当前余额不变。
     @discardableResult
     static func commit(_ items: [ImportItem], source: BillSource, fileName: String, in context: ModelContext) throws -> ImportBatch? {
         let chosen = items.filter { $0.include && $0.canImport }
         guard !chosen.isEmpty else { return nil }
+        let existing = (try? context.fetch(FetchDescriptor<LedgerRecord>())) ?? []
+        let latestExistingDate = existing.map(\.date).max()
         let batch = ImportBatch(source: source, fileName: fileName)
         context.insert(batch)
         let batchID = batch.id.uuidString
         var expense = 0.0, income = 0.0
+        var effectSum: [String: Double] = [:]
+        var preservedCount = 0
         for item in chosen {
             let e = item.entry
             let category = item.kind.countsInStats ? item.categoryID.flatMap { DataStore.category(id: $0, in: context) } : nil
             let from = item.accountID.flatMap { DataStore.account(id: $0, in: context) }
             let to = item.kind == .transfer ? item.toAccountID.flatMap { DataStore.account(id: $0, in: context) } : nil
-            let record = LedgerRecord(amount: (e.amount * 100).rounded() / 100, kind: item.kind, category: category,
+            let amount = (e.amount * 100).rounded() / 100
+            let record = LedgerRecord(amount: amount, kind: item.kind, category: category,
                                       note: e.memo, merchant: item.kind == .transfer ? "" : e.merchant,
                                       account: from?.name ?? "", date: e.date, source: source.rawValue)
             if item.kind == .transfer && record.note.isEmpty { record.note = e.merchant }
@@ -177,18 +190,34 @@ enum BillImporter {
             record.externalID = e.orderID
             record.importBatchID = batchID
             context.insert(record)
+            if ImportBalanceMath.isHistorical(date: e.date, latestExisting: latestExistingDate) {
+                preservedCount += 1
+                ImportBalanceMath.accumulateEffects(into: &effectSum, kind: item.kind, amount: amount, fee: record.fee,
+                                                    fromAccountID: from?.id.uuidString, toAccountID: to?.id.uuidString)
+            }
             if item.edited && item.kind.countsInStats && !e.merchant.isEmpty {
                 RuleStore.learn(merchant: e.merchant, kind: item.kind, category: category, account: from, in: context)
             }
             if item.kind == .expense { expense += record.amount }
             if item.kind == .income { income += record.amount }
         }
+        let adjustments = ImportBalanceMath.initialBalanceAdjustments(fromEffects: effectSum)
+        for (idStr, delta) in adjustments {
+            guard let id = UUID(uuidString: idStr), let account = DataStore.account(id: id, in: context) else { continue }
+            account.initialBalance = ((account.initialBalance + delta) * 100).rounded() / 100
+        }
         batch.recordCount = chosen.count
         batch.expenseTotal = expense
         batch.incomeTotal = income
         batch.firstDate = chosen.map(\.entry.date).min()
         batch.lastDate = chosen.map(\.entry.date).max()
+        batch.balanceOffsets = adjustments
+        batch.balancePreservedCount = preservedCount
         try context.save()
+        let newer = chosen.count - preservedCount
+        RunLog.shared.log(.info, "import",
+                          "写入 \(chosen.count) 笔（历史 \(preservedCount) 笔保持余额，较新 \(newer) 笔计入余额；调整 \(adjustments.count) 个账户初始余额）",
+                          memory: false)
         BudgetMonitor.check(in: context)
         return batch
     }
@@ -198,13 +227,23 @@ enum BillImporter {
         return (try? context.fetch(FetchDescriptor<LedgerRecord>(predicate: #Predicate<LedgerRecord> { $0.importBatchID == target }))) ?? []
     }
 
-    /// 撤销整批导入，返回删除的记录数
+    /// 撤销整批导入：删除记录，并还原为保持余额而调整过的初始余额。返回删除的记录数。
     @discardableResult
     static func undo(_ batch: ImportBatch, in context: ModelContext) -> Int {
         let list = records(of: batch, in: context)
+        let offsets = batch.balanceOffsets
+        for (idStr, delta) in offsets {
+            guard let id = UUID(uuidString: idStr), let account = DataStore.account(id: id, in: context) else { continue }
+            account.initialBalance = ((account.initialBalance - delta) * 100).rounded() / 100
+        }
         list.forEach { context.delete($0) }
+        let n = list.count
+        let preserved = batch.balancePreservedCount
         context.delete(batch)
         try? context.save()
-        return list.count
+        RunLog.shared.log(.info, "import",
+                          "撤销导入 \(n) 笔（还原 \(offsets.count) 个账户初始余额；其中历史 \(preserved) 笔曾保持余额）",
+                          memory: false)
+        return n
     }
 }

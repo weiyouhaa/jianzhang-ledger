@@ -107,6 +107,9 @@ struct LedgerBackup: Codable {
         var incomeTotal: Double
         var firstDate: Date?
         var lastDate: Date?
+        /// 导入时为保持余额而调整的初始余额（账户 id → 调整量）；旧备份无此字段
+        var balanceOffsetsJSON: String? = nil
+        var balancePreservedCount: Int? = nil
     }
 
     struct ChangeLogDTO: Codable {

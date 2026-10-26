@@ -55,6 +55,10 @@ final class ImportBatch {
     var incomeTotal: Double = 0
     var firstDate: Date?
     var lastDate: Date?
+    /// 导入历史账单时为保持当前余额而加到各账户 initialBalance 的调整量（JSON：账户 id → 调整量）。撤销时按此还原。
+    var balanceOffsetsJSON: String = ""
+    /// 本批中「日期不晚于导入前最新记录」的笔数（不影响余额）
+    var balancePreservedCount: Int = 0
 
     init(source: BillSource, fileName: String) {
         self.id = UUID()
@@ -64,6 +68,11 @@ final class ImportBatch {
     }
 
     var source: BillSource { BillSource(rawValue: sourceRaw) ?? .alipay }
+
+    var balanceOffsets: [String: Double] {
+        get { ImportBalanceMath.decodeOffsets(balanceOffsetsJSON) }
+        set { balanceOffsetsJSON = ImportBalanceMath.encodeOffsets(newValue) }
+    }
 }
 
 /// 周期账单

@@ -97,6 +97,7 @@ struct ImportPreviewView: View {
         let expense = chosen.filter { $0.kind == .expense }.reduce(0) { $0 + $1.entry.amount }
         let income = chosen.filter { $0.kind == .income }.reduce(0) { $0 + $1.entry.amount }
         let dates = items.map(\.entry.date)
+        let preserved = chosen.filter(\.preservesBalance).count
         return VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 10) {
                 Image(systemName: session.result.source.icon)
@@ -123,6 +124,11 @@ struct ImportPreviewView: View {
             }
             .font(.caption)
             .foregroundStyle(.secondary)
+            if preserved > 0 {
+                Text("\(preserved) 笔日期不晚于最新记录，导入后不会改变账户余额")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
         }
     }
 
@@ -397,8 +403,11 @@ struct ImportBatchesView: View {
         .navigationBarTitleDisplayMode(.inline)
         .alert("撤销这次导入？", isPresented: undoBinding, presenting: pendingUndo) { batch in
             Button("撤销并删除 \(BillImporter.records(of: batch, in: context).count) 笔", role: .destructive) {
+                let preserved = batch.balancePreservedCount
                 let n = BillImporter.undo(batch, in: context)
-                undoneMessage = "已删除 \(n) 笔导入的记录"
+                undoneMessage = preserved > 0
+                    ? "已删除 \(n) 笔导入的记录，并还原因此调整过的账户初始余额。"
+                    : "已删除 \(n) 笔导入的记录"
             }
             Button("取消", role: .cancel) {}
         } message: { batch in
