@@ -85,21 +85,27 @@ struct DedupeView: View {
         }
         .navigationTitle("一键去重")
         .navigationBarTitleDisplayMode(.inline)
-        .toolbar {
-            if isReal && !groups.isEmpty {
-                ToolbarItem(placement: .bottomBar) {
-                    Button("自动处理") { showAutoConfirm = true }
-                        .disabled(autoPlan.isEmpty)
-                        .accessibilityIdentifier("dedupe-auto")
+        .bottomActionBar(isPresented: isReal && !groups.isEmpty) {
+            HStack(spacing: 12) {
+                Button {
+                    showAutoConfirm = true
+                } label: {
+                    Text("自动处理").frame(maxWidth: .infinity)
                 }
-                ToolbarItem(placement: .bottomBar) { Spacer() }
-                ToolbarItem(placement: .bottomBar) {
-                    Button(role: .destructive) { showDeleteConfirm = true } label: {
-                        Text("删除所选 \(pending.records) 笔").fontWeight(.semibold)
-                    }
-                    .disabled(pending.records == 0)
-                    .accessibilityIdentifier("dedupe-delete")
+                .buttonStyle(.bordered)
+                .controlSize(.large)
+                .disabled(autoPlan.isEmpty)
+                .accessibilityIdentifier("dedupe-auto")
+                Button(role: .destructive) {
+                    showDeleteConfirm = true
+                } label: {
+                    Text("删除所选 \(pending.records) 笔").fontWeight(.semibold).frame(maxWidth: .infinity)
                 }
+                .buttonStyle(.borderedProminent)
+                .tint(.red)
+                .controlSize(.large)
+                .disabled(pending.records == 0)
+                .accessibilityIdentifier("dedupe-delete")
             }
         }
         .onAppear { if !loaded { reload() } }

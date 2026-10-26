@@ -57,13 +57,17 @@ struct CategoryManagerView: View {
         .navigationTitle("分类管理")
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) { EditButton() }
-            ToolbarItem(placement: .bottomBar) {
-                Button {
-                    editing = .new(kind)
-                } label: {
-                    Label("新建分类", systemImage: "plus.circle.fill")
-                }
+        }
+        // 底部按钮不用 .bottomBar：iOS 26/27 的悬浮 TabBar 会盖住它
+        .bottomActionBar {
+            Button {
+                editing = .new(kind)
+            } label: {
+                Label("新建分类", systemImage: "plus.circle.fill").frame(maxWidth: .infinity)
             }
+            .buttonStyle(.bordered)
+            .controlSize(.large)
+            .accessibilityIdentifier("category-new")
         }
         .onAppear {
             if !didLoad { kind = initialKind; didLoad = true }
