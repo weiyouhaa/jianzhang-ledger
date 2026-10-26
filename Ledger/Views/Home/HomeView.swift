@@ -250,6 +250,19 @@ private struct HomeRecordList: View {
         }
         .listStyle(.insetGrouped)
         .toolbar {
+            // 2.0 (17)：全部折叠 / 全部展开放到右上角，一个按钮切换
+            ToolbarItem(placement: .topBarTrailing) {
+                Button {
+                    withAnimation(.snappy) {
+                        if allCollapsed { collapsedDays.removeAll() } else { collapsedDays.formUnion(groups.map(\.day)) }
+                    }
+                } label: {
+                    Image(systemName: allCollapsed ? "rectangle.expand.vertical" : "rectangle.compress.vertical")
+                }
+                .disabled(groups.isEmpty)
+                .accessibilityLabel(allCollapsed ? "全部展开" : "全部折叠")
+                .accessibilityIdentifier("home-collapse-toggle")
+            }
             ToolbarItem(placement: .topBarTrailing) {
                 NavigationLink {
                     SearchView()
@@ -271,34 +284,6 @@ private struct HomeRecordList: View {
                     .accessibilityIdentifier("home-dedupe")
                 }
             }
-            ToolbarItem(placement: .topBarLeading) {
-                Menu {
-                    Button {
-                        withAnimation(.snappy) { collapsedDays.formUnion(groups.map(\.day)) }
-                    } label: {
-                        Label("全部折叠", systemImage: "chevron.up.chevron.down")
-                    }
-                    .disabled(groups.isEmpty || allCollapsed)
-                    Button {
-                        withAnimation(.snappy) { collapsedDays.removeAll() }
-                    } label: {
-                        Label("全部展开", systemImage: "list.bullet")
-                    }
-                    .disabled(collapsedDays.isEmpty)
-                    if range.preset != .thisMonth {
-                        Divider()
-                        Button {
-                            resetToThisMonth()
-                        } label: {
-                            Label("回到本月", systemImage: "calendar")
-                        }
-                    }
-                } label: {
-                    Image(systemName: allCollapsed ? "rectangle.expand.vertical" : "rectangle.compress.vertical")
-                }
-                .accessibilityLabel("折叠 / 展开")
-                .accessibilityIdentifier("home-collapse-menu")
-            }
         }
         .task {
             // 截图模式：直接打开记一笔 / 搜索
@@ -318,20 +303,34 @@ private struct HomeRecordList: View {
                 if collapsed { collapsedDays.remove(group.day) } else { collapsedDays.insert(group.day) }
             }
         } label: {
-            HStack(spacing: 6) {
+            // 2.0 (17)：字号加大（Dynamic Type），点按区域至少 44pt
+            HStack(spacing: 8) {
                 Image(systemName: "chevron.down")
-                    .font(.caption2.weight(.semibold))
+                    .font(.footnote.weight(.semibold))
                     .rotationEffect(.degrees(collapsed ? -90 : 0))
                     .foregroundStyle(.secondary)
+                    .frame(minWidth: 16)
                 Text(DateText.dayHeaderText(group.day))
+                    .font(.headline)
+                    .foregroundStyle(.primary)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
                 Text("\(group.records.count) 笔")
-                    .foregroundStyle(.tertiary)
-                Spacer()
-                if group.expense > 0 { Text("支 \(Money.masked(group.expense, hidden: hideAmounts))") }
-                if group.income > 0 { Text("收 \(Money.masked(group.income, hidden: hideAmounts))") }
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                Spacer(minLength: 4)
+                VStack(alignment: .trailing, spacing: 1) {
+                    if group.expense > 0 { Text("支 \(Money.masked(group.expense, hidden: hideAmounts))") }
+                    if group.income > 0 { Text("收 \(Money.masked(group.income, hidden: hideAmounts))") }
+                }
+                .font(.subheadline.monospacedDigit())
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
             }
-            .font(.caption)
             .textCase(nil)
+            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -390,7 +389,7 @@ struct HomeRangeSheet: View {
                         }
                     }
                 } footer: {
-                    Text("范围只在本次使用中记住，下次打开回到本月。搜索不受此范围影响。")
+                    Text("选「本月」即可回到本月。范围只在本次使用中记住，下次打开回到本月。搜索不受此范围影响。")
                 }
 
                 Section {
