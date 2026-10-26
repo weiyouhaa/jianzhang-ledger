@@ -217,9 +217,21 @@ private struct HomeRecordList: View {
                     .listRowBackground(Color.clear)
                 }
             } else {
+                let maxDayExpense = groups.map(\.expense).max() ?? 0
                 ForEach(groups, id: \.day) { group in
                     let collapsed = collapsedDays.contains(group.day)
                     Section {
+                        // 2.0 (18)：每天一张卡片，折叠时只剩这一行；整行点按展开 / 折叠
+                        DaySummaryRow(day: group.day,
+                                      count: group.records.count,
+                                      expense: group.expense,
+                                      income: group.income,
+                                      chips: chips(for: group),
+                                      barRatio: DaySummary.barRatio(expense: group.expense, maxExpense: maxDayExpense),
+                                      collapsed: collapsed,
+                                      hideAmounts: hideAmounts)
+                            .onTapGesture { toggle(group.day) }
+                            .accessibilityAction { toggle(group.day) }
                         if !collapsed {
                             ForEach(group.records) { record in
                                 RecordRow(record: record)
@@ -239,8 +251,6 @@ private struct HomeRecordList: View {
                                     }
                             }
                         }
-                    } header: {
-                        dayHeader(group, collapsed: collapsed)
                     }
                 }
             }
@@ -249,6 +259,7 @@ private struct HomeRecordList: View {
             Color.clear.frame(height: 84).listRowBackground(Color.clear)
         }
         .listStyle(.insetGrouped)
+        .listSectionSpacing(.compact)
         .toolbar {
             // 2.0 (17)：全部折叠 / 全部展开放到右上角，一个按钮切换
             ToolbarItem(placement: .topBarTrailing) {
@@ -296,46 +307,21 @@ private struct HomeRecordList: View {
         }
     }
 
-    /// 可点按的日期标题：折叠后仍显示当天支出 / 收入和笔数
-    private func dayHeader(_ group: DayGroup, collapsed: Bool) -> some View {
-        Button {
-            withAnimation(.snappy) {
-                if collapsed { collapsedDays.remove(group.day) } else { collapsedDays.insert(group.day) }
-            }
-        } label: {
-            // 2.0 (17)：字号加大（Dynamic Type），点按区域至少 44pt
-            HStack(spacing: 8) {
-                Image(systemName: "chevron.down")
-                    .font(.footnote.weight(.semibold))
-                    .rotationEffect(.degrees(collapsed ? -90 : 0))
-                    .foregroundStyle(.secondary)
-                    .frame(minWidth: 16)
-                Text(DateText.dayHeaderText(group.day))
-                    .font(.headline)
-                    .foregroundStyle(.primary)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.8)
-                Text("\(group.records.count) 笔")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                Spacer(minLength: 4)
-                VStack(alignment: .trailing, spacing: 1) {
-                    if group.expense > 0 { Text("支 \(Money.masked(group.expense, hidden: hideAmounts))") }
-                    if group.income > 0 { Text("收 \(Money.masked(group.income, hidden: hideAmounts))") }
-                }
-                .font(.subheadline.monospacedDigit())
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
-                .minimumScaleFactor(0.8)
-            }
-            .textCase(nil)
-            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
-            .contentShape(Rectangle())
+    private func toggle(_ day: Date) {
+        withAnimation(.snappy) {
+            if collapsedDays.contains(day) { collapsedDays.remove(day) } else { collapsedDays.insert(day) }
         }
-        .buttonStyle(.plain)
-        .accessibilityLabel("\(DateText.dayHeaderText(group.day))，\(group.records.count) 笔")
-        .accessibilityHint(collapsed ? "展开" : "折叠")
+    }
+
+    /// 当天支出最多的前三个分类图标
+    private func chips(for group: DayGroup) -> [DaySummaryRow.Chip] {
+        let spent = group.records.filter { $0.countsAsExpense(includeRepayment: group.includeRepayment) }
+        let keys = DaySummary.topKeys(spent.map { (key: $0.categoryName, amount: $0.amount) })
+        return keys.compactMap { key in
+            spent.first { $0.categoryName == key }.map {
+                DaySummaryRow.Chip(id: key, icon: $0.categoryIcon, color: $0.categoryColor)
+            }
+        }
     }
 
     private func step(_ delta: Int) {

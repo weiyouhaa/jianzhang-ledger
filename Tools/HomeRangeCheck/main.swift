@@ -78,5 +78,24 @@ check(octLater.preset == .lastMonth && octLater.balanceTitle == "上月结余", 
 // 预设菜单
 check(HomeDateRange.Preset.menu.map(\.label) == ["本月", "上月", "最近 7 天", "最近 30 天", "本年", "全部", "自定义"], "预设菜单顺序")
 
+// 按天卡片（2.0 (18)）
+check(DaySummary.dayNumber(d(2026, 10, 6, 12), calendar: cal) == "6", "日期大数字")
+check(DaySummary.relativeLabel(d(2026, 10, 26, 8), now: now, calendar: cal) == "今天", "今天")
+check(DaySummary.relativeLabel(d(2026, 10, 25, 23), now: now, calendar: cal) == "昨天", "昨天")
+check(DaySummary.relativeLabel(d(2026, 10, 21), now: now, calendar: cal) == "周三", "2026-10-21 是周三")
+check(DaySummary.relativeLabel(d(2026, 10, 25), now: d(2026, 10, 26, 0, 0), calendar: cal) == "昨天", "零点时昨天仍是昨天")
+check(DaySummary.dateLabel(d(2026, 10, 21), now: now, calendar: cal) == "10月21日", "今年不带年份")
+check(DaySummary.dateLabel(d(2026, 10, 26), now: now, calendar: cal) == "10月26日 周一", "今天补星期")
+check(DaySummary.dateLabel(d(2025, 12, 31), now: now, calendar: cal) == "2025年12月31日", "往年带年份")
+let tk = DaySummary.topKeys([("餐饮", 30), ("交通", 50), ("餐饮", 30), ("购物", 10), ("娱乐", 60), ("零", 0)].map { (key: $0.0, amount: $0.1) })
+check(tk == ["餐饮", "娱乐", "交通"], "分类排行按金额合计取前三（\(tk)）")
+let tie = DaySummary.topKeys([("A", 10), ("B", 10)].map { (key: $0.0, amount: $0.1) }, limit: 5)
+check(tie == ["A", "B"], "同额按出现顺序")
+check(DaySummary.topKeys([(key: "A", amount: 0.0)]).isEmpty, "无支出无分类")
+check(DaySummary.barRatio(expense: 50, maxExpense: 200) == 0.25, "占比条 25%")
+check(DaySummary.barRatio(expense: 1, maxExpense: 10_000) == 0.04, "占比条最小露出")
+check(DaySummary.barRatio(expense: 0, maxExpense: 100) == 0 && DaySummary.barRatio(expense: 10, maxExpense: 0) == 0, "无支出无条")
+check(DaySummary.barRatio(expense: 300, maxExpense: 200) == 1, "占比条封顶")
+
 if failures > 0 { print("\(failures) FAILED"); exit(1) }
 print("All home range checks passed")
