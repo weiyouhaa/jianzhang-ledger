@@ -78,9 +78,18 @@ enum BillParseError: LocalizedError {
     case unreadableText
     case headerNotFound
     case empty
+    /// 旧版二进制 Excel（.xls）或加密的 Excel：OLE 复合文档
+    case legacyExcel
+    /// 带解压密码的压缩包（微信 / 支付宝导出的账单压缩包）
+    case encryptedArchive
+    /// 压缩包里没有可识别的账单文件
+    case archiveWithoutBill
 
     var errorDescription: String? {
         switch self {
+        case .legacyExcel: return "这是旧版 Excel（.xls）或设置了打开密码的 Excel，简账暂不支持直接读取。请用 Numbers / Excel / WPS 打开后「导出为 CSV」或另存为 .xlsx 再导入。"
+        case .encryptedArchive: return "这是带解压密码的账单压缩包。请先在「文件」App 中用账单邮件 / 短信里的解压密码解压，再选择里面的 CSV 或 XLSX 文件导入。"
+        case .archiveWithoutBill: return "压缩包里没有找到 CSV / XLSX 账单文件。请解压后选择里面的账单文件导入。"
         case .unreadableText: return "无法识别文件编码。请确认是支付宝或微信导出的账单文件（CSV / XLSX）。"
         case .headerNotFound: return "没有找到账单表头（交易时间、收/支、金额…）。请确认文件是「支付宝交易明细」或「微信支付账单」。"
         case .empty: return "账单中没有可导入的交易。"
@@ -96,9 +105,25 @@ enum BillParser {
 
     static func parse(data: Data, fileName: String = "") throws -> BillParseResult {
         let rows: [[String]]
-        if XLSXReader.isXLSX(data) {
+        switch BillFileKind.detect(data) {
+        case .legacyExcel:
+            throw BillParseError.legacyExcel
+        case .xlsx:
             rows = try XLSXReader.rows(from: data)
-        } else {
+        case .zip:
+            // 普通 ZIP：未加密且里面恰好有账单文件时直接读取（例如解压密码为空的导出）
+            let zip = try ZipArchive(data: data)
+            let candidates = zip.entries.filter { e in
+                let n = e.name.lowercased()
+                return !n.hasPrefix("__macosx/") && (n.hasSuffix(".csv") || n.hasSuffix(".xlsx") || n.hasSuffix(".xls"))
+            }
+            guard let entry = candidates.first else { throw BillParseError.archiveWithoutBill }
+            if candidates.contains(where: { $0.isEncrypted }) { throw BillParseError.encryptedArchive }
+            let inner = try zip.data(for: entry)
+            let innerName = (entry.name as NSString).lastPathComponent
+            guard BillFileKind.detect(inner) != .zip else { throw BillParseError.archiveWithoutBill }
+            return try parse(data: inner, fileName: innerName.isEmpty ? fileName : innerName)
+        case .text:
             guard let text = decodeText(data) else { throw BillParseError.unreadableText }
             rows = parseCSV(text)
         }
@@ -416,5 +441,24 @@ enum BillParser {
             return Date(timeIntervalSince1970: seconds - Double(timeZone.secondsFromGMT()))
         }
         return nil
+    }
+}
+
+/// 按文件内容（魔数）判断账单文件类型，不依赖扩展名 / UTType
+enum BillFileKind: String {
+    case xlsx          // ZIP 且含 xl/ 工作簿
+    case zip           // 其它 ZIP（账单压缩包）
+    case legacyExcel   // OLE 复合文档：.xls / 加密的 .xlsx
+    case text          // CSV / TXT
+
+    static func detect(_ data: Data) -> BillFileKind {
+        let b = [UInt8](data.prefix(8))
+        if b.count >= 8, b == [0xD0, 0xCF, 0x11, 0xE0, 0xA1, 0xB1, 0x1A, 0xE1] { return .legacyExcel }
+        guard XLSXReader.isXLSX(data) else { return .text }
+        if let zip = try? ZipArchive(data: data) {
+            return zip.entries.contains(where: { $0.name.hasPrefix("xl/") || $0.name == "[Content_Types].xml" }) ? .xlsx : .zip
+        }
+        // 无法读取目录：仍按 XLSX 处理，交给 XLSXReader 报具体错误
+        return .xlsx
     }
 }

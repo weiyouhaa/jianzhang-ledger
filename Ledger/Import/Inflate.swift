@@ -180,6 +180,9 @@ struct ZipArchive {
         let compressedSize: Int
         let uncompressedSize: Int
         let localHeaderOffset: Int
+        /// 通用标志位；bit 0 = 加密（微信 / 支付宝账单压缩包带解压密码）
+        var flags: Int = 0
+        var isEncrypted: Bool { flags & 1 != 0 }
     }
 
     enum ZipError: Error {
@@ -212,6 +215,7 @@ struct ZipArchive {
         var list: [Entry] = []
         for _ in 0..<count {
             guard p + 46 <= b.count, u32(p) == 0x02014B50 else { throw ZipError.corrupted }
+            let flags = u16(p + 8)
             let method = u16(p + 10)
             let csize = u32(p + 20)
             let usize = u32(p + 24)
@@ -221,7 +225,7 @@ struct ZipArchive {
             let offset = u32(p + 42)
             guard p + 46 + nameLen <= b.count else { throw ZipError.corrupted }
             let name = String(decoding: b[(p + 46)..<(p + 46 + nameLen)], as: UTF8.self)
-            list.append(Entry(name: name, method: method, compressedSize: csize, uncompressedSize: usize, localHeaderOffset: offset))
+            list.append(Entry(name: name, method: method, compressedSize: csize, uncompressedSize: usize, localHeaderOffset: offset, flags: flags))
             p += 46 + nameLen + extraLen + commentLen
         }
         entries = list

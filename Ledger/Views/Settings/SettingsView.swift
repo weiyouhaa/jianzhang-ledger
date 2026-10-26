@@ -21,8 +21,6 @@ struct SettingsView: View {
     @AppStorage(SettingsKey.lastBackupAt, store: .standard) private var lastBackupAt: Double = 0
     @State private var showDemoBackup = false
     @State private var demoDestination: String?
-    @State private var showFileImporter = false
-    @State private var importSession: ImportSession?
     @State private var importMessage: String?
     @Query private var rules: [CategoryRule]
     @Query private var recurringRules: [RecurringRule]
@@ -83,24 +81,12 @@ struct SettingsView: View {
                     break
                 case "rules", "recurring", "budgets", "changelog": if demoDestination == nil { demoDestination = ScreenshotDemo.screen }
                 case "import":
-                    if importSession == nil, let session = ScreenshotDemo.importSession() { importSession = session }
+                    if BillImportCenter.shared.session == nil, let session = ScreenshotDemo.importSession() { BillImportCenter.shared.session = session }
                 default: break
                 }
             }
-            .fileImporter(isPresented: $showFileImporter, allowedContentTypes: ImportSession.contentTypes) { result in
-                switch result {
-                case .success(let url):
-                    do { importSession = try ImportSession.load(url: url) }
-                    catch { importMessage = error.localizedDescription }
-                case .failure(let error):
-                    importMessage = error.localizedDescription
-                }
-            }
-            .sheet(item: $importSession) { session in
-                ImportPreviewView(session: session) { count in
-                    if count > 0 { importMessage = "已导入 \(count) 笔。可在「导入记录」中整批撤销。" }
-                }
-            }
+            // 账单导入的文件选择器 / 预览 / 提示挂在 TabView 层的 BillImportHost 上（2.0 (11)）：
+            // 之前与本页的密码 sheet、多个 alert 挂在同一个 Form 上，且在选择器回调里同步弹预览，选完 Excel 会「没反应」
             .alert("账单导入", isPresented: Binding(get: { importMessage != nil }, set: { if !$0 { importMessage = nil } })) {
                 Button("好", role: .cancel) {}
             } message: {
@@ -352,7 +338,8 @@ struct SettingsView: View {
                 .accessibilityIdentifier("settings-run-log")
             }
             Button {
-                showFileImporter = true
+                RunLog.shared.log(.info, "import", "打开文件选择器", memory: false)
+                BillImportCenter.shared.showPicker = true
             } label: {
                 Label("导入支付宝 / 微信账单", systemImage: "square.and.arrow.down.on.square")
             }

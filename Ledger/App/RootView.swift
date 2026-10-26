@@ -40,6 +40,11 @@ struct RootView: View {
         }
         .preferredColorScheme(colorScheme)
         .onOpenURL { url in
+            // 其他 App「用其他应用打开 / 共享」过来的账单文件（CSV / XLSX / XLS），见 Info.plist CFBundleDocumentTypes
+            if url.isFileURL {
+                BillImportCenter.shared.receive(url: url, isLocked: lock.isLocked)
+                return
+            }
             guard url.scheme == "jianzhang" else { return }
             if !lock.isLocked { PendingAppEdit.consumeIfNeeded() }
         }
@@ -57,14 +62,25 @@ struct RootView: View {
             }
             await Self.runSmartTasks()
             if !lock.isLocked { PendingAppEdit.consumeIfNeeded() }
+            BillImportCenter.shared.consumePendingIfPossible(isLocked: lock.isLocked)
         }
         .onChange(of: lock.isLocked) { _, locked in
             syncLockWindow(locked)
+            if !locked {
+                // 等真实 / 防窥模式切换完成后再判断；防窥模式下排队的文件继续等待真实解锁
+                Task { @MainActor in
+                    try? await Task.sleep(nanoseconds: 600_000_000)
+                    BillImportCenter.shared.consumePendingIfPossible(isLocked: lock.isLocked)
+                }
+            }
         }
         .onChange(of: scenePhase) { _, phase in
             lock.handleScenePhase(phase)
             // 快捷指令 continueInForeground 切到前台：未上锁时直接弹编辑页；上锁则等解锁（真实密码 / 面容）后再弹
-            if phase == .active && !lock.isLocked { PendingAppEdit.consumeIfNeeded() }
+            if phase == .active && !lock.isLocked {
+                PendingAppEdit.consumeIfNeeded()
+                BillImportCenter.shared.consumePendingIfPossible(isLocked: false)
+            }
             if phase == .active {
                 AppleIntelligenceExtractor.prewarm()
                 Task { @MainActor in
@@ -162,6 +178,8 @@ struct MainTabView: View {
                 }
             }
         }
+        // 账单导入（文件选择器 / 预览 / 提示）的独立宿主
+        .overlay { BillImportHost() }
         .onAppear { PendingAppEdit.consumeIfNeeded() }
     }
 }

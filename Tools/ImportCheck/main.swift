@@ -158,5 +158,66 @@ let daily = RecurrenceSpec(frequency: .daily, interval: 3, start: d("2026-10-01 
 expect(daily.occurrences(through: d("2026-10-10 00:00"), calendar: cal).count == 3, "每 3 天（10/1、4、7）")
 expect(monthly.description(calendar: cal) == "每月 31 日", "描述文字")
 
+// MARK: 文件类型识别（2.0 (11)：.xls / 账单压缩包 / XLSX）
+
+/// 构造仅存储（method 0）的最小 ZIP，用于合成测试
+func makeZip(_ files: [(String, Data)], encrypted: Bool = false) -> Data {
+    var out = [UInt8](), central = [UInt8]()
+    func le16(_ v: Int) -> [UInt8] { [UInt8(v & 0xFF), UInt8((v >> 8) & 0xFF)] }
+    func le32(_ v: Int) -> [UInt8] { le16(v & 0xFFFF) + le16((v >> 16) & 0xFFFF) }
+    let flag = encrypted ? 1 : 0
+    for (name, data) in files {
+        let n = [UInt8](name.utf8), d = [UInt8](data)
+        let offset = out.count
+        out += le32(0x04034B50) + le16(20) + le16(flag) + le16(0) + le16(0) + le16(0) + le32(0)
+        out += le32(d.count) + le32(d.count) + le16(n.count) + le16(0) + n + d
+        central += le32(0x02014B50) + le16(20) + le16(20) + le16(flag) + le16(0) + le16(0) + le16(0) + le32(0)
+        central += le32(d.count) + le32(d.count) + le16(n.count) + le16(0) + le16(0) + le16(0) + le16(0) + le32(0) + le32(offset) + n
+    }
+    let cdOffset = out.count
+    out += central
+    out += le32(0x06054B50) + le16(0) + le16(0) + le16(files.count) + le16(files.count) + le32(central.count) + le32(cdOffset) + le16(0)
+    return Data(out)
+}
+func parseError(_ data: Data, _ name: String) -> BillParseError? {
+    do { _ = try BillParser.parse(data: data, fileName: name); return nil } catch let e as BillParseError { return e } catch { return nil }
+}
+
+let oleHeader = Data([0xD0, 0xCF, 0x11, 0xE0, 0xA1, 0xB1, 0x1A, 0xE1] + [UInt8](repeating: 0, count: 504))
+expect(BillFileKind.detect(oleHeader) == .legacyExcel, "OLE 魔数 → 旧版 Excel")
+if case .legacyExcel? = parseError(oleHeader, "示例账单.xls") { expect(true, ".xls 抛出明确提示（导出 CSV / XLSX）") }
+else { expect(false, ".xls 抛出明确提示") }
+expect(BillParseError.legacyExcel.errorDescription?.contains("CSV") == true, ".xls 提示文字含 CSV 建议")
+if let x = load("wechat.xlsx") { expect(BillFileKind.detect(x) == .xlsx, "wechat.xlsx 识别为 XLSX") }
+if let c = load("wechat.csv") {
+    expect(BillFileKind.detect(c) == .text, "wechat.csv 识别为文本")
+    let plain = makeZip([("__MACOSX/._x.csv", Data([1, 2])), ("微信支付账单(示例).csv", c)])
+    expect(BillFileKind.detect(plain) == .zip, "普通 ZIP 识别为压缩包")
+    if let r = try? BillParser.parse(data: plain, fileName: "示例.zip") {
+        expect(r.source == .wechat && !r.entries.isEmpty, "未加密压缩包内的 CSV 直接读取（\(r.entries.count) 笔）")
+    } else { expect(false, "未加密压缩包内的 CSV 直接读取") }
+    if case .encryptedArchive? = parseError(makeZip([("示例.csv", c)], encrypted: true), "示例.zip") { expect(true, "加密压缩包 → 提示先解压") }
+    else { expect(false, "加密压缩包 → 提示先解压") }
+}
+if case .archiveWithoutBill? = parseError(makeZip([("readme.txt", Data("hi".utf8))]), "a.zip") { expect(true, "压缩包无账单 → 明确提示") }
+else { expect(false, "压缩包无账单 → 明确提示") }
+expect(BillFileKind.detect(Data()) == .text, "空文件不崩溃")
+
+// Info.plist：简账出现在「共享 / 用其他应用打开」里（XLSX / XLS / CSV，Alternate），且保留 jianzhang:// 与 .jzbackup
+if let plistData = try? Data(contentsOf: URL(fileURLWithPath: "Config/Info.plist")),
+   let plist = try? PropertyListSerialization.propertyList(from: plistData, format: nil) as? [String: Any] {
+    let docs = plist["CFBundleDocumentTypes"] as? [[String: Any]] ?? []
+    let types = Set(docs.flatMap { $0["LSItemContentTypes"] as? [String] ?? [] })
+    expect(types.isSuperset(of: ["org.openxmlformats.spreadsheetml.sheet", "com.microsoft.excel.xls", "public.comma-separated-values-text"]),
+           "CFBundleDocumentTypes 含 XLSX / XLS / CSV")
+    expect(!docs.isEmpty && docs.allSatisfy { ($0["LSHandlerRank"] as? String) == "Alternate" }, "文档类型均为 Alternate（不抢默认打开方式）")
+    let schemes = (plist["CFBundleURLTypes"] as? [[String: Any]] ?? []).flatMap { $0["CFBundleURLSchemes"] as? [String] ?? [] }
+    expect(schemes.contains("jianzhang"), "保留 jianzhang:// URL Scheme")
+    let exported = (plist["UTExportedTypeDeclarations"] as? [[String: Any]] ?? []).compactMap { $0["UTTypeIdentifier"] as? String }
+    expect(exported.contains("com.fve.ledger.jzbackup"), "保留 .jzbackup 类型声明")
+} else {
+    print("（未找到 Config/Info.plist，跳过文档类型检查）")
+}
+
 print(failures == 0 ? "ALL PASSED" : "\(failures) FAILED")
 exit(failures == 0 ? 0 : 1)

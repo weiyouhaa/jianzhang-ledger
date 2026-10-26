@@ -8,28 +8,8 @@ struct ImportSession: Identifiable {
     let result: BillParseResult
     let fileName: String
 
-    static let contentTypes: [UTType] = {
-        var list: [UTType] = [.commaSeparatedText, .plainText, .text, .spreadsheet, .data]
-        if let x = UTType(filenameExtension: "xlsx") { list.insert(x, at: 0) }
-        return list
-    }()
-
-    /// 读取用户选中的文件（处理安全作用域）
-    static func load(url: URL) throws -> ImportSession {
-        let scoped = url.startAccessingSecurityScopedResource()
-        defer { if scoped { url.stopAccessingSecurityScopedResource() } }
-        let data = try Data(contentsOf: url)
-        do {
-            let result = try BillParser.parse(data: data, fileName: url.lastPathComponent)
-            guard !result.entries.isEmpty else { throw BillParseError.empty }
-            return ImportSession(result: result, fileName: url.lastPathComponent)
-        } catch let error as BillParseError {
-            throw error
-        } catch {
-            // ZIP / 解压 / XML 错误
-            throw ImportLoadError.xlsx(error.localizedDescription)
-        }
-    }
+    /// 文件选择器允许的类型（实际选择 / 读取流程见 BillImportCenter）
+    static var contentTypes: [UTType] { BillImportCenter.pickerTypes }
 }
 
 enum ImportLoadError: LocalizedError {
