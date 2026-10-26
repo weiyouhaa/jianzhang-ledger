@@ -15,9 +15,8 @@ struct StatsView: View {
     @State private var period: Period = .month
     @State private var anchor: Date = Date()
     @State private var kind: RecordKind = .expense
-    /// 图表点选：构成 / 趋势 / 收支对比
+    /// 图表点选（chartOverlay + SpatialTap；不用 chartXSelection，ScrollView 里在 iOS 26/27 常不触发）
     @State private var selectedPieID: String?
-    @State private var pieAngle: Double?
     @State private var selectedTrendDate: Date?
     @State private var selectedCompareDate: Date?
 
@@ -181,12 +180,17 @@ struct StatsView: View {
                     .opacity(selectedPieID == nil || selectedPieID == item.id ? 1 : 0.35)
                 }
                 .chartLegend(.hidden)
-                .chartAngleSelection(value: $pieAngle)
-                .onChange(of: pieAngle) { _, newValue in
-                    if let item = category(atAngle: newValue, in: totals, total: total) {
-                        selectedPieID = item.id
-                    } else if newValue == nil {
-                        selectedPieID = nil
+                .chartOverlay { proxy in
+                    GeometryReader { geo in
+                        Rectangle()
+                            .fill(Color.clear)
+                            .contentShape(Rectangle())
+                            .highPriorityGesture(
+                                SpatialTapGesture()
+                                    .onEnded { event in
+                                        selectPie(at: event.location, proxy: proxy, geo: geo, totals: totals, total: total)
+                                    }
+                            )
                     }
                 }
                 .frame(height: 220)
@@ -213,6 +217,7 @@ struct StatsView: View {
                         }
                     }
                     .frame(maxWidth: 120)
+                    .allowsHitTesting(false)
                     .animation(.snappy, value: selectedPieID)
                 }
 
@@ -228,17 +233,12 @@ struct StatsView: View {
                     chartHint
                 }
 
-                // 图例（可点选）
+                // 图例（可点选，图表手势的后备）
                 LazyVGrid(columns: [GridItem(.adaptive(minimum: 90), alignment: .leading)], alignment: .leading, spacing: 8) {
                     ForEach(totals.prefix(8)) { item in
                         Button {
                             withAnimation(.snappy) {
-                                if selectedPieID == item.id {
-                                    selectedPieID = nil
-                                    pieAngle = nil
-                                } else {
-                                    selectedPieID = item.id
-                                }
+                                selectedPieID = selectedPieID == item.id ? nil : item.id
                             }
                         } label: {
                             HStack(spacing: 6) {
@@ -275,11 +275,10 @@ struct StatsView: View {
                     }
                     if let selected {
                         RuleMark(x: .value("选中", selected.date, unit: unit))
-                            .foregroundStyle(Color.secondary.opacity(0.35))
-                            .lineStyle(StrokeStyle(lineWidth: 1, dash: [4, 3]))
+                            .foregroundStyle(Color.accentColor.opacity(0.45))
+                            .lineStyle(StrokeStyle(lineWidth: 1.5, dash: [4, 3]))
                     }
                 }
-                .chartXSelection(value: $selectedTrendDate)
                 .chartYAxis {
                     AxisMarks(position: .leading) { value in
                         AxisGridLine()
@@ -288,6 +287,26 @@ struct StatsView: View {
                                 Text(Money.compact(v))
                             }
                         }
+                    }
+                }
+                .chartOverlay { proxy in
+                    GeometryReader { geo in
+                        Rectangle()
+                            .fill(Color.clear)
+                            .contentShape(Rectangle())
+                            .highPriorityGesture(
+                                SpatialTapGesture()
+                                    .onEnded { event in
+                                        selectDate(
+                                            at: event.location,
+                                            proxy: proxy,
+                                            geo: geo,
+                                            current: selectedTrendDate,
+                                            set: { selectedTrendDate = $0 },
+                                            granularity: unit
+                                        )
+                                    }
+                            )
                     }
                 }
                 .frame(height: 200)
@@ -370,12 +389,11 @@ struct StatsView: View {
                     }
                     if let selectedKey {
                         RuleMark(x: .value("选中", selectedKey, unit: .month))
-                            .foregroundStyle(Color.secondary.opacity(0.35))
-                            .lineStyle(StrokeStyle(lineWidth: 1, dash: [4, 3]))
+                            .foregroundStyle(Color.accentColor.opacity(0.45))
+                            .lineStyle(StrokeStyle(lineWidth: 1.5, dash: [4, 3]))
                     }
                 }
                 .chartForegroundStyleScale(["支出": Color.orange, "收入": Color.green])
-                .chartXSelection(value: $selectedCompareDate)
                 .chartYAxis {
                     AxisMarks(position: .leading) { value in
                         AxisGridLine()
@@ -386,12 +404,32 @@ struct StatsView: View {
                         }
                     }
                 }
+                .chartOverlay { proxy in
+                    GeometryReader { geo in
+                        Rectangle()
+                            .fill(Color.clear)
+                            .contentShape(Rectangle())
+                            .highPriorityGesture(
+                                SpatialTapGesture()
+                                    .onEnded { event in
+                                        selectDate(
+                                            at: event.location,
+                                            proxy: proxy,
+                                            geo: geo,
+                                            current: selectedCompareDate,
+                                            set: { selectedCompareDate = $0 },
+                                            granularity: .month
+                                        )
+                                    }
+                            )
+                    }
+                }
                 .frame(height: 220)
 
                 if let selectedKey {
                     VStack(alignment: .leading, spacing: 8) {
                         Text(DateText.month.string(from: selectedKey))
-                            .font(.subheadline.weight(.medium))
+                            .font(.subheadline.weight(.semibold))
                         HStack(spacing: 16) {
                             compareAmountRow(title: "支出", amount: expenseAmt, color: .orange)
                             compareAmountRow(title: "收入", amount: incomeAmt, color: .green)
@@ -403,11 +441,15 @@ struct StatsView: View {
                             )
                         }
                     }
-                    .padding(10)
+                    .padding(12)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .background(
                         RoundedRectangle(cornerRadius: 12, style: .continuous)
-                            .fill(Color(.tertiarySystemFill))
+                            .fill(Color(.secondarySystemFill))
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            .strokeBorder(Color.accentColor.opacity(0.35), lineWidth: 1)
                     )
                 } else {
                     chartHint
@@ -478,21 +520,25 @@ struct StatsView: View {
     // MARK: - 图表点选
 
     private var chartHint: some View {
-        Text("点按图表查看详情")
-            .font(.caption2)
-            .foregroundStyle(.tertiary)
+        Text("点按扇区或柱子查看详情")
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.vertical, 4)
     }
 
     private func chartCallout(title: String, amount: Double, percentText: String?, count: Int?, color: Color?) -> some View {
         HStack(spacing: 10) {
             if let color {
-                Circle().fill(color).frame(width: 10, height: 10)
+                RoundedRectangle(cornerRadius: 3, style: .continuous)
+                    .fill(color)
+                    .frame(width: 4, height: 36)
             }
             VStack(alignment: .leading, spacing: 2) {
-                Text(title).font(.subheadline.weight(.medium))
+                Text(title).font(.subheadline.weight(.semibold))
                 HStack(spacing: 8) {
                     Text(Money.format(amount))
-                        .font(.system(.body, design: .rounded).weight(.semibold))
+                        .font(.system(.title3, design: .rounded).weight(.bold))
                     if let percentText {
                         Text(percentText).font(.caption).foregroundStyle(.secondary)
                     }
@@ -503,10 +549,15 @@ struct StatsView: View {
             }
             Spacer(minLength: 0)
         }
-        .padding(10)
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
         .background(
             RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .fill(Color(.tertiarySystemFill))
+                .fill(Color(.secondarySystemFill))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .strokeBorder(Color.accentColor.opacity(0.35), lineWidth: 1)
         )
     }
 
@@ -530,12 +581,65 @@ struct StatsView: View {
 
     private func clearChartSelection() {
         selectedPieID = nil
-        pieAngle = nil
         selectedTrendDate = nil
         selectedCompareDate = nil
     }
 
-    /// `chartAngleSelection` 返回的是角度域上的累计值（与 SectorMark 的金额同域）
+    /// 饼图：把点击位置换成「从 12 点顺时针」的累计金额域，再落到分类
+    private func selectPie(at location: CGPoint, proxy: ChartProxy, geo: GeometryProxy, totals: [CategoryTotal], total: Double) {
+        guard total > 0, !totals.isEmpty else { return }
+        let frame: CGRect
+        if let pf = proxy.plotFrame {
+            frame = geo[pf]
+        } else {
+            frame = geo.frame(in: .local)
+        }
+        let dx = location.x - frame.midX
+        let dy = location.y - frame.midY
+        let dist = hypot(dx, dy)
+        let radius = min(frame.width, frame.height) / 2
+        // 洞心或图外：取消选中
+        if dist < radius * 0.28 || dist > radius * 1.2 {
+            withAnimation(.snappy) { selectedPieID = nil }
+            return
+        }
+        // SectorMark：从正上方起顺时针
+        var radians = atan2(dx, -dy)
+        if radians < 0 { radians += 2 * .pi }
+        let value = (radians / (2 * .pi)) * total
+        guard let item = category(atAngle: value, in: totals, total: total) else { return }
+        withAnimation(.snappy) {
+            selectedPieID = selectedPieID == item.id ? nil : item.id
+        }
+    }
+
+    /// 柱状图：ChartProxy 把 x 映射为 Date，再写入选中（再点同一粒度则取消）
+    private func selectDate(
+        at location: CGPoint,
+        proxy: ChartProxy,
+        geo: GeometryProxy,
+        current: Date?,
+        set: (Date?) -> Void,
+        granularity: Calendar.Component
+    ) {
+        let frame: CGRect
+        if let pf = proxy.plotFrame {
+            frame = geo[pf]
+        } else {
+            frame = geo.frame(in: .local)
+        }
+        let x = location.x - frame.origin.x
+        guard let date: Date = proxy.value(atX: x) else { return }
+        withAnimation(.snappy) {
+            if let current, calendar.isDate(current, equalTo: date, toGranularity: granularity) {
+                set(nil)
+            } else {
+                set(date)
+            }
+        }
+    }
+
+    /// 累计金额域 → 分类（饼图 SectorMark 的 angle 值域）
     private func category(atAngle angle: Double?, in totals: [CategoryTotal], total: Double) -> CategoryTotal? {
         guard let angle, total > 0, !totals.isEmpty else { return nil }
         var running = 0.0
