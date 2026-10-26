@@ -64,7 +64,7 @@ struct SearchView: View {
         let income = results.filter { $0.kind == .income }.reduce(0) { $0 + $1.amount }
 
         List {
-            Section("筛选") {
+            Section {
                 Picker("类型", selection: $kindFilter) {
                     Text("全部").tag(0)
                     Text("支出").tag(1)
@@ -96,6 +96,11 @@ struct SearchView: View {
                         .keyboardType(.decimalPad)
                         .multilineTextAlignment(.center)
                 }
+            } header: {
+                Text("筛选")
+            } footer: {
+                // 2.0 (16)：明细页默认只显示本月，搜索不受影响
+                Text(useDateRange ? "只搜索所选日期内的记录。" : "搜索全部日期的记录，不受明细页日期范围的影响。")
             }
 
             Section {

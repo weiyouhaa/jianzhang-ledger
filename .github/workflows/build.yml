@@ -82,6 +82,11 @@ jobs:
           swiftc Ledger/Models/RecordKind.swift Tools/BalanceCheck/main.swift -o "$RUNNER_TEMP/balancecheck"
           "$RUNNER_TEMP/balancecheck"
 
+      - name: Home date range tests (default this month, presets, month stepping, rollover, custom)
+        run: |
+          swiftc Ledger/Views/Home/HomeDateRange.swift Tools/HomeRangeCheck/main.swift -o "$RUNNER_TEMP/homerange"
+          "$RUNNER_TEMP/homerange"
+
       - name: Passcode route tests (real vs decoy unlock)
         run: |
           swiftc Tools/PasscodeRouteCheck/main.swift -o "$RUNNER_TEMP/passcoderoute"
