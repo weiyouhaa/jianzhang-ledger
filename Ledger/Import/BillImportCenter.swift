@@ -17,6 +17,8 @@ final class BillImportCenter: ObservableObject {
     @Published var session: ImportSession?
     @Published var message: String?
     @Published var isLoading = false
+    /// 预览页真正出现在屏幕上（由预览内容的 onAppear 置位），用于检测「sheet 被系统丢弃」
+    var previewAppeared = false
 
     /// 从其他 App 收到、但当前上锁 / 处于防窥模式而暂未处理的文件（仅内存，10 分钟有效）
     private var pending: (data: Data, fileName: String, receivedAt: Date)?
@@ -122,7 +124,7 @@ final class BillImportCenter: ObservableObject {
                 RunLog.shared.log(.info, "import", "解析成功：\(result.source.title)，\(result.entries.count) 笔，无法识别 \(result.unreadableRows) 行", memory: false)
                 // 等文件选择器 / 共享面板完全收起后再弹预览，避免与正在消失的 presentation 冲突
                 try? await Task.sleep(nanoseconds: 450_000_000)
-                session = ImportSession(result: result, fileName: fileName)
+                await showPreview(ImportSession(result: result, fileName: fileName))
             case .failure(let error):
                 let text: String
                 if let e = error as? BillParseError {
@@ -134,6 +136,26 @@ final class BillImportCenter: ObservableObject {
                 present(message: text)
             }
         }
+    }
+
+    /// 弹出预览并确认它真的出现了：若被正在消失的 presentation 吞掉，重试一次；仍失败则弹提示，保证不会「没反应」
+    private func showPreview(_ s: ImportSession) async {
+        for attempt in 1...2 {
+            previewAppeared = false
+            session = s
+            try? await Task.sleep(nanoseconds: 1_200_000_000)
+            if previewAppeared { return }
+            RunLog.shared.log(.warn, "import", "预览未出现（第 \(attempt) 次），重试", memory: false)
+            session = nil
+            try? await Task.sleep(nanoseconds: 400_000_000)
+        }
+        RunLog.shared.log(.error, "import", "预览两次都未能弹出", memory: false)
+        message = "账单已读取（\(s.result.entries.count) 笔），但导入预览没能打开。请返回设置页后再试一次。"
+    }
+
+    /// 选择器被取消（用户点了取消，或系统收起了选择器）
+    func handlePickerCancelled() {
+        RunLog.shared.log(.info, "import", "选择器取消", memory: false)
     }
 
     /// 弹出提示；稍等选择器收起，避免提示框被丢弃
@@ -199,13 +221,17 @@ struct BillImportHost: View {
     var body: some View {
         ZStack {
             Color.clear
-                .fileImporter(isPresented: $center.showPicker, allowedContentTypes: BillImportCenter.pickerTypes) { result in
-                    center.handlePicked(result)
-                }
+                .fileImporter(isPresented: $center.showPicker, allowedContentTypes: BillImportCenter.pickerTypes,
+                              onCompletion: { result in center.handlePicked(result) },
+                              onCancellation: { center.handlePickerCancelled() })
             Color.clear
                 .sheet(item: $center.session) { session in
                     ImportPreviewView(session: session) { count in
                         if count > 0 { center.present(message: "已导入 \(count) 笔。可在「导入记录」中整批撤销。") }
+                    }
+                    .onAppear {
+                        center.previewAppeared = true
+                        RunLog.shared.log(.info, "import", "预览已显示", memory: false)
                     }
                 }
             Color.clear
