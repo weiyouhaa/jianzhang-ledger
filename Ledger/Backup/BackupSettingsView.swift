@@ -29,7 +29,6 @@ struct BackupSettingsView: View {
     @State private var exportDocument: BackupDocument?
     @State private var exportFileName = ""
     @State private var showExporter = false
-    @State private var showImporter = false
     @State private var pendingImport: ImportedBackup?
     @State private var pendingEncrypted: EncryptedImport?
     @State private var decryptedHold: ImportedBackup?
@@ -89,25 +88,6 @@ struct BackupSettingsView: View {
                 showAlert("已导出", "备份已保存为「\(url.lastPathComponent)」。")
             case .failure(let error):
                 showAlert("导出失败", error.localizedDescription)
-            }
-        }
-        .fileImporter(isPresented: $showImporter, allowedContentTypes: [.jzBackup, .json, .data]) { result in
-            switch result {
-            case .success(let url):
-                do {
-                    // 按文件头识别：JZBK = 加密备份，需要密码；否则按明文 JSON（v1–v3）解析
-                    let data = try BackupService.readData(from: url)
-                    if BackupCrypto.isEncrypted(data) {
-                        pendingEncrypted = EncryptedImport(fileName: url.lastPathComponent, data: data)
-                    } else {
-                        let backup = try BackupService.decode(data)
-                        pendingImport = ImportedBackup(fileName: url.lastPathComponent, backup: backup)
-                    }
-                } catch {
-                    showAlert("无法导入", error.localizedDescription)
-                }
-            case .failure(let error):
-                showAlert("无法导入", error.localizedDescription)
             }
         }
         .sheet(item: $pendingEncrypted, onDismiss: {
@@ -283,6 +263,43 @@ struct BackupSettingsView: View {
         return "回到 App 时按频率自动备份，保留最近 \(autoBackupKeep) 份（当前 \(backupCount) 份）。" + enc + where_
     }
 
+    /// 从备份恢复：用 UIKit 选择器直接弹出（2.0 (12)；SwiftUI .fileImporter 在 iOS 27.2 beta 上选完文件没有回调）
+    private func openRestorePicker() {
+        RunLog.shared.log(.info, "backup", "点击从备份恢复，打开 UIKit 文件选择器", memory: false)
+        let ok = DocumentPicker.present(types: [.jzBackup, .json, .data], tag: "backup", onPick: { url in
+            handleRestorePicked(url)
+        })
+        if !ok { showAlert("无法导入", "无法打开文件选择器，请返回上一页后重试。") }
+    }
+
+    private func handleRestorePicked(_ url: URL) {
+        do {
+            // 按文件头识别：JZBK = 加密备份，需要密码；否则按明文 JSON（v1–v3）解析
+            let data = try BackupService.readData(from: url)
+            BillImportCenter.cleanupInboxCopy(url)
+            let encrypted = BackupCrypto.isEncrypted(data)
+            RunLog.shared.log(.info, "backup", "已读取备份文件：\(data.count) 字节，\(encrypted ? "加密" : "明文")", memory: false)
+            let name = url.lastPathComponent
+            let backup: LedgerBackup? = encrypted ? nil : try BackupService.decode(data)
+            // 等选择器完全收起再弹密码 / 确认页，避免 sheet 被正在消失的选择器吞掉
+            Task { @MainActor in
+                try? await Task.sleep(nanoseconds: 450_000_000)
+                if let backup {
+                    pendingImport = ImportedBackup(fileName: name, backup: backup)
+                } else {
+                    pendingEncrypted = EncryptedImport(fileName: name, data: data)
+                }
+            }
+        } catch {
+            BillImportCenter.cleanupInboxCopy(url)
+            RunLog.shared.log(.error, "backup", "读取备份失败：\(error.localizedDescription)", memory: false)
+            Task { @MainActor in
+                try? await Task.sleep(nanoseconds: 450_000_000)
+                showAlert("无法导入", error.localizedDescription)
+            }
+        }
+    }
+
     private func promptForPassword() {
         passwordSetupPrompt = "自动备份已开启加密，需要在本机保存一个备份密码才能自动加密备份。"
         showPasswordSetup = true
@@ -296,7 +313,7 @@ struct BackupSettingsView: View {
                 Label("导出备份到文件…", systemImage: "square.and.arrow.up.on.square")
             }
             Button {
-                showImporter = true
+                openRestorePicker()
             } label: {
                 Label("从备份恢复…", systemImage: "arrow.down.doc")
             }

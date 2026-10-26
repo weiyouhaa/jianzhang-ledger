@@ -85,7 +85,7 @@ struct SettingsView: View {
                 default: break
                 }
             }
-            // 账单导入的文件选择器 / 预览 / 提示挂在 TabView 层的 BillImportHost 上（2.0 (11)）：
+            // 账单导入：选择器用 UIKit 直接弹出（2.0 (12)），预览 / 提示挂在 TabView 层的 BillImportHost 上：
             // 之前与本页的密码 sheet、多个 alert 挂在同一个 Form 上，且在选择器回调里同步弹预览，选完 Excel 会「没反应」
             .alert("账单导入", isPresented: Binding(get: { importMessage != nil }, set: { if !$0 { importMessage = nil } })) {
                 Button("好", role: .cancel) {}
@@ -338,8 +338,7 @@ struct SettingsView: View {
                 .accessibilityIdentifier("settings-run-log")
             }
             Button {
-                RunLog.shared.log(.info, "import", "打开文件选择器", memory: false)
-                BillImportCenter.shared.showPicker = true
+                BillImportCenter.shared.openPicker()
             } label: {
                 Label("导入支付宝 / 微信账单", systemImage: "square.and.arrow.down.on.square")
             }

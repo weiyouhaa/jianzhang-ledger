@@ -219,5 +219,19 @@ if let plistData = try? Data(contentsOf: URL(fileURLWithPath: "Config/Info.plist
     print("（未找到 Config/Info.plist，跳过文档类型检查）")
 }
 
+// 2.0 (12)：iOS 27.2 beta 上 SwiftUI .fileImporter 选完文件无回调，所有文件选择统一走 UIKit DocumentPicker
+if let e = FileManager.default.enumerator(atPath: "Ledger") {
+    var offenders: [String] = []
+    var pickerUsers = 0
+    for case let path as String in e where path.hasSuffix(".swift") {
+        guard let src = try? String(contentsOfFile: "Ledger/" + path, encoding: .utf8) else { continue }
+        let code = src.split(separator: "\n").filter { !$0.trimmingCharacters(in: .whitespaces).hasPrefix("//") && !$0.trimmingCharacters(in: .whitespaces).hasPrefix("///") }.joined(separator: "\n")
+        if code.contains(".fileImporter(") { offenders.append(path) }
+        if code.contains("DocumentPicker.present(") { pickerUsers += 1 }
+    }
+    expect(offenders.isEmpty, "源码中没有 SwiftUI .fileImporter（\(offenders)）")
+    expect(pickerUsers >= 2, "账单导入与备份恢复都使用 UIKit DocumentPicker（\(pickerUsers) 处）")
+}
+
 print(failures == 0 ? "ALL PASSED" : "\(failures) FAILED")
 exit(failures == 0 ? 0 : 1)

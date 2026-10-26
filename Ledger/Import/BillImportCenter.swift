@@ -13,7 +13,6 @@ import UniformTypeIdentifiers
 final class BillImportCenter: ObservableObject {
     static let shared = BillImportCenter()
 
-    @Published var showPicker = false
     @Published var session: ImportSession?
     @Published var message: String?
     @Published var isLoading = false
@@ -21,7 +20,8 @@ final class BillImportCenter: ObservableObject {
     var previewAppeared = false
 
     /// 从其他 App 收到、但当前上锁 / 处于防窥模式而暂未处理的文件（仅内存，10 分钟有效）
-    private var pending: (data: Data, fileName: String, receivedAt: Date)?
+    /// fromPicker：设置页里主动选择的文件，按当前账本导入（与 2.0 (11) 之前一致，防窥模式下导入防窥账本）
+    private var pending: (data: Data, fileName: String, receivedAt: Date, fromPicker: Bool)?
     private static let pendingTTL: TimeInterval = 600
 
     /// 文件选择器允许的类型：显式列出 XLSX / XLS / CSV / ZIP，再兜底 .data，保证任何账单文件都能被选中
@@ -40,32 +40,32 @@ final class BillImportCenter: ObservableObject {
 
     // MARK: - 入口
 
-    /// 设置页的文件选择器结果
-    func handlePicked(_ result: Result<URL, Error>) {
-        switch result {
-        case .success(let url):
-            RunLog.shared.log(.info, "import", "选择器返回文件（.\(Self.ext(url))）", memory: false)
-            load(url: url, origin: "picker")
-        case .failure(let error):
-            RunLog.shared.log(.warn, "import", "选择器失败：\(error.localizedDescription)", memory: false)
-            present(message: "无法打开所选文件：\(error.localizedDescription)")
-        }
+    /// 设置页「导入账单」：用 UIKit 选择器选文件，选中后走与「共享 / 用其他应用打开」完全相同的路径
+    func openPicker() {
+        RunLog.shared.log(.info, "import", "设置页点击导入，打开 UIKit 文件选择器", memory: false)
+        let ok = DocumentPicker.present(types: Self.pickerTypes, tag: "import", onPick: { [weak self] url in
+            RunLog.shared.log(.info, "import", "选择器文件转入共享导入路径（.\(Self.ext(url))）", memory: false)
+            self?.receive(url: url, isLocked: false, fromPicker: true)
+        }, onCancel: {})
+        if !ok { present(message: "无法打开文件选择器，请返回上一页后重试。") }
     }
 
     /// 其他 App「用其他应用打开 / 共享」过来的文件（onOpenURL）
-    func receive(url: URL, isLocked: Bool) {
-        RunLog.shared.log(.info, "import", "收到外部文件（.\(Self.ext(url))）", memory: false)
+    func receive(url: URL, isLocked: Bool, fromPicker: Bool = false) {
+        RunLog.shared.log(.info, "import", "\(fromPicker ? "选择器文件" : "收到外部文件")（.\(Self.ext(url))）", memory: false)
+        if fromPicker { isLoading = true }
         Task {
             do {
                 let data = try await Self.readCoordinated(url)
                 Self.cleanupInboxCopy(url)
-                pending = (data, url.lastPathComponent, Date())
+                pending = (data, url.lastPathComponent, Date(), fromPicker)
                 consumePendingIfPossible(isLocked: isLocked)
             } catch {
                 Self.cleanupInboxCopy(url)
+                isLoading = false
                 RunLog.shared.log(.error, "import", "外部文件读取失败：\(error.localizedDescription)", memory: false)
                 // 上锁 / 防窥时不提示，避免在锁屏或防窥账本里暴露真实导入行为
-                if !isLocked && !SessionManager.shared.isDecoy {
+                if fromPicker || (!isLocked && !SessionManager.shared.isDecoy) {
                     present(message: "无法读取这个文件：\(error.localizedDescription)")
                 }
             }
@@ -77,32 +77,20 @@ final class BillImportCenter: ObservableObject {
         guard let p = pending else { return }
         if Date().timeIntervalSince(p.receivedAt) > Self.pendingTTL {
             pending = nil
+            isLoading = false
             RunLog.shared.log(.info, "import", "排队的外部文件已过期，丢弃", memory: false)
             return
         }
-        guard !isLocked, !SessionManager.shared.isDecoy, !ScreenshotDemo.isActive else {
+        guard !isLocked, p.fromPicker || !SessionManager.shared.isDecoy, !ScreenshotDemo.isActive else {
+            isLoading = false
             RunLog.shared.log(.info, "import", "外部文件排队等待真实解锁", memory: false)
             return
         }
         pending = nil
-        parse(data: p.data, fileName: p.fileName, origin: "open-in")
+        parse(data: p.data, fileName: p.fileName, origin: p.fromPicker ? "picker" : "open-in")
     }
 
     // MARK: - 读取 / 解析
-
-    private func load(url: URL, origin: String) {
-        isLoading = true
-        Task {
-            do {
-                let data = try await Self.readCoordinated(url)
-                parse(data: data, fileName: url.lastPathComponent, origin: origin)
-            } catch {
-                isLoading = false
-                RunLog.shared.log(.error, "import", "读取失败（\(origin)）：\(error.localizedDescription)", memory: false)
-                present(message: "无法读取这个文件：\(error.localizedDescription)\n如果文件在 iCloud 云盘中，请确认已下载完成后重试。")
-            }
-        }
-    }
 
     private func parse(data: Data, fileName: String, origin: String) {
         isLoading = true
@@ -199,10 +187,10 @@ final class BillImportCenter: ObservableObject {
         }.value
     }
 
-    /// 「拷贝到简账」时系统放在 Documents/Inbox 或 tmp/*-Inbox 的副本，读完即删
+    /// 「拷贝到简账」/ 选择器 asCopy 时系统放在 Documents/Inbox 或 tmp/*-Inbox 的副本，读完即删
     nonisolated static func cleanupInboxCopy(_ url: URL) {
-        let path = url.standardizedFileURL.path
-        let home = URL(fileURLWithPath: NSHomeDirectory()).standardizedFileURL.path
+        let path = url.resolvingSymlinksInPath().standardizedFileURL.path
+        let home = URL(fileURLWithPath: NSHomeDirectory()).resolvingSymlinksInPath().standardizedFileURL.path
         guard path.hasPrefix(home), path.contains("/Inbox/") || path.contains("-Inbox/") else { return }
         try? FileManager.default.removeItem(at: url)
     }
@@ -220,19 +208,6 @@ struct BillImportHost: View {
 
     var body: some View {
         ZStack {
-            Color.clear
-                .fileImporter(isPresented: $center.showPicker, allowedContentTypes: BillImportCenter.pickerTypes,
-                              allowsMultipleSelection: false,
-                              onCompletion: { result in
-                                  switch result {
-                                  case .success(let urls):
-                                      if let url = urls.first { center.handlePicked(.success(url)) }
-                                      else { center.handlePickerCancelled() }
-                                  case .failure(let error):
-                                      center.handlePicked(.failure(error))
-                                  }
-                              },
-                              onCancellation: { center.handlePickerCancelled() })
             Color.clear
                 .sheet(item: $center.session) { session in
                     ImportPreviewView(session: session) { count in
