@@ -222,7 +222,16 @@ struct BillImportHost: View {
         ZStack {
             Color.clear
                 .fileImporter(isPresented: $center.showPicker, allowedContentTypes: BillImportCenter.pickerTypes,
-                              onCompletion: { result in center.handlePicked(result) },
+                              allowsMultipleSelection: false,
+                              onCompletion: { result in
+                                  switch result {
+                                  case .success(let urls):
+                                      if let url = urls.first { center.handlePicked(.success(url)) }
+                                      else { center.handlePickerCancelled() }
+                                  case .failure(let error):
+                                      center.handlePicked(.failure(error))
+                                  }
+                              },
                               onCancellation: { center.handlePickerCancelled() })
             Color.clear
                 .sheet(item: $center.session) { session in
