@@ -26,6 +26,8 @@ struct CategoryIcon: View {
 struct RecordRow: View {
     let record: LedgerRecord
     var showDate: Bool = false
+    /// 账户详情：该条记录发生后的余额文案（如「余额 ¥1,234.56」）；首页明细不传
+    var runningBalanceText: String? = nil
 
     var body: some View {
         HStack(spacing: 12) {
@@ -73,6 +75,13 @@ struct RecordRow: View {
                 Text(showDate ? DateText.monthDayTime.string(from: record.date) : DateText.time.string(from: record.date))
                     .font(.caption2)
                     .foregroundStyle(.secondary)
+                if let runningBalanceText {
+                    Text(runningBalanceText)
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.7)
+                }
             }
         }
         .padding(.vertical, 2)

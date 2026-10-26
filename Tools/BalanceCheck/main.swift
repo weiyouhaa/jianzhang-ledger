@@ -126,5 +126,46 @@ do {
 }
 
 
+// MARK: - 账户明细「当条之后余额」(2.0 (14))
+
+do {
+    let d1 = day("2026-01-01")
+    let d2 = day("2026-01-02")
+    // 同日两条：id 字典序 a < b，先扣 100 再入 50
+    let entries: [(id: String, date: Date, effect: Double)] = [
+        ("b", d1, 50),   // income +50（故意乱序传入）
+        ("a", d1, -100), // expense -100
+        ("c", d2, -200),
+    ]
+    let map = BalanceMath.runningBalances(initialBalance: 1000, entries: entries)
+    check(near(map["a"] ?? -1, 900), "同日先 a：1000−100 → 900（实际 \(map["a"] ?? -1)）")
+    check(near(map["b"] ?? -1, 950), "同日后 b：900+50 → 950（实际 \(map["b"] ?? -1)）")
+    check(near(map["c"] ?? -1, 750), "次日 c：950−200 → 750（实际 \(map["c"] ?? -1)）")
+    // 最终应等于 initial + Σ effects
+    let final = 1000 + entries.reduce(0) { $0 + $1.effect }
+    check(near(map["c"] ?? -1, final), "最后一条之后余额 = 初始+全部效果")
+}
+
+do {
+    // 负债：初始欠 3000（initial −3000）；还款转入 +1000 → −2000；校准 +50 → −1950
+    let d1 = day("2026-03-01")
+    let d2 = day("2026-03-02")
+    let map = BalanceMath.runningBalances(
+        initialBalance: -3000,
+        entries: [
+            ("repay", d1, BalanceMath.effect(kind: .transfer, amount: 1000, fee: 0, isSource: false, isTarget: true)),
+            ("adj", d2, BalanceMath.effect(kind: .adjustment, amount: 50, fee: 0, isSource: true, isTarget: false)),
+        ])
+    check(near(map["repay"] ?? 0, -2000), "负债还款后余额 −2000（欠 2000）")
+    check(near(map["adj"] ?? 0, -1950), "负债校准后余额 −1950（欠 1950）")
+}
+
+do {
+    // 空列表
+    check(BalanceMath.runningBalances(initialBalance: 42, entries: []).isEmpty, "无记录 → 空 map")
+}
+
+
+
 print(failures == 0 ? "ALL PASS" : "\(failures) FAILED")
 exit(failures == 0 ? 0 : 1)

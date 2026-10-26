@@ -63,6 +63,26 @@ enum BalanceMath {
         case .adjustment, .contribution: return nil
         }
     }
+
+    /// 每条记录发生后的账户余额（含该条效果）。按 date 升序，同刻按 id 稳定排序；O(n log n) 排序 + O(n) 累加。
+    /// - Returns: id → 当条之后的余额（分位四舍五入到分）
+    static func runningBalances(
+        initialBalance: Double,
+        entries: [(id: String, date: Date, effect: Double)]
+    ) -> [String: Double] {
+        let sorted = entries.sorted { a, b in
+            if a.date != b.date { return a.date < b.date }
+            return a.id < b.id
+        }
+        var running = initialBalance
+        var result: [String: Double] = [:]
+        result.reserveCapacity(sorted.count)
+        for e in sorted {
+            running += e.effect
+            result[e.id] = (running * 100).rounded() / 100
+        }
+        return result
+    }
 }
 
 /// 「信用卡还款计入支出」（按模式隔离：真实 / 防窥各一份）

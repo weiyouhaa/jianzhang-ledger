@@ -24,7 +24,11 @@ struct AccountDetailView: View {
 
     var body: some View {
         let _ = records.count   // 记录变化时刷新余额
-        let entries = account.allEntries.sorted { $0.date > $1.date }
+        let entries = account.allEntries.sorted {
+            if $0.date != $1.date { return $0.date > $1.date }
+            return $0.id.uuidString > $1.id.uuidString
+        }
+        let afterByID = runningBalanceAfterByID(entries: account.allEntries)
         let balance = account.balance()
         let points = balanceTrend(entries)
 
@@ -69,7 +73,11 @@ struct AccountDetailView: View {
                 } else {
                     ForEach(entries) { r in
                         Button { editingRecord = r } label: {
-                            RecordRow(record: r, showDate: true)
+                            RecordRow(
+                                record: r,
+                                showDate: true,
+                                runningBalanceText: runningBalanceCaption(afterByID[r.id] ?? account.initialBalance)
+                            )
                         }
                         .buttonStyle(.plain)
                     }
@@ -202,6 +210,29 @@ struct AccountDetailView: View {
     }
 
     // MARK: - 走势
+
+    /// 预计算每条记录发生后的余额（O(n log n)），列表展示用
+    private func runningBalanceAfterByID(entries: [LedgerRecord]) -> [UUID: Double] {
+        let payload = entries.map { (id: $0.id.uuidString, date: $0.date, effect: $0.effect(on: account)) }
+        let byString = BalanceMath.runningBalances(initialBalance: account.initialBalance, entries: payload)
+        var map: [UUID: Double] = [:]
+        map.reserveCapacity(entries.count)
+        for r in entries {
+            if let v = byString[r.id.uuidString] { map[r.id] = v }
+        }
+        return map
+    }
+
+    /// 与账户头部口径一致：资产显示「余额」；负债显示「欠款」或「溢缴」
+    private func runningBalanceCaption(_ signed: Double) -> String {
+        if account.type.isLiability {
+            if signed <= 0 {
+                return "欠款 " + Money.masked(abs(signed), hidden: hideAmounts)
+            }
+            return "溢缴 " + Money.masked(signed, hidden: hideAmounts)
+        }
+        return "余额 " + Money.masked(signed, hidden: hideAmounts)
+    }
 
     /// 每笔记录后的余额（负债显示为欠款）
     private func balanceTrend(_ entriesDesc: [LedgerRecord]) -> [BalancePoint] {
