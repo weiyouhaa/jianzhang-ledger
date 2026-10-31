@@ -185,7 +185,7 @@ enum ModelPromptBuilder {
         - 还款/转账：from=付款账户，to=被还款卡或收款账户，fromTail/toTail=对应卡号末 4 位，banks=截图中的银行；要同银行同卡种，不确定就留空。
         - 多笔按从上到下各输出一次。★ 表示大字。没有的字段留空。
         """
-        if level == .normal { s += "\n- date 原样抄写日期时间文字。" }
+        if level == .normal { s += "\n- date 原样抄写交易时间文字（不要抄顶部状态栏的时钟、单号）。" }
         s += "\n分类（category 只能选）：支出 \(expense.joined(separator: "、"))；收入 \(income.joined(separator: "、"))。还款不填分类。"
         s += "\n账户（account/from/to 只能选，或留空）：\(accts.isEmpty ? "无" : accts.joined(separator: "、"))"
         return s

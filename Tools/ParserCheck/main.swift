@@ -165,9 +165,9 @@ checkAll("银行短信两条", [
 ])
 
 // 微信收款到账（收入）、退款（收入）、普通支付（支出）
-checkAll("微信收款", [OCRLine("微信支付"), OCRLine("今天 上午10:02"), OCRLine("二维码收款到账"), OCRLine("+¥58.00"),
+checkAll("微信收款", [OCRLine("微信支付"), OCRLine("今天 上午8:02"), OCRLine("二维码收款到账"), OCRLine("+¥58.00"),
                     OCRLine("付款方 张三")],
-         [Expect(amount: 58, income: true, merchant: "张三", date: "2026-10-18 10:02")])
+         [Expect(amount: 58, income: true, merchant: "张三", date: "2026-10-18 08:02")])
 checkAll("退款", [OCRLine("退款成功"), OCRLine("¥99.00"), OCRLine("退款方式 原路退回 花呗")],
          [Expect(amount: 99, income: true, category: "退款")])
 checkAll("对方已收款=支出", [OCRLine("支付成功,对方已收款"), OCRLine("¥8.00"), OCRLine("收款方 李记早点")],
@@ -367,9 +367,9 @@ checkW("支付宝提现", ["账单详情", "余额提现", "-500.00", "交易成
 checkW("转入余额宝", ["账单详情", "转入余额宝", "-2,000.00", "交易成功", "付款方式 招商银行储蓄卡(1357)"],
        W(amount: 2000, transfer: ("debit", "?"), transferTail: "1357", toName: "余额宝"))
 checkW("花呗还款", ["账单详情", "花呗还款", "-1,200.00", "还款成功", "付款方式 余额宝"], W(amount: 1200, repay: true))
-checkList("支付宝账单列表", ["账单", "2026年10月", "支出 ¥2,000.00 收入 ¥100.00", "示例奶茶店", "-18.00", "今天 10:05", "示例地铁", "-4.00", "昨天 08:12",
+checkList("支付宝账单列表", ["账单", "2026年10月", "支出 ¥2,000.00 收入 ¥100.00", "示例奶茶店", "-18.00", "今天 08:05", "示例地铁", "-4.00", "昨天 08:12",
                           "示例朋友", "+100.00", "10-16 19:30"],
-          [W(amount: 18, category: "餐饮", date: "2026-10-18 10:05"), W(amount: 4, category: "交通", date: "2026-10-17 08:12"),
+          [W(amount: 18, category: "餐饮", date: "2026-10-18 08:05"), W(amount: 4, category: "交通", date: "2026-10-17 08:12"),
            W(amount: 100, income: true, date: "2026-10-16 19:30")])
 
 // --- 支付宝 · 英文 ---
@@ -393,9 +393,9 @@ checkW("Alipay Yu'e Bao", ["Bill Details", "Transfer to Yu'e Bao", "-2,000.00", 
        W(amount: 2000, transfer: ("debit", "?"), transferTail: "1357", toName: "余额宝"))
 checkW("Alipay Huabei Repayment", ["Bill Details", "Huabei Repayment", "-1,200.00", "Successful", "Payment Method", "Yu'e Bao", "Alipay"],
        W(amount: 1200, repay: true))
-checkList("Alipay Bills", ["Bills", "Oct 2026", "Expenses ¥2,000.00 Income ¥100.00", "Sample Milk Tea", "-18.00", "Today 10:05", "Sample Metro", "-4.00",
+checkList("Alipay Bills", ["Bills", "Oct 2026", "Expenses ¥2,000.00 Income ¥100.00", "Sample Milk Tea", "-18.00", "Today 08:05", "Sample Metro", "-4.00",
                           "Yesterday 08:12", "Sample Friend", "+100.00", "Oct 16 7:30 PM", "Alipay"],
-          [W(amount: 18, category: "餐饮", date: "2026-10-18 10:05"), W(amount: 4, category: "交通", date: "2026-10-17 08:12"),
+          [W(amount: 18, category: "餐饮", date: "2026-10-18 08:05"), W(amount: 4, category: "交通", date: "2026-10-17 08:12"),
            W(amount: 100, income: true, date: "2026-10-16 19:30")])
 checkList("Alipay Bills（名称与金额同一行）", ["Bills", "Sample Bakery -9.90", "Oct 17 07:50", "Sample Bus Line -2.00", "Oct 17 08:00"],
           [W(amount: 9.9, merchant: "Sample Bakery", category: "餐饮", date: "2026-10-17 07:50"), W(amount: 2, date: "2026-10-17 08:00")])
@@ -664,6 +664,104 @@ var g4 = g2; g4.amount = 50
 expect(OrderAmountGuard.filter([g1, g4], lines: ["-¥34.56", "-¥50.00"]).count == 2, "2.0(8) 兜底：金额无关的两笔都保留")
 expect(ReceiptParser.unglue("Order amount¥40.23") == "Order amount ¥40.23" && ReceiptParser.unglue("HK$12.00") == "HK$12.00",
        "2.0(8) 粘连：Order amount¥ 拆开，HK$ 不拆")
+
+// MARK: - 2.0 (19) 时间识别：参考时间 = 截图时间；状态栏 / 单号 / 未来时间不算；找不到时用截图时间
+do {
+    let shot = cal.date(from: DateComponents(year: 2026, month: 10, day: 20, hour: 21, minute: 30))!   // 截图时间
+    func d(_ lines: [String], ref: Date = shot) -> String { fmt(ReceiptParser.date(lines: lines, now: ref, calendar: cal)) }
+    // 状态栏时钟不是交易时间
+    expect(d(["21:30", "支付成功", "¥12.00"]) == "nil", "2.0(19) 单独的状态栏「21:30」不当交易时间")
+    // 「今天 / 昨天」按截图那天算，而不是识图的那天
+    expect(d(["昨天 19:05", "¥12.00"]) == "2026-10-19 19:05", "2.0(19) 「昨天」相对截图时间（\(d(["昨天 19:05"])))")
+    expect(d(["今天 上午8:10"]) == "2026-10-20 08:10", "2.0(19) 「今天」相对截图时间")
+    // 晚于截图时间的完整日期不要；同一屏有多个日期时优先「支付时间」那一行
+    expect(d(["有效期至 2027-03-01", "支付时间 2026-10-19 12:01:02"]) == "2026-10-19 12:01", "2.0(19) 未来的有效期跳过，取支付时间")
+    expect(d(["下单时间 2026-10-18 09:00", "创建 2026-10-17 08:00"]) == "2026-10-18 09:00", "2.0(19) 带标签的行优先")
+    expect(d(["2026-10-25 10:00"]) == "nil", "2.0(19) 晚于截图 5 天的日期不要（\(d(["2026-10-25 10:00"])))")
+    expect(d(["2026-10-20 21:40"]) == "2026-10-20 21:40", "2.0(19) 晚 10 分钟在容差内（时钟误差）")
+    expect(d(["生产日期 2010-01-01 08:00"]) == "nil", "2.0(19) 10 年以前的日期不要")
+    // 订单号 / 流水号里的数字串不是日期
+    // 合成单号（分段拼接，避免源码里出现长数字串）
+    let fakeNo = "订单号 " + "4200" + "002026.10.19" + "1234" + "56"
+    expect(d([fakeNo]) == "nil", "2.0(19) 单号里的「2026.10.19」不当日期（\(d([fakeNo])))")
+    expect(d(["交易单号 12026-10-19 88"]) == "nil", "2.0(19) 前面紧挨数字的不当日期")
+    // 没有年份：按截图年份推断；跨年（1 月初看到 12 月）是去年
+    let jan = cal.date(from: DateComponents(year: 2027, month: 1, day: 2, hour: 10))!
+    expect(d(["12月31日 23:10"], ref: jan) == "2026-12-31 23:10", "2.0(19) 1 月初的「12月31日」是去年")
+    expect(d(["12-31 23:10"], ref: jan) == "2026-12-31 23:10", "2.0(19) 1 月初的「12-31」是去年")
+    expect(d(["10/19 18:20"]) == "2026-10-19 18:20", "2.0(19) 「10/19 18:20」")
+    expect(d(["10月20日"]) == "2026-10-20 12:00", "2.0(19) 只有日期（当天，中午早于截图）按中午")
+    let morning = cal.date(from: DateComponents(year: 2026, month: 10, day: 20, hour: 9, minute: 5))!
+    expect(d(["10月20日"], ref: morning) == "2026-10-20 09:05", "2.0(19) 只有日期（当天，截图在中午前）不晚于截图")
+    // 12 / 24 小时制
+    expect(d(["2026-10-19 下午3:05"]) == "2026-10-19 15:05", "2.0(19) 完整日期 + 下午")
+    expect(d(["2026/10/19 3:05 PM"]) == "2026-10-19 15:05", "2.0(19) 完整日期 + PM")
+    expect(d(["2026-10-19 12:05 AM"]) == "2026-10-19 00:05", "2.0(19) 12:05 AM = 0:05")
+    expect(d(["2026-10-19T14:03:22"]) == "2026-10-19 14:03", "2.0(19) ISO 带 T")
+    // 英文
+    expect(d(["Payment Time", "Oct 19, 2026 14:03"]) == "2026-10-19 14:03", "2.0(19) Oct 19, 2026 14:03")
+    expect(d(["October 19, 2026 at 2:03 PM"]) == "2026-10-19 14:03", "2.0(19) October 19, 2026 at 2:03 PM")
+    expect(d(["19 Oct 2026 14:03"]) == "2026-10-19 14:03", "2.0(19) 19 Oct 2026 14:03")
+    expect(d(["Oct 19 7:30 PM"]) == "2026-10-19 19:30", "2.0(19) Oct 19 7:30 PM（无年份）")
+    expect(d(["Transaction Date 10/19/2026 09:15"]) == "2026-10-19 09:15", "2.0(19) 10/19/2026（美式）")
+    expect(d(["19/10/2026 09:15"]) == "2026-10-19 09:15", "2.0(19) 19/10/2026（日在前）")
+    expect(d(["You may 5 times"]) == "nil", "2.0(19) 英文单词 may 不当月份")
+    expect(d(["Dec 2026"]) == "nil", "2.0(19) 只有月份年份不当日期")
+    // 只有时分：必须带标签，按截图那天；晚于截图则是前一天
+    expect(d(["支付时间 18:42"]) == "2026-10-20 18:42", "2.0(19) 「支付时间 18:42」按截图那天")
+    expect(d(["支付时间", "23:10"]) == "2026-10-19 23:10", "2.0(19) 晚于截图的时分是前一天")
+    expect(d(["Payment Time 6:42 PM"]) == "2026-10-20 18:42", "2.0(19) Payment Time 6:42 PM")
+    // 微信 / 支付宝 / 云闪付详情页：整页解析，参考时间 = 截图时间
+    let wx = ReceiptParser.parse(lines: ["21:30", "示例面馆", "-26.00", "当前状态 支付成功", "支付时间 2026年10月19日 12:30:05", "支付方式 零钱"], now: shot, calendar: cal)
+    expect(fmt(wx.date) == "2026-10-19 12:30", "2.0(19) 微信详情：支付时间（不是状态栏）\(fmt(wx.date))")
+    let ali = ReceiptParser.parse(lines: ["21:30", "账单详情", "示例便利店", "-12.50", "交易成功", "创建时间 2026-10-19 08:15:00", "订单号 " + String(repeating: "2026", count: 3) + "0099"], now: shot, calendar: cal)
+    expect(fmt(ali.date) == "2026-10-19 08:15", "2.0(19) 支付宝详情：创建时间 \(fmt(ali.date))")
+    let up = ReceiptParser.parse(lines: ["21:30", "交易详情", "示例超市", "-¥45.60", "交易时间", "2026-10-19 11:08:41", "订单编号 " + "2026" + "1019" + "1108" + "41" + "0001"], now: shot, calendar: cal)
+    expect(fmt(up.date) == "2026-10-19 11:08", "2.0(19) 云闪付详情：交易时间 \(fmt(up.date))")
+    let none = ReceiptParser.parse(lines: ["21:30", "支付成功", "示例小店", "¥9.00"], now: shot, calendar: cal)
+    expect(none.date == nil, "2.0(19) 只有状态栏时钟：识别不到交易时间（交给截图时间兜底）")
+}
+
+// 状态栏时钟：顶部、短；带位置信息时只看 midY < 0.06 的
+do {
+    let sb = ReceiptParser.statusBarClock([OCRLine("21:30 5G 80", midY: 0.02, height: 0.015), OCRLine("支付成功", midY: 0.2)])
+    expect(sb?.hour == 21 && sb?.minute == 30, "2.0(19) 状态栏时钟 21:30")
+    expect(ReceiptParser.statusBarClock([OCRLine("支付成功", midY: 0.2), OCRLine("21:30", midY: 0.5)]) == nil, "2.0(19) 中间的时分不是状态栏")
+    expect(ReceiptParser.statusBarClock([OCRLine("9:41")])?.hour == 9, "2.0(19) 无位置信息时看第一行")
+    expect(ReceiptParser.statusBarClock([OCRLine("12:30 支付成功 示例商户名称很长的一行文字")]) == nil, "2.0(19) 带整句的不是状态栏")
+}
+
+// 截图时间兜底：拍摄时间 → 状态栏 → 现在
+do {
+    let nowT = cal.date(from: DateComponents(year: 2026, month: 10, day: 22, hour: 10))!
+    let shot = cal.date(from: DateComponents(year: 2026, month: 10, day: 20, hour: 21, minute: 30))!
+    let cap = CaptureTime(date: shot, source: .screenshot)
+    let fb = CaptureTime.fallback(capture: cap, statusBar: (9, 41), now: nowT, calendar: cal)
+    expect(fb == cap, "2.0(19) 兜底优先截图拍摄时间")
+    let fb2 = CaptureTime.fallback(capture: nil, statusBar: (9, 41), now: nowT, calendar: cal)
+    expect(fb2.source == .statusBar && fmt(fb2.date) == "2026-10-22 09:41", "2.0(19) 没有拍摄时间用状态栏（今天）")
+    let fb3 = CaptureTime.fallback(capture: nil, statusBar: (23, 5), now: nowT, calendar: cal)
+    expect(fb3.source == .statusBar && fmt(fb3.date) == "2026-10-21 23:05", "2.0(19) 状态栏晚于现在 → 昨天")
+    let fb4 = CaptureTime.fallback(capture: nil, statusBar: nil, now: nowT, calendar: cal)
+    expect(fb4.source == .now && fb4.date == nowT, "2.0(19) 都没有：现在")
+    let future = CaptureTime(date: nowT.addingTimeInterval(86_400), source: .screenshot)
+    expect(CaptureTime.fallback(capture: future, statusBar: nil, now: nowT, calendar: cal).source == .now, "2.0(19) 未来的拍摄时间不可信")
+    expect(CaptureTime.reference(capture: cap, now: nowT) == shot && CaptureTime.reference(capture: nil, now: nowT) == nowT, "2.0(19) 参考时间")
+    let ok = CaptureTime.resolve(recognized: shot.addingTimeInterval(-3600), reference: shot, fallback: cap)
+    expect(ok.source == .recognized, "2.0(19) 合理的识别时间直接用")
+    let bad = CaptureTime.resolve(recognized: shot.addingTimeInterval(3 * 3600), reference: shot, fallback: cap)
+    expect(bad == cap, "2.0(19) 晚于截图的识别时间弃用，改用截图时间")
+    expect(CaptureTime.resolve(recognized: nil, reference: shot, fallback: cap) == cap, "2.0(19) 没识别到 → 截图时间")
+    expect(TimeSource.screenshot.hint == "时间取自截图" && TimeSource.recognized.hint == nil, "2.0(19) 来源提示文字")
+    // 元数据时间解析：EXIF（本地时间 / 带偏移）、XMP ISO
+    let hk = TimeZone(identifier: "Asia/Shanghai")!
+    expect(fmt(CaptureTime.parseMetadataDate("2026:10:20 21:30:05", timeZone: hk)) == "2026-10-20 21:30", "2.0(19) EXIF 本地时间")
+    expect(fmt(CaptureTime.parseMetadataDate("2026:10:20 13:30:05", offset: "+00:00", timeZone: hk)) == "2026-10-20 21:30", "2.0(19) EXIF + OffsetTimeOriginal")
+    expect(fmt(CaptureTime.parseMetadataDate("2026-10-20T21:30:05+08:00", timeZone: TimeZone(secondsFromGMT: 0)!)) == "2026-10-20 21:30", "2.0(19) XMP ISO 带时区")
+    expect(fmt(CaptureTime.parseMetadataDate("2026-10-20T13:30:05.120Z", timeZone: hk)) == "2026-10-20 21:30", "2.0(19) ISO Z")
+    expect(CaptureTime.parseMetadataDate("0000:00:00 00:00:00", timeZone: hk) == nil, "2.0(19) 空 EXIF 日期")
+    expect(CaptureTime.parseMetadataDate("abc", timeZone: hk) == nil, "2.0(19) 非日期文本")
+}
 
 print(failures == 0 ? "ALL PASSED" : "\(failures) FAILED")
 exit(failures == 0 ? 0 : 1)

@@ -68,6 +68,8 @@ struct ReviewItem: Identifiable {
     var toAccountID: UUID? = nil
     var date: Date
     var dateRecognized: Bool
+    /// 时间来源（截图文字 / 截图拍摄时间 / 状态栏 / 现在）：不是识别到的时在时间后面小字注明，方便修改
+    var dateSource: TimeSource = .recognized
     var isDuplicate = false
     /// 重复项默认跳过；用户可改为仍然保存
     var saveDuplicate = false
@@ -127,10 +129,20 @@ enum ReviewFormatter {
             accountName: isTransfer
                 ? "\(account?.name ?? "未选付款账户") → \(toAccount?.name ?? (isRepay ? "未选信用卡" : "未选账户"))"
                 : (account?.name ?? "未指定账户"),
-            timeText: item.dateRecognized || item.isManual ? DateText.monthDayTime.string(from: item.date) : "时间未识别（按现在）",
+            timeText: timeText(item),
             duplicate: item.isDuplicate ? (item.saveDuplicate ? .saveAnyway : .skip) : .none,
             isManual: item.isManual
         )
+    }
+
+    /// 识别到的 / 手动的只显示时间；截图时间、状态栏兜底的加一句来源；完全没有则「时间未识别（按现在）」
+    static func timeText(_ item: ReviewItem) -> String {
+        let text = DateText.monthDayTime.string(from: item.date)
+        if item.dateRecognized || item.isManual { return text }
+        switch item.dateSource {
+        case .now: return TimeSource.now.hint ?? text
+        default: return item.dateSource.hint.map { "\(text)（\($0)）" } ?? text
+        }
     }
 
     /// 一行文字摘要（选项标题 / 对话框）

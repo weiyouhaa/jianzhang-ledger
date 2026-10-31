@@ -504,5 +504,14 @@ check(rules8.count == 1, "2.0(8) 规则：云闪付详情页 1 笔（实际 \(ru
 check(o8two.receipts.count == 1 && o8two.receipts.first?.amount == 34.56,
       "2.0(8) 合并：模型给两笔（含订单金额 40.23）→ 只留实付 34.56（实际 \(o8two.receipts.map { $0.amount ?? -1 })）")
 
+// 2.0 (19) 模型抄来的时间晚于截图时间（例如抄了有效期 / 单号）→ 不用，回到规则识别的支付时间
+let t19 = ["9:00", "支付成功", "示例小店", "-¥18.00", "支付时间 2026-10-17 11:08:41", "有效期至 2026-12-01 00:00"]
+let t19Out = mergeWith(t19, [ModelTransaction(amount: 18, kind: "expense", merchant: "示例小店", categoryName: "餐饮",
+                                              accountHint: "微信", dateText: "2026-12-01 00:00")])
+check(fmt(t19Out.receipts.first?.date) == "2026-10-17 11:08", "2.0(19) 模型给的未来时间弃用，取支付时间（\(fmt(t19Out.receipts.first?.date))）")
+let t19b = mergeWith(["9:00", "支付成功", "示例小店", "-¥18.00"], [ModelTransaction(amount: 18, kind: "expense", merchant: "示例小店",
+                                              categoryName: "餐饮", accountHint: "微信", dateText: "今天 23:00")])
+check(t19b.receipts.first?.date == nil, "2.0(19) 晚于截图的「今天 23:00」不当交易时间（\(fmt(t19b.receipts.first?.date))）")
+
 print(failures == 0 ? "ALL PASSED" : "\(failures) FAILED")
 exit(failures == 0 ? 0 : 1)

@@ -15,6 +15,8 @@ struct OCRRecognition {
     var engine: RecognitionEngine
     /// 例如「Apple 智能：设备不支持，已用规则」
     var note: String?
+    /// 截图顶部状态栏的时钟（只有时分）：找不到交易时间、也拿不到截图时间时的弱线索（2.0 (19)）
+    var statusBarClock: (hour: Int, minute: Int)? = nil
 
     /// 结果页 / 审核弹窗里显示的一小行字
     var engineLine: String {
@@ -151,6 +153,7 @@ enum ReceiptRecognizer {
                     detail: String? = nil) -> OCRRecognition {
             var r = raw
             r.receipts = sanitize(r.receipts)
+            r.statusBarClock = ReceiptParser.statusBarClock(lines)
             let found = r.receipts.filter { ($0.amount ?? 0) > 0 }
             RunLog.shared.log(.info, "engine-result",
                               "引擎：\(r.engine.title)，\(found.count) 笔" + ((reason ?? r.note).map { "（\($0)）" } ?? ""))

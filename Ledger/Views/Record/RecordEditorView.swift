@@ -1,6 +1,7 @@
 import SwiftUI
 import SwiftData
 import PhotosUI
+import Photos
 
 /// 新建 / 编辑记录（支出、收入、转账；余额校准记录也可在此修改）
 struct RecordEditorView: View {
@@ -50,6 +51,12 @@ struct RecordEditorView: View {
     @State private var showReceiptPicker = false
     /// 上次识图使用的引擎（Apple 智能 / 规则）及回退说明
     @State private var ocrEngineLine: String?
+    /// 识图的时间参考（截图拍摄时间，没有则为识图时的现在）与找不到交易时间时的兜底（2.0 (19)）
+    @State private var ocrReference: Date?
+    @State private var ocrFallback: CaptureTime?
+    /// 时间不是从截图文字里识别到的：在时间下方小字说明来源；用户改了时间后不再显示
+    @State private var ocrTimeHint: String?
+    @State private var ocrTimeHintDate: Date?
     @FocusState private var amountFocused: Bool
 
     private var categories: [LedgerCategory] {
@@ -160,6 +167,12 @@ struct RecordEditorView: View {
 
                 Section {
                     DatePicker("时间", selection: $date)
+                    if let ocrTimeHint, ocrTimeHintDate == date {
+                        Label(ocrTimeHint, systemImage: "clock.badge.questionmark")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .accessibilityIdentifier("ocr-time-source")
+                    }
                     TextField("备注", text: $note)
                     if kind.countsInStats && !repayMode {
                         TextField("商户（可选）", text: $merchant)
@@ -173,7 +186,7 @@ struct RecordEditorView: View {
 
                 if kind.countsInStats {
                     Section {
-                        PhotosPicker(selection: $photoItem, matching: .images) {
+                        PhotosPicker(selection: $photoItem, matching: .images, photoLibrary: .shared()) {
                             HStack {
                                 Label("从支付截图识别填写", systemImage: "text.viewfinder")
                                 Spacer()
@@ -603,8 +616,16 @@ struct RecordEditorView: View {
                 expenseCategories: allCategories.filter { $0.kind == .expense }.map(\.name),
                 incomeCategories: allCategories.filter { $0.kind == .income }.map(\.name),
                 accounts: allAccounts.filter { !$0.isArchived }.map(\.name))
-            let recognition = try await ReceiptRecognizer.recognizeDetailed(imageData: data, vocabulary: vocab)
+            // 截图时间：照片库创建时间（只在已有照片权限时读取，不弹权限）→ 图片 EXIF / XMP 拍摄时间
+            let started = Date()
+            let capture = ScreenshotTime.capture(data: data, assetIdentifier: item.itemIdentifier, now: started)
+            let reference = CaptureTime.reference(capture: capture, now: started)
+            RunLog.shared.log(.info, "capture-time", "截图时间：\(capture?.source.logTag ?? "无（按现在）")")
+            let recognition = try await ReceiptRecognizer.recognizeDetailed(imageData: data, now: reference, vocabulary: vocab)
             ocrEngineLine = recognition.engineLine
+            ocrReference = reference
+            ocrFallback = CaptureTime.fallback(capture: capture, statusBar: recognition.statusBarClock,
+                                               now: Date(), calendar: .current)
             let all = recognition.receipts
             let found = all.filter { ($0.amount ?? 0) > 0 }
             if found.count > 1 {
@@ -636,7 +657,7 @@ struct RecordEditorView: View {
         if parsed.isCardRepayment {
             kind = .expense
             amountText = String(format: "%.2f", amount)
-            if let d = parsed.date { date = d }
+            applyDate(parsed)
             let card = DataStore.account(matching: parsed.repaymentCard ?? AccountHint(type: "credit"),
                                          modelName: parsed.repaymentCardName, role: .card, in: context)
             if let payer = DataStore.account(matching: parsed.accountHint, modelName: parsed.accountName, role: .payer,
@@ -654,7 +675,7 @@ struct RecordEditorView: View {
             // 钱包充值 / 提现 / 余额宝转入转出：自己账户之间的转账
             kind = .transfer
             amountText = String(format: "%.2f", amount)
-            if let d = parsed.date { date = d }
+            applyDate(parsed)
             let from = DataStore.account(matching: parsed.transferFrom, modelName: parsed.transferFromName, role: .single, in: context)
             let to = DataStore.account(matching: parsed.transferTo, modelName: parsed.transferToName, role: .single,
                                        excluding: from?.id, in: context)
@@ -670,7 +691,7 @@ struct RecordEditorView: View {
         amountText = String(format: "%.2f", amount)
         if let m = parsed.merchant { merchant = m }
         if note.isEmpty, let n = parsed.discountNote { note = n }
-        if let d = parsed.date { date = d }
+        applyDate(parsed)
         let list = allCategories.filter { $0.kind == kind }
         let hit = RuleStore.match(merchant: parsed.merchant ?? "", kind: kind, in: context, countHit: false)
         if let c = hit?.category, c.kind == kind {
@@ -690,6 +711,19 @@ struct RecordEditorView: View {
             accountID = a.id
         }
         source = "ocr"
+    }
+
+    /// 识别到且合理的交易时间直接用；否则用截图时间（或状态栏时钟），并在时间下方注明来源。
+    /// 完全拿不到时保留当前时间，提示「时间未识别」。运行日志只记来源。
+    @MainActor
+    private func applyDate(_ parsed: ParsedReceipt) {
+        let fallback = ocrFallback ?? CaptureTime(date: date, source: .now)
+        let t = CaptureTime.resolve(recognized: parsed.date, reference: ocrReference ?? Date(), fallback: fallback)
+        RunLog.shared.log(.info, "time-source", "账单时间来源：\(t.source.logTag)"
+                          + (parsed.date != nil && t.source != .recognized ? "（识别到的时间不合理，已弃用）" : ""))
+        if t.source != .now { date = t.date }
+        ocrTimeHint = t.source == .now ? "时间未识别，请确认" : t.source.hint
+        ocrTimeHintDate = ocrTimeHint == nil ? nil : date
     }
 
     private func account(named name: String?) -> LedgerAccount? {

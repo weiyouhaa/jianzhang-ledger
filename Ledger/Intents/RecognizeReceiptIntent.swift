@@ -106,7 +106,15 @@ struct RecognizeReceiptIntent: AppIntent {
             throw LedgerIntentError.unreadableImage
         }
 
+        // 截图本身的时间（拍摄 / 文件时间）：作为解析「今天 / 昨天」、补年份、拒绝未来时间的参考，
+        // 也是找不到交易时间时的账单时间。日志只记来源，不记具体时间。
+        let startedAt = Date()
+        let capture = ScreenshotTime.capture(data: data, fileURL: image.fileURL, now: startedAt)
+        let reference = CaptureTime.reference(capture: capture, now: startedAt)
+        log.log(.info, "capture-time", "截图时间：\(capture?.source.logTag ?? "无（按现在）")")
+
         let parsedList: [ParsedReceipt]
+        var statusBarClock: (hour: Int, minute: Int)?
         OCRRunInfo.engineLine = nil
         do {
             // 快捷指令可能在后台运行：端侧模型在后台会被限流，失败时自动回退规则并在结果里注明
@@ -114,9 +122,11 @@ struct RecognizeReceiptIntent: AppIntent {
             let vocabulary = IntentRecorder.ocrVocabulary()
             log.log(.info, "vocabulary", "分类 \(vocabulary.expenseCategories.count + vocabulary.incomeCategories.count) 个，账户 \(vocabulary.accounts.count) 个")
             let recognition = try await ReceiptRecognizer.recognizeDetailed(imageData: data,
+                                                                            now: reference,
                                                                             vocabulary: vocabulary,
                                                                             context: .shortcut)
             parsedList = recognition.receipts
+            statusBarClock = recognition.statusBarClock
             OCRRunInfo.engineLine = recognition.engineLine
         } catch {
             let ns = error as NSError
@@ -137,6 +147,14 @@ struct RecognizeReceiptIntent: AppIntent {
             throw LedgerIntentError.noAmount(preview.isEmpty ? "（无）" : preview)
         }
 
+        // 找不到（或不合理的）交易时间：截图时间 → 状态栏时钟 → 现在
+        let fallbackTime = CaptureTime.fallback(capture: capture, statusBar: statusBarClock, now: Date(), calendar: .current)
+        let times = found.map { CaptureTime.resolve(recognized: $0.date, reference: reference, fallback: fallbackTime) }
+        let rejected = zip(found, times).filter { $0.0.date != nil && $0.1.source != .recognized }.count
+        log.log(.info, "time-source", TimeSource.allCases.compactMap { src in
+            let n = times.filter { $0.source == src }.count
+            return n > 0 ? "\(src.logTag) \(n) 笔" : nil
+        }.joined(separator: "，") + (rejected > 0 ? "（\(rejected) 笔识别到的时间不合理，已弃用）" : ""))
         log.log(.info, "resolve", "匹配分类 / 账户（\(found.count) 笔）")
         var items: [ReviewItem] = found.enumerated().map { index, p in
             let k: RecordKind
@@ -156,7 +174,8 @@ struct RecognizeReceiptIntent: AppIntent {
                                                   accountHint: p.accountHint)
             var item = ReviewItem(amount: p.amount ?? 0, kind: k, categoryID: resolved.category?.id,
                                   merchant: merchant, note: note ?? p.discountNote ?? "", accountID: resolved.account?.id,
-                                  date: p.date ?? Date(), dateRecognized: p.date != nil)
+                                  date: times[index].date, dateRecognized: times[index].source == .recognized)
+            item.dateSource = times[index].source
             item.accountTail = p.isCardRepayment ? nil : p.accountHint?.cardTail
             // 信用卡还款截图：付款账户 → 信用卡 的转账（未指定类型 / 分类时）。
             // 信用卡没匹配上也保持「还款」，在审核里选卡（不再退回成「支出 · 其他」）
@@ -557,6 +576,7 @@ struct RecognizeReceiptIntent: AppIntent {
             case .dateNow:
                 item.date = Date()
                 item.dateRecognized = true
+                item.dateSource = .manual
             case .done:
                 break
             }

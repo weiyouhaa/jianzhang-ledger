@@ -207,7 +207,7 @@ enum ModelMerge {
             r.accountHint = rule.transferFrom
             r.date = rule.date
             if !t.dateText.isEmpty, let d = ReceiptParser.date(lines: [String(t.dateText.prefix(60))], now: ctx.now, calendar: ctx.calendar),
-               abs(d.timeIntervalSince(ctx.now)) < 20 * 366 * 86_400 { r.date = d }
+               ReceiptParser.isPlausible(d, reference: ctx.now) { r.date = d }
             return r
         }
         r.isIncome = kind == "income" || t.isRefund
@@ -233,8 +233,9 @@ enum ModelMerge {
             trace("model-amount", "规则实付 \(ra) 覆盖模型订单金额 \(ma)")
         }
         let dateText = String(t.dateText.prefix(60))
+        // 模型抄的时间同样按截图时间（ctx.now）校验：晚于截图或 10 年以前的不要（多半是状态栏 / 单号 / 有效期）
         if !dateText.isEmpty, let d = ReceiptParser.date(lines: [dateText], now: ctx.now, calendar: ctx.calendar),
-           abs(d.timeIntervalSince(ctx.now)) < 20 * 366 * 86_400 {
+           ReceiptParser.isPlausible(d, reference: ctx.now) {
             r.date = d
         } else {
             r.date = ruleMatch?.date

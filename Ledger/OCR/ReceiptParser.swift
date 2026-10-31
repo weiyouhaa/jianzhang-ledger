@@ -892,15 +892,42 @@ enum ReceiptParser {
     // MARK: - 日期
 
     static let periodPattern = "凌晨|早上|早晨|上午|中午|下午|傍晚|晚上|夜里|夜间"
+    /// 12 小时制后缀：PM / p.m. / AM
+    private static let ampmPattern = #"(?:\s*([AaPp])\.?\s?[Mm]\.?(?![A-Za-z]))?"#
+    // 前后不能紧挨数字：订单号 / 流水号里的「…2026.10.26…」「12026-10-26」不是日期
     private static let fullDatePattern = try! NSRegularExpression(
-        pattern: #"(20\d{2})\s*[-/.年]\s*(\d{1,2})\s*[-/.月]\s*(\d{1,2})\s*日?\s*(?:("# + periodPattern + #")?\s*(\d{1,2}):(\d{2})(?::(\d{2}))?)?"#)
+        pattern: #"(?<![\d.])(20\d{2})\s*[-/.年]\s*(\d{1,2})\s*[-/.月]\s*(\d{1,2})(?!\d)\s*日?[\sT]*(?:("# + periodPattern + #")?\s*(\d{1,2}):(\d{2})(?::(\d{2}))?"# + ampmPattern + ")?")
     private static let monthDayPattern = try! NSRegularExpression(
         pattern: #"(?<!\d)(\d{1,2})\s*月\s*(\d{1,2})\s*日\s*(?:("# + periodPattern + #")?\s*(\d{1,2}):(\d{2}))?"#)
     private static let relativePattern = try! NSRegularExpression(
         pattern: #"(今天|昨天|前天|星期[一二三四五六日天]|周[一二三四五六日天])?\s*("# + periodPattern + #")?\s*(\d{1,2}):(\d{2})"#)
+    // 「10-26 14:03」「10/26 14:03」（无年份）
     private static let dashMonthDayPattern = try! NSRegularExpression(
-        pattern: #"(?<![\d-])(\d{1,2})-(\d{1,2})\s+(\d{1,2}):(\d{2})"#)
+        pattern: #"(?<![\d\-/.])(\d{1,2})[-/](\d{1,2})(?![\d/])\s+(\d{1,2}):(\d{2})"#)
     private static let bareDayPattern = try! NSRegularExpression(pattern: #"(今天|昨天|前天)"#)
+    static let englishMonths = ["jan": 1, "feb": 2, "mar": 3, "apr": 4, "may": 5, "jun": 6,
+                                "jul": 7, "aug": 8, "sep": 9, "oct": 10, "nov": 11, "dec": 12]
+    private static let monthNamePattern = #"(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)(?:[a-z]{0,6})\.?"#
+    private static let englishTimePattern = #"(?:\s*,?\s*(?:at\s+)?(\d{1,2}):(\d{2})(?::(\d{2}))?"# + ampmPattern + ")?"
+    // 「Oct 26, 2026 14:03」「October 26 2026 at 2:03 PM」「Oct 26 14:03」（年份可省略）
+    private static let englishMonthFirst = try! NSRegularExpression(
+        pattern: #"(?i)(?<![A-Za-z])"# + monthNamePattern + #"\s+(\d{1,2})(?:st|nd|rd|th)?(?!\d)(?:\s*,?\s*(20\d{2})(?!\d))?"# + englishTimePattern)
+    // 「26 Oct 2026 14:03」「26 Oct, 2026」
+    private static let englishDayFirst = try! NSRegularExpression(
+        pattern: #"(?i)(?<![\d:])(\d{1,2})\s+"# + monthNamePattern + #"(?:\s*,?\s*(20\d{2})(?!\d))?"# + englishTimePattern)
+    // 「10/26/2026 14:03」（美式）/「26/10/2026 14:03」（日在前，日 > 12 时可判断）
+    private static let slashYearLastPattern = try! NSRegularExpression(
+        pattern: #"(?<![\d/])(\d{1,2})/(\d{1,2})/(20\d{2})(?!\d)(?:\s+(\d{1,2}):(\d{2})(?::(\d{2}))?"# + ampmPattern + ")?")
+    /// 交易时间标签：同一行出现时优先取这一行的时间；只有「时:分」时也只认带标签的（单独的「14:32」多半是状态栏）
+    static let timeLabelPattern = #"(?i)(支付时间|付款时间|交易时间|创建时间|下单时间|到账时间|转账时间|收款时间|消费时间|完成时间|记账时间|提现时间|充值时间|退款时间|还款时间|入账时间|交易日期|payment time|transaction time|transaction date|time of payment|order time|created|date|time)"#
+    private static let labeledTimePattern = try! NSRegularExpression(
+        pattern: timeLabelPattern + #"\s*[:：]?\s*("# + periodPattern + #")?\s*(\d{1,2}):(\d{2})(?::\d{2})?"# + ampmPattern)
+    private static let timeLabelRegex = try! NSRegularExpression(pattern: timeLabelPattern)
+
+    /// 交易时间允许晚于截图 / 现在的容差（时钟误差）
+    static let futureTolerance: TimeInterval = 15 * 60
+    /// 早于截图时间这么久的日期视为误识别（例如证件有效期、商品生产日期）
+    static let maxPast: TimeInterval = 10 * 366 * 86_400
 
     /// 「下午3:25」→ 15:25，「凌晨12:30」→ 0:30
     static func hour24(_ h: Int, period: String) -> Int {
@@ -908,6 +935,15 @@ enum ReceiptParser {
         case "下午", "傍晚", "晚上", "夜里", "夜间": return h < 12 ? h + 12 : h
         case "中午": return h < 11 ? h + 12 : h
         case "凌晨", "早上", "早晨", "上午": return h == 12 ? 0 : h
+        default: return h
+        }
+    }
+
+    /// 「2:03 PM」→ 14:03，「12:10 AM」→ 0:10；ampm 为空时原样返回
+    static func hour12(_ h: Int, ampm: String) -> Int {
+        switch ampm.lowercased() {
+        case "p": return h < 12 ? h + 12 : h
+        case "a": return h == 12 ? 0 : h
         default: return h
         }
     }
@@ -929,30 +965,75 @@ enum ReceiptParser {
         }
     }
 
+    /// 交易时间是否合理：不晚于参考时间（截图时间，没有则为现在）+ 容差，也不早于参考时间 10 年以上
+    static func isPlausible(_ d: Date, reference: Date) -> Bool {
+        d <= reference.addingTimeInterval(futureTolerance) && d >= reference.addingTimeInterval(-maxPast)
+    }
+
+    /// 从文字中找交易时间。`now` 是参考时间：截图时间（拿得到时）或现在，
+    /// 用于推断「今天 / 昨天」、补全缺失的年份，并拒绝晚于它的日期。
     static func date(lines: [String], now: Date, calendar: Calendar) -> Date? {
         let text = lines.joined(separator: "\n")
         let ns = text as NSString
         let range = NSRange(location: 0, length: ns.length)
-        let latest = now.addingTimeInterval(2 * 86_400)
 
-        if let m = fullDatePattern.firstMatch(in: text, range: range) {
+        /// 同一种写法有多处时：带「支付时间 / 交易时间」等标签的行优先，其次取第一个合理的
+        func best(_ regex: NSRegularExpression, _ make: (NSTextCheckingResult) -> Date?) -> Date? {
+            var first: Date?
+            for m in regex.matches(in: text, range: range) {
+                guard let d = make(m), isPlausible(d, reference: now) else { continue }
+                if labeled(m.range, ns) { return d }
+                if first == nil { first = d }
+            }
+            return first
+        }
+        /// 没有年份：取参考时间所在年；那一天在参考时间之后（例如 1 月初看到「12-31」）则是去年
+        func inferYear(_ c: DateComponents) -> Date? {
+            var c = c
+            c.year = calendar.component(.year, from: now)
+            guard valid(c), var d = calendar.date(from: c) else { return nil }
+            if calendar.startOfDay(for: d) > now, let prev = calendar.date(byAdding: .year, value: -1, to: d) { d = prev }
+            return d
+        }
+        /// 只有日期没有时间：当天按参考时间（不会晚于截图），其他日子按中午 12 点
+        func noonOrReference(_ d: Date, hasTime: Bool) -> Date {
+            guard !hasTime else { return d }
+            if calendar.isDate(d, inSameDayAs: now), d > now { return now }
+            return d
+        }
+
+        if let d = best(fullDatePattern, { m in
             var c = DateComponents()
             c.year = Int(group(m, 1, ns)); c.month = Int(group(m, 2, ns)); c.day = Int(group(m, 3, ns))
-            c.hour = hour24(Int(group(m, 5, ns)) ?? 12, period: group(m, 4, ns))
+            let hasTime = !group(m, 5, ns).isEmpty
+            c.hour = hour12(hour24(Int(group(m, 5, ns)) ?? 12, period: group(m, 4, ns)), ampm: group(m, 8, ns))
             c.minute = Int(group(m, 6, ns)) ?? 0; c.second = Int(group(m, 7, ns)) ?? 0
-            if valid(c), let d = calendar.date(from: c), d <= latest { return d }
-        }
-        if let m = monthDayPattern.firstMatch(in: text, range: range) {
+            guard valid(c), let d = calendar.date(from: c) else { return nil }
+            return noonOrReference(d, hasTime: hasTime)
+        }) { return d }
+        if let d = best(englishMonthFirst, { m in englishDate(m, ns, month: 1, day: 2, year: 3, time: 4, calendar: calendar, inferYear: inferYear, adjust: noonOrReference) }) { return d }
+        if let d = best(englishDayFirst, { m in englishDate(m, ns, month: 2, day: 1, year: 3, time: 4, calendar: calendar, inferYear: inferYear, adjust: noonOrReference) }) { return d }
+        if let d = best(slashYearLastPattern, { m in
+            guard let a = Int(group(m, 1, ns)), let b = Int(group(m, 2, ns)) else { return nil }
             var c = DateComponents()
-            c.year = calendar.component(.year, from: now)
+            // 默认美式 月/日/年；第一个数 > 12 时是 日/月/年
+            (c.month, c.day) = a > 12 ? (b, a) : (a, b)
+            c.year = Int(group(m, 3, ns))
+            let hasTime = !group(m, 4, ns).isEmpty
+            c.hour = hour12(Int(group(m, 4, ns)) ?? 12, ampm: group(m, 7, ns))
+            c.minute = Int(group(m, 5, ns)) ?? 0; c.second = Int(group(m, 6, ns)) ?? 0
+            guard valid(c), let d = calendar.date(from: c) else { return nil }
+            return noonOrReference(d, hasTime: hasTime)
+        }) { return d }
+        if let d = best(monthDayPattern, { m in
+            var c = DateComponents()
             c.month = Int(group(m, 1, ns)); c.day = Int(group(m, 2, ns))
+            let hasTime = !group(m, 4, ns).isEmpty
             c.hour = hour24(Int(group(m, 4, ns)) ?? 12, period: group(m, 3, ns))
             c.minute = Int(group(m, 5, ns)) ?? 0
-            if valid(c), var d = calendar.date(from: c) {
-                if d > latest, let prev = calendar.date(byAdding: .year, value: -1, to: d) { d = prev }
-                return d
-            }
-        }
+            return inferYear(c).map { noonOrReference($0, hasTime: hasTime) }
+        }) { return d }
+        var rejectedDayWord = false   // 「今天 23:00」晚于截图：整句不可信，也不退回到单独的「今天」
         for m in relativePattern.matches(in: text, range: range) {
             let dayWord = group(m, 1, ns), period = group(m, 2, ns)
             guard !dayWord.isEmpty || !period.isEmpty else { continue }   // 单独的「14:32」多半是状态栏
@@ -960,24 +1041,78 @@ enum ReceiptParser {
             let offset = dayOffset(dayWord, now: now, calendar: calendar) ?? 0
             guard let day = calendar.date(byAdding: .day, value: offset, to: now),
                   var d = calendar.date(bySettingHour: hour24(h, period: period), minute: mi, second: 0, of: day) else { continue }
-            // 只有「下午3:00」没有日期、且晚于现在：视为昨天
+            // 只有「下午3:00」没有日期、且晚于参考时间：视为昨天
             if dayWord.isEmpty, d > now.addingTimeInterval(300), let y = calendar.date(byAdding: .day, value: -1, to: d) { d = y }
+            guard isPlausible(d, reference: now) else {
+                if !dayWord.isEmpty { rejectedDayWord = true }
+                continue
+            }
             return d
         }
-        if let m = dashMonthDayPattern.firstMatch(in: text, range: range) {
+        if let d = best(dashMonthDayPattern, { m in
             var c = DateComponents()
-            c.year = calendar.component(.year, from: now)
             c.month = Int(group(m, 1, ns)); c.day = Int(group(m, 2, ns))
             c.hour = Int(group(m, 3, ns)); c.minute = Int(group(m, 4, ns))
-            if valid(c), var d = calendar.date(from: c) {
-                if d > latest, let prev = calendar.date(byAdding: .year, value: -1, to: d) { d = prev }
-                return d
-            }
+            return inferYear(c)
+        }) { return d }
+        // 「支付时间 14:03」：只有时分，按参考时间（截图）那天；晚于参考时间则是前一天
+        for m in labeledTimePattern.matches(in: text, range: range) {
+            guard let h = Int(group(m, 3, ns)), let mi = Int(group(m, 4, ns)), h < 24, mi < 60 else { continue }
+            let hour = hour12(hour24(h, period: group(m, 2, ns)), ampm: group(m, 5, ns))
+            guard var d = calendar.date(bySettingHour: hour, minute: mi, second: 0, of: now) else { continue }
+            if d > now.addingTimeInterval(300), let y = calendar.date(byAdding: .day, value: -1, to: d) { d = y }
+            return d
         }
-        if let m = bareDayPattern.firstMatch(in: text, range: range),
+        if !rejectedDayWord, let m = bareDayPattern.firstMatch(in: text, range: range),
            let offset = dayOffset(group(m, 1, ns), now: now, calendar: calendar),
-           let day = calendar.date(byAdding: .day, value: offset, to: now) {
-            return calendar.date(bySettingHour: 12, minute: 0, second: 0, of: day)
+           let day = calendar.date(byAdding: .day, value: offset, to: now),
+           let d = calendar.date(bySettingHour: 12, minute: 0, second: 0, of: day) {
+            return min(d, now)
+        }
+        return nil
+    }
+
+    private static func englishDate(_ m: NSTextCheckingResult, _ ns: NSString, month: Int, day: Int, year: Int, time: Int,
+                                    calendar: Calendar, inferYear: (DateComponents) -> Date?,
+                                    adjust: (Date, Bool) -> Date) -> Date? {
+        guard let mo = englishMonths[String(group(m, month, ns).prefix(3)).lowercased()] else { return nil }
+        var c = DateComponents()
+        c.month = mo; c.day = Int(group(m, day, ns))
+        let hasTime = !group(m, time, ns).isEmpty
+        c.hour = hour12(Int(group(m, time, ns)) ?? 12, ampm: group(m, time + 3, ns))
+        c.minute = Int(group(m, time + 1, ns)) ?? 0; c.second = Int(group(m, time + 2, ns)) ?? 0
+        let d: Date?
+        if let y = Int(group(m, year, ns)) {
+            c.year = y
+            d = valid(c) ? calendar.date(from: c) : nil
+        } else {
+            // 没有年份也没有时间的「May 5」太容易误判（英文单词），不取
+            guard hasTime else { return nil }
+            d = inferYear(c)
+        }
+        return d.map { adjust($0, hasTime) }
+    }
+
+    /// 匹配所在的那一行是否带交易时间标签（支付时间 / Payment Time …）
+    private static func labeled(_ r: NSRange, _ ns: NSString) -> Bool {
+        let line = ns.lineRange(for: r)
+        let prefix = NSRange(location: line.location, length: max(0, r.location - line.location))
+        return timeLabelRegex.firstMatch(in: ns as String, range: prefix) != nil
+    }
+
+    /// 截图顶部状态栏的时钟（「14:32」，只有时分）：只作为找不到交易时间、也拿不到截图时间时的弱线索。
+    /// 只看最上面 3 行里 midY < 0.06 的行；没有位置信息（midY 全为 0）时只看第一行。
+    static func statusBarClock(_ lines: [OCRLine]) -> (hour: Int, minute: Int)? {
+        let positioned = lines.contains { $0.midY > 0 }
+        let candidates = positioned ? lines.prefix(3).filter { $0.midY < 0.06 } : Array(lines.prefix(1))
+        for line in candidates {
+            let t = line.text.trimmingCharacters(in: .whitespaces)
+            guard let r = t.range(of: #"^(\d{1,2}):(\d{2})(?!\d)"#, options: .regularExpression) else { continue }
+            // 后面只能跟很短的信号 / 电量文字（「5G 80」），不能是一整句
+            guard t[r.upperBound...].count <= 12 else { continue }
+            let parts = t[r].split(separator: ":")
+            guard let h = Int(parts[0]), let m = Int(parts[1]), h < 24, m < 60 else { continue }
+            return (h, m)
         }
         return nil
     }
@@ -985,6 +1120,7 @@ enum ReceiptParser {
     private static func valid(_ c: DateComponents) -> Bool {
         guard let mo = c.month, let d = c.day else { return false }
         return (1...12).contains(mo) && (1...31).contains(d) && (0...23).contains(c.hour ?? 0) && (0...59).contains(c.minute ?? 0)
+            && (0...59).contains(c.second ?? 0)
     }
 
     // MARK: - 工具
