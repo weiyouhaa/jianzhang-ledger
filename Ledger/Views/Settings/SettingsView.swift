@@ -11,6 +11,7 @@ struct SettingsView: View {
     @AppStorage(SettingsKey.monthlyBudget) private var budget: Double = 0
     @AppStorage(SettingsKey.currencySymbol) private var currencySymbol = "¥"
     @AppStorage(SettingsKey.appearance, store: .standard) private var appearance = 0
+    @AppStorage(SettingsKey.skin, store: .standard) private var skinRaw = AppSkin.default.rawValue
     @AppStorage(SettingsKey.defaultAccount) private var defaultAccount = ""
     @AppStorage(RepaymentSetting.key) private var repaymentAsExpense = false
     /// 识图「识别引擎」：设备级设置
@@ -59,6 +60,7 @@ struct SettingsView: View {
                 }
                 aboutSection
             }
+            .themedScreenBackground()
             .navigationTitle("设置")
             .navigationDestination(isPresented: $showDemoBackup) { BackupSettingsView() }
             .navigationDestination(item: $demoDestination) { screen in
@@ -432,14 +434,30 @@ struct SettingsView: View {
     }
 
     private var appearanceSection: some View {
-        Section("外观") {
+        Section {
             Picker(selection: $appearance) {
                 Text("跟随系统").tag(0)
                 Text("浅色").tag(1)
                 Text("深色").tag(2)
             } label: {
-                Label("主题", systemImage: "circle.lefthalf.filled")
+                Label("明暗", systemImage: "circle.lefthalf.filled")
             }
+            Picker(selection: $skinRaw) {
+                ForEach(AppSkin.allCases) { skin in
+                    Text(skin.label).tag(skin.rawValue)
+                }
+            } label: {
+                Label("皮肤", systemImage: "paintpalette.fill")
+            }
+            .accessibilityIdentifier("settings-skin")
+            SkinLivePreview(skin: AppSkin.stored(skinRaw))
+                .listRowInsets(EdgeInsets(top: 10, leading: 16, bottom: 10, trailing: 16))
+                .listRowBackground(Color.clear)
+                .animation(.easeInOut(duration: 0.2), value: skinRaw)
+        } header: {
+            Text("外观")
+        } footer: {
+            Text(AppSkin.stored(skinRaw).detail + "。皮肤为设备级设置，真实账本与防窥账本外观一致。")
         }
     }
 

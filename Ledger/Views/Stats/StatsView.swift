@@ -9,6 +9,7 @@ struct StatsView: View {
     @AppStorage(SettingsKey.monthlyBudget) private var budgetSetting: Double = 0
     @AppStorage(BudgetKey.rollover) private var rolloverSetting = false
     @Environment(\.ledgerPrefs) private var prefs
+    @Environment(\.appTheme) private var theme
     /// 「信用卡还款计入支出」：开启后还款作为「信用卡还款」分类计入支出
     @AppStorage(RepaymentSetting.key) private var repaymentAsExpense = false
 
@@ -122,6 +123,7 @@ struct StatsView: View {
                 .padding()
             }
             .background(Color(.systemGroupedBackground))
+            .themedScreenBackground()
             .navigationTitle("统计")
             .onChange(of: period) { _, _ in clearChartSelection() }
             .onChange(of: kind) { _, _ in clearChartSelection() }
@@ -463,9 +465,16 @@ struct StatsView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(16)
             .background(
-                RoundedRectangle(cornerRadius: 20, style: .continuous)
-                    .fill(Color(.secondarySystemGroupedBackground))
+                RoundedRectangle(cornerRadius: theme.cardCorner,
+                                 style: theme.isReceipt ? .circular : .continuous)
+                    .fill(theme.cardFill)
             )
+            .overlay {
+                if theme.usesDashedRules {
+                    RoundedRectangle(cornerRadius: theme.cardCorner)
+                        .strokeBorder(theme.rule, style: StrokeStyle(lineWidth: 1, dash: [4, 3]))
+                }
+            }
     }
 
     // MARK: - 计算

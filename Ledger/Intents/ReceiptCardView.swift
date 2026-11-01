@@ -514,6 +514,106 @@ extension ReviewRow {
     ]
 }
 
+
+/// 皮肤对比预览（合成数据，CI 渲染用；不含真实用户数据）
+struct SkinChromeDemo: View {
+    var body: some View {
+        HStack(alignment: .top, spacing: 0) {
+            panel(.light, title: "浅色")
+            panel(.dark, title: "深色")
+        }
+    }
+
+    private func panel(_ scheme: ColorScheme, title: String) -> some View {
+        let light = ReceiptPalette.paper(.light)
+        let dark = ReceiptPalette.paper(.dark)
+        return VStack(alignment: .leading, spacing: 14) {
+            Text(title).font(.caption.bold()).foregroundStyle(scheme == .dark ? dark.faint : light.faint)
+            chrome(false, scheme)
+            chrome(true, scheme)
+        }
+        .padding(14)
+        .frame(width: 320)
+        .background(scheme == .dark ? Color(white: 0.11) : Color(white: 0.93))
+        .environment(\.colorScheme, scheme)
+    }
+
+    /// defaultStyle == false → 默认青绿；true → 小票
+    private func chrome(_ receipt: Bool, _ scheme: ColorScheme) -> some View {
+        let p = ReceiptPalette.paper(scheme)
+        let accent = receipt ? p.accent : Color.cardHex(scheme == .dark ? "#3FC780" : "#219F66")
+        let paper = receipt ? p.paper : Color.cardHex(scheme == .dark ? "#2C2C2E" : "#FFFFFF")
+        let ink = receipt ? p.ink : Color.cardHex(scheme == .dark ? "#F5F5F7" : "#1C1C1E")
+        let faint = receipt ? p.faint : Color.cardHex(scheme == .dark ? "#98989F" : "#6C6C70")
+        let hero = receipt ? [paper] : [Color.cardHex("#1FA67A"), Color.cardHex("#1673A8")]
+        let heroInk: Color = receipt ? ink : .white
+        let heroFaint: Color = receipt ? faint : Color.white.opacity(0.8)
+        return VStack(alignment: .leading, spacing: 10) {
+            Text(receipt ? "小票" : "默认").font(.caption2.bold()).foregroundStyle(faint)
+            VStack(alignment: .leading, spacing: 12) {
+                HStack {
+                    Text("2026年10月").font(receipt ? ReceiptFont.typewriter(size: 15, relativeTo: .headline) : .headline)
+                    Spacer()
+                    Text("12 笔").font(.caption).opacity(0.8)
+                }
+                .foregroundStyle(heroInk)
+                if receipt { DashedRule(color: p.rule) }
+                Text("本月结余").font(.caption).foregroundStyle(heroFaint)
+                Text("¥1,234.50")
+                    .font(receipt ? ReceiptFont.typewriter(size: 28, relativeTo: .title) : .system(size: 28, weight: .bold, design: .rounded))
+                    .foregroundStyle(heroInk)
+                if receipt { DashedRule(color: p.rule) }
+                HStack {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("支出").font(.caption).foregroundStyle(heroFaint)
+                        Text("¥2,000.00").font(receipt ? ReceiptFont.typewriter(size: 15, relativeTo: .headline) : .headline).foregroundStyle(heroInk)
+                    }
+                    Spacer()
+                    VStack(alignment: .trailing, spacing: 2) {
+                        Text("收入").font(.caption).foregroundStyle(heroFaint)
+                        Text("¥3,234.50").font(receipt ? ReceiptFont.typewriter(size: 15, relativeTo: .headline) : .headline).foregroundStyle(heroInk)
+                    }
+                }
+            }
+            .padding(14)
+            .background(
+                RoundedRectangle(cornerRadius: receipt ? 4 : 20)
+                    .fill(LinearGradient(colors: hero, startPoint: .topLeading, endPoint: .bottomTrailing))
+            )
+            .overlay {
+                if receipt {
+                    RoundedRectangle(cornerRadius: 4)
+                        .strokeBorder(p.rule, style: StrokeStyle(lineWidth: 1, dash: [5, 4]))
+                }
+            }
+            // day row
+            HStack {
+                Text("19")
+                    .font(receipt ? ReceiptFont.typewriter(size: 20, relativeTo: .title2) : .title2.bold())
+                    .foregroundStyle(receipt ? paper : .white)
+                    .frame(width: 40, height: 40)
+                    .background(RoundedRectangle(cornerRadius: receipt ? 4 : 12).fill(accent))
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("今天").font(receipt ? ReceiptFont.typewriter(size: 15, relativeTo: .headline) : .headline).foregroundStyle(accent)
+                    Text("10月19日 · 3 笔").font(.caption).foregroundStyle(faint)
+                }
+                Spacer()
+                Text("-¥128.00")
+                    .font(receipt ? ReceiptFont.typewriter(size: 16, relativeTo: .headline) : .headline.monospacedDigit())
+                    .foregroundStyle(ink)
+            }
+            .padding(10)
+            .background(RoundedRectangle(cornerRadius: receipt ? 4 : 12).fill(paper))
+            .overlay {
+                if receipt {
+                    RoundedRectangle(cornerRadius: 4)
+                        .strokeBorder(p.rule, style: StrokeStyle(lineWidth: 1, dash: [4, 3]))
+                }
+            }
+        }
+    }
+}
+
 #if DEBUG
 struct ReceiptStackView_Previews: PreviewProvider {
     static var previews: some View {

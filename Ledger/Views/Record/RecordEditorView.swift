@@ -242,6 +242,7 @@ struct RecordEditorView: View {
                     }
                 }
             }
+            .themedScreenBackground()
             .navigationTitle(navTitle)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {

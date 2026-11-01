@@ -259,6 +259,7 @@ private struct HomeRecordList: View {
             Color.clear.frame(height: 84).listRowBackground(Color.clear)
         }
         .listStyle(.insetGrouped)
+        .themedScreenBackground()
         .listSectionSpacing(.compact)
         .toolbar {
             // 2.0 (17)：全部折叠 / 全部展开放到右上角，一个按钮切换
@@ -420,6 +421,7 @@ struct SummaryCard: View {
     let onPrevious: () -> Void
     let onNext: () -> Void
     let onPickRange: () -> Void
+    @Environment(\.appTheme) private var theme
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -434,14 +436,14 @@ struct SummaryCard: View {
                     HStack(spacing: 6) {
                         Image(systemName: "calendar").font(.subheadline)
                         Text(title)
-                            .font(.headline)
+                            .font(theme.title(.headline))
                             .lineLimit(1)
                             .minimumScaleFactor(0.7)
                         Image(systemName: "chevron.down").font(.caption2.weight(.bold))
                     }
                     .padding(.horizontal, 12)
                     .padding(.vertical, 6)
-                    .background(Capsule().fill(.white.opacity(0.2)))
+                    .background(Capsule().fill(theme.isReceipt ? theme.accent.opacity(0.12) : .white.opacity(0.2)))
                     .contentShape(Capsule())
                 }
                 .accessibilityLabel("日期范围：\(title)")
@@ -457,23 +459,27 @@ struct SummaryCard: View {
                 }
                 Spacer()
                 Text("\(count) 笔")
-                    .font(.caption)
+                    .font(theme.mono(.caption))
                     .opacity(0.8)
             }
             .buttonStyle(.plain)
-            .foregroundStyle(.white)
+            .foregroundStyle(theme.heroInk)
+
+            if theme.usesDashedRules { ThemedDashedRule() }
 
             VStack(alignment: .leading, spacing: 4) {
                 Text(balanceTitle)
-                    .font(.caption)
-                    .foregroundStyle(.white.opacity(0.8))
+                    .font(theme.mono(.caption))
+                    .foregroundStyle(theme.heroFaint)
                 Text(Money.masked(income - expense, hidden: hideAmounts))
-                    .font(.system(size: 36, weight: .bold, design: .rounded))
-                    .foregroundStyle(.white)
+                    .font(theme.amountSize(36))
+                    .foregroundStyle(theme.heroInk)
                     .contentTransition(.numericText())
                     .lineLimit(1)
                     .minimumScaleFactor(0.5)
             }
+
+            if theme.usesDashedRules { ThemedDashedRule() }
 
             HStack {
                 StatBlock(title: "支出", value: Money.masked(expense, hidden: hideAmounts), light: true)
@@ -482,17 +488,23 @@ struct SummaryCard: View {
             }
 
             if budget > 0 && !hideAmounts {
-                BudgetProgressView(spent: expense, budget: budget, light: true)
+                BudgetProgressView(spent: expense, budget: budget, light: !theme.isReceipt)
             }
         }
         .padding(20)
         .background(
-            RoundedRectangle(cornerRadius: 24, style: .continuous)
-                .fill(LinearGradient(
-                    colors: [Color(hex: "#1FA67A"), Color(hex: "#1673A8")],
-                    startPoint: .topLeading, endPoint: .bottomTrailing))
+            RoundedRectangle(cornerRadius: theme.isReceipt ? 4 : 24,
+                             style: theme.isReceipt ? .circular : .continuous)
+                .fill(LinearGradient(colors: theme.heroFill,
+                                     startPoint: .topLeading, endPoint: .bottomTrailing))
         )
-        .shadow(color: Color.black.opacity(0.12), radius: 12, y: 6)
+        .overlay {
+            if theme.usesDashedRules {
+                RoundedRectangle(cornerRadius: 4)
+                    .strokeBorder(theme.rule, style: StrokeStyle(lineWidth: 1, dash: [5, 4]))
+            }
+        }
+        .shadow(color: Color.black.opacity(theme.isReceipt ? 0.04 : 0.12), radius: theme.isReceipt ? 2 : 12, y: theme.isReceipt ? 1 : 6)
         .padding(.vertical, 4)
     }
 }

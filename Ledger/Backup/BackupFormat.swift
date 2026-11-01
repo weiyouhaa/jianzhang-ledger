@@ -148,6 +148,7 @@ struct LedgerBackup: Codable {
         var monthlyBudget: Double?
         var currencySymbol: String?
         var appearance: Int?
+        var skin: String?
         var defaultAccount: String?
         var hideInAppSwitcher: Bool?
         var yearlyBudget: Double? = nil

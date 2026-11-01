@@ -28,6 +28,7 @@ struct RenderPreview {
         }
         let view = HStack(alignment: .top, spacing: 0) { panel(.light); panel(.dark) }
         write(view, to: "\(out)/preview-receipt-card", ext: imageExt)
+        write(SkinChromeDemo(), to: "\(out)/preview-skins", ext: imageExt)
     }
 
     static let imageExt = "png"

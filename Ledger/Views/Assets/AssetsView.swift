@@ -117,6 +117,7 @@ struct AssetsView: View {
                 }
             }
             .listStyle(.insetGrouped)
+            .themedScreenBackground()
             .task {
                 // 截图模式：滚动到「公积金与社保」
                 if ScreenshotDemo.screen == "assetssocial" {
@@ -344,30 +345,37 @@ struct NetWorthCard: View {
     /// 可支配资产（不含公积金与社保）；没有这类账户时为 nil
     var disposable: Double? = nil
     @Binding var hidden: Bool
+    @Environment(\.appTheme) private var theme
+
+    private var heroColors: [Color] {
+        theme.isReceipt ? theme.heroFill : [Color(hex: "#5E5CE6"), Color(hex: "#1673A8")]
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             HStack {
                 Text("净资产")
-                    .font(.subheadline)
-                    .foregroundStyle(.white.opacity(0.85))
+                    .font(theme.mono(.subheadline))
+                    .foregroundStyle(theme.heroFaint)
                 Button {
                     withAnimation { hidden.toggle() }
                 } label: {
                     Image(systemName: hidden ? "eye.slash.fill" : "eye.fill")
                         .font(.subheadline)
-                        .foregroundStyle(.white.opacity(0.85))
+                        .foregroundStyle(theme.heroFaint)
                 }
                 .buttonStyle(.plain)
                 Spacer()
-                Image(systemName: "wallet.pass.fill").foregroundStyle(.white.opacity(0.6))
+                Image(systemName: "wallet.pass.fill").foregroundStyle(theme.heroFaint.opacity(0.7))
             }
+            if theme.usesDashedRules { ThemedDashedRule() }
             Text(Money.masked(netWorth, hidden: hidden))
-                .font(.system(size: 36, weight: .bold, design: .rounded))
-                .foregroundStyle(.white)
+                .font(theme.amountSize(36))
+                .foregroundStyle(theme.heroInk)
                 .lineLimit(1)
                 .minimumScaleFactor(0.5)
                 .contentTransition(.numericText())
+            if theme.usesDashedRules { ThemedDashedRule() }
             HStack {
                 StatBlock(title: "总资产", value: Money.masked(assets, hidden: hidden), light: true)
                 Spacer()
@@ -380,32 +388,41 @@ struct NetWorthCard: View {
                     Text("· 不含公积金与社保").opacity(0.75)
                     Spacer()
                 }
-                .font(.caption)
-                .foregroundStyle(.white.opacity(0.9))
+                .font(theme.mono(.caption))
+                .foregroundStyle(theme.heroFaint)
             }
             if assets > 0 && !hidden {
                 let ratio = min(max(liabilities / assets, 0), 1)
                 VStack(alignment: .leading, spacing: 6) {
                     GeometryReader { geo in
                         ZStack(alignment: .leading) {
-                            Capsule().fill(Color.white.opacity(0.25))
-                            Capsule().fill(Color.white).frame(width: geo.size.width * ratio)
+                            Capsule().fill(theme.isReceipt ? theme.rule : Color.white.opacity(0.25))
+                            Capsule().fill(theme.isReceipt ? theme.accent : Color.white)
+                                .frame(width: geo.size.width * ratio)
                         }
                     }
                     .frame(height: 6)
                     Text("负债率 " + String(format: "%.1f%%", liabilities / assets * 100))
-                        .font(.caption2)
-                        .foregroundStyle(.white.opacity(0.8))
+                        .font(theme.mono(.caption2))
+                        .foregroundStyle(theme.heroFaint)
                 }
             }
         }
         .padding(20)
         .background(
-            RoundedRectangle(cornerRadius: 24, style: .continuous)
-                .fill(LinearGradient(colors: [Color(hex: "#5E5CE6"), Color(hex: "#1673A8")],
+            RoundedRectangle(cornerRadius: theme.isReceipt ? 4 : 24,
+                             style: theme.isReceipt ? .circular : .continuous)
+                .fill(LinearGradient(colors: heroColors,
                                      startPoint: .topLeading, endPoint: .bottomTrailing))
         )
-        .shadow(color: Color.black.opacity(0.12), radius: 12, y: 6)
+        .overlay {
+            if theme.usesDashedRules {
+                RoundedRectangle(cornerRadius: 4)
+                    .strokeBorder(theme.rule, style: StrokeStyle(lineWidth: 1, dash: [5, 4]))
+            }
+        }
+        .shadow(color: Color.black.opacity(theme.isReceipt ? 0.04 : 0.12),
+                radius: theme.isReceipt ? 2 : 12, y: theme.isReceipt ? 1 : 6)
         .padding(.vertical, 4)
     }
 }

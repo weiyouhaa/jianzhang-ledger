@@ -28,13 +28,15 @@ struct RecordRow: View {
     var showDate: Bool = false
     /// 账户详情：该条记录发生后的余额文案（如「余额 ¥1,234.56」）；首页明细不传
     var runningBalanceText: String? = nil
+    @Environment(\.appTheme) private var theme
 
     var body: some View {
         HStack(spacing: 12) {
             CategoryIcon(icon: record.categoryIcon, color: record.categoryColor)
             VStack(alignment: .leading, spacing: 3) {
                 Text(record.displayTitle)
-                    .font(.body)
+                    .font(theme.body(.body))
+                    .foregroundStyle(theme.ink)
                     .lineLimit(1)
                 HStack(spacing: 4) {
                     if record.isCreditRepayment {
@@ -63,18 +65,18 @@ struct RecordRow: View {
                         Image(systemName: "square.2.layers.3d")
                     }
                 }
-                .font(.caption)
-                .foregroundStyle(.secondary)
+                .font(theme.body(.caption))
+                .foregroundStyle(theme.faint)
                 .lineLimit(1)
             }
             Spacer(minLength: 8)
             VStack(alignment: .trailing, spacing: 3) {
                 Text(record.amountText)
-                    .font(.system(.body, design: .rounded).weight(.semibold))
+                    .font(theme.amount(.body, weight: .semibold))
                     .foregroundStyle(amountColor)
                 Text(showDate ? DateText.monthDayTime.string(from: record.date) : DateText.time.string(from: record.date))
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
+                    .font(theme.mono(.caption2))
+                    .foregroundStyle(theme.faint)
                 if let runningBalanceText {
                     Text(runningBalanceText)
                         .font(.caption2)
@@ -90,10 +92,10 @@ struct RecordRow: View {
 
     private var amountColor: Color {
         switch record.kind {
-        case .income: return .green
+        case .income: return theme.income
         case .contribution: return Color(hex: "#E8A33D")
-        case .expense: return .primary
-        case .transfer, .adjustment: return .secondary
+        case .expense: return theme.ink
+        case .transfer, .adjustment: return theme.faint
         }
     }
 }
@@ -142,15 +144,16 @@ struct StatBlock: View {
     let value: String
     var alignment: HorizontalAlignment = .leading
     var light: Bool = false
+    @Environment(\.appTheme) private var theme
 
     var body: some View {
         VStack(alignment: alignment, spacing: 4) {
             Text(title)
-                .font(.caption)
-                .foregroundStyle(light ? Color.white.opacity(0.8) : Color.secondary)
+                .font(theme.mono(.caption))
+                .foregroundStyle(light ? theme.heroFaint : theme.faint)
             Text(value)
-                .font(.system(.headline, design: .rounded))
-                .foregroundStyle(light ? Color.white : Color.primary)
+                .font(theme.amount(.headline))
+                .foregroundStyle(light ? theme.heroInk : theme.ink)
                 .lineLimit(1)
                 .minimumScaleFactor(0.6)
         }

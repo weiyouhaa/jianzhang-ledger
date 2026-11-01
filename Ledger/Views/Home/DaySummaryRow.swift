@@ -20,6 +20,7 @@ struct DaySummaryRow: View {
     let hideAmounts: Bool
 
     @Environment(\.dynamicTypeSize) private var typeSize
+    @Environment(\.appTheme) private var theme
     private var calendar: Calendar { DateText.calendar }
     private var isToday: Bool { calendar.isDateInToday(day) }
     private var relative: String { DaySummary.relativeLabel(day, calendar: calendar) }
@@ -37,11 +38,11 @@ struct DaySummaryRow: View {
                     dayBadge
                     VStack(alignment: .leading, spacing: 2) {
                         Text(relative)
-                            .font(.headline)
-                            .foregroundStyle(isToday ? Color.accentColor : Color.primary)
+                            .font(theme.title(.headline, weight: .semibold))
+                            .foregroundStyle(isToday ? theme.accent : theme.ink)
                         Text("\(dateLabel) · \(count) 笔")
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
+                            .font(theme.body(.subheadline))
+                            .foregroundStyle(theme.faint)
                     }
                     // 大字号时换行，不截断日期
                     .fixedSize(horizontal: false, vertical: true)
@@ -60,6 +61,7 @@ struct DaySummaryRow: View {
             if barRatio > 0 && !hideAmounts { bar }
         }
         .padding(.vertical, 6)
+        .padding(.horizontal, theme.isReceipt ? 4 : 0)
         .frame(minHeight: 44)
         .contentShape(Rectangle())
         .accessibilityElement(children: .ignore)
@@ -71,15 +73,15 @@ struct DaySummaryRow: View {
 
     private var dayBadge: some View {
         Text(DaySummary.dayNumber(day, calendar: calendar))
-            .font(.title2.weight(.bold))
-            .fontDesign(.rounded)
+            .font(theme.amount(.title2))
             .monospacedDigit()
-            .foregroundStyle(isToday ? Color.white : Color.accentColor)
+            .foregroundStyle(isToday ? (theme.isReceipt ? theme.paper : Color.white) : theme.accent)
             .padding(.horizontal, 6)
             .frame(minWidth: 44, minHeight: 44)
             .background(
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .fill(isToday ? Color.accentColor : Color.accentColor.opacity(0.14))
+                RoundedRectangle(cornerRadius: theme.isReceipt ? 4 : 12,
+                                 style: theme.isReceipt ? .circular : .continuous)
+                    .fill(isToday ? theme.accent : theme.accent.opacity(theme.isReceipt ? 0.18 : 0.14))
             )
     }
 
@@ -88,18 +90,18 @@ struct DaySummaryRow: View {
         VStack(alignment: alignment, spacing: 2) {
             if expense > 0 {
                 Text("-" + Money.masked(expense, hidden: hideAmounts))
-                    .font(.headline.monospacedDigit())
-                    .foregroundStyle(.primary)
+                    .font(theme.amount(.headline))
+                    .foregroundStyle(theme.ink)
             }
             if income > 0 {
                 Text("+" + Money.masked(income, hidden: hideAmounts))
-                    .font((expense > 0 ? Font.subheadline : Font.headline).monospacedDigit())
-                    .foregroundStyle(.green)
+                    .font(theme.amount(expense > 0 ? .subheadline : .headline))
+                    .foregroundStyle(theme.income)
             }
             if expense <= 0 && income <= 0 {
                 Text("无收支")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
+                    .font(theme.body(.subheadline))
+                    .foregroundStyle(theme.faint)
             }
         }
         .lineLimit(1)
@@ -110,8 +112,8 @@ struct DaySummaryRow: View {
         HStack(spacing: -6) {
             ForEach(chips) { chip in
                 CategoryIcon(icon: chip.icon, color: chip.color, size: 24)
-                    .background(Circle().fill(Color(.secondarySystemGroupedBackground)))
-                    .overlay(Circle().stroke(Color(.secondarySystemGroupedBackground), lineWidth: 2))
+                    .background(Circle().fill(theme.paper))
+                    .overlay(Circle().stroke(theme.paper, lineWidth: 2))
             }
         }
         .accessibilityHidden(true)
@@ -128,9 +130,9 @@ struct DaySummaryRow: View {
     private var bar: some View {
         GeometryReader { g in
             ZStack(alignment: .leading) {
-                Capsule().fill(Color.primary.opacity(0.07))
+                Capsule().fill(theme.rule.opacity(theme.isReceipt ? 1 : 0.5))
                 Capsule()
-                    .fill(Color.accentColor.opacity(0.65))
+                    .fill(theme.accent.opacity(0.65))
                     .frame(width: max(4, g.size.width * barRatio))
             }
         }

@@ -66,6 +66,7 @@ enum BackupService {
             monthlyBudget: d.double(forKey: SettingsKey.monthlyBudget),
             currencySymbol: d.string(forKey: SettingsKey.currencySymbol),
             appearance: d.integer(forKey: SettingsKey.appearance),
+            skin: d.string(forKey: SettingsKey.skin),
             defaultAccount: d.string(forKey: SettingsKey.defaultAccount),
             hideInAppSwitcher: d.object(forKey: SettingsKey.hideInAppSwitcher) as? Bool,
             yearlyBudget: d.double(forKey: BudgetKey.yearly),
@@ -368,6 +369,7 @@ enum BackupService {
         if let v = s.monthlyBudget { d.set(v, forKey: SettingsKey.monthlyBudget) }
         if let v = s.currencySymbol { d.set(v, forKey: SettingsKey.currencySymbol) }
         if let v = s.appearance { d.set(v, forKey: SettingsKey.appearance) }
+        if let v = s.skin { d.set(v, forKey: SettingsKey.skin) }
         if let v = s.defaultAccount { d.set(v, forKey: SettingsKey.defaultAccount) }
         if let v = s.hideInAppSwitcher { d.set(v, forKey: SettingsKey.hideInAppSwitcher) }
         if let v = s.yearlyBudget { d.set(v, forKey: BudgetKey.yearly) }

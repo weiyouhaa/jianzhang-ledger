@@ -6,12 +6,14 @@ struct RootView: View {
     @EnvironmentObject private var session: SessionManager
     @Environment(\.scenePhase) private var scenePhase
     @AppStorage(SettingsKey.appearance, store: .standard) private var appearance = 0
+    @AppStorage(SettingsKey.skin, store: .standard) private var skinRaw = AppSkin.default.rawValue
     @AppStorage(SettingsKey.hideInAppSwitcher, store: .standard) private var hideInAppSwitcher = true
     @State private var lockWindowShown = false
 
     var body: some View {
         ZStack {
             MainTabView()
+                .modifier(RootThemeInjector(skinRaw: skinRaw))
 
             if ScreenshotDemo.screen == "reviewsnippet" {
                 ReviewSnippetDemoView().zIndex(3)
@@ -181,5 +183,18 @@ struct MainTabView: View {
         // 账单导入（文件选择器 / 预览 / 提示）的独立宿主
         .overlay { BillImportHost() }
         .onAppear { PendingAppEdit.consumeIfNeeded() }
+    }
+}
+
+/// 在 preferredColorScheme 生效后，按当前 ColorScheme 注入 AppTheme，并统一 tint（标签栏 / 按钮强调色）。
+private struct RootThemeInjector: ViewModifier {
+    let skinRaw: String
+    @Environment(\.colorScheme) private var scheme
+
+    func body(content: Content) -> some View {
+        let theme = AppTheme.resolve(skin: AppSkin.stored(skinRaw), scheme: scheme)
+        content
+            .environment(\.appTheme, theme)
+            .tint(theme.accent)
     }
 }
