@@ -83,30 +83,15 @@ struct ReviewItem: Identifiable {
     var cardTail: String? = nil
     /// 自己账户之间的转账（钱包充值 / 提现 / 余额宝转入转出），不是信用卡还款
     var isSelfTransfer = false
+    /// 截图来源（微信 / 支付宝 / 云闪付 / 银行公众号…），卡片里显示；不保存、不记日志
+    var channel: String? = nil
 
     /// 还款 / 转账必须两个账户都已选定
     var isComplete: Bool { kind != .transfer || (accountID != nil && toAccountID != nil) }
     var willSave: Bool { (!isDuplicate || saveDuplicate) && isComplete }
 }
 
-/// 快照视图用的一行（纯值，可在 SwiftUI 片段中渲染）
-struct ReviewRow: Identifiable, Hashable {
-    var id: Int { index }
-    let index: Int
-    let isIncome: Bool
-    let amountText: String
-    let categoryName: String
-    let icon: String
-    let colorHex: String
-    let merchant: String
-    let note: String
-    let accountName: String
-    let timeText: String
-    let duplicate: DuplicateState
-    let isManual: Bool
-
-    enum DuplicateState: Hashable { case none, skip, saveAnyway }
-}
+// ReviewRow（快照视图用的一笔）定义在 ReceiptCardView.swift
 
 @MainActor
 enum ReviewFormatter {
@@ -131,9 +116,24 @@ enum ReviewFormatter {
                 : (account?.name ?? "未指定账户"),
             timeText: timeText(item),
             duplicate: item.isDuplicate ? (item.saveDuplicate ? .saveAnyway : .skip) : .none,
-            isManual: item.isManual
+            isManual: item.isManual,
+            kindText: isTransfer ? (isRepay ? "还款" : "转账") : (item.kind == .income ? "收入" : "支出"),
+            dateText: fullDate.string(from: item.date),
+            timeHint: (item.dateRecognized || item.isManual) ? nil : item.dateSource.hint,
+            fromAccount: isTransfer ? (account?.name ?? "未选付款账户") : nil,
+            toAccount: isTransfer ? (toAccount?.name ?? (isRepay ? "未选信用卡" : "未选账户")) : nil,
+            channel: item.channel,
+            amount: item.amount
         )
     }
+
+    /// 卡片里的完整时间：「2026年10月19日 12:30」
+    static let fullDate: DateFormatter = {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "zh_CN")
+        f.dateFormat = "yyyy年M月d日 HH:mm"
+        return f
+    }()
 
     /// 识别到的 / 手动的只显示时间；截图时间、状态栏兜底的加一句来源；完全没有则「时间未识别（按现在）」
     static func timeText(_ item: ReviewItem) -> String {
@@ -172,142 +172,34 @@ struct ReviewSnippetView: View {
     /// 识别引擎（Apple 智能 / 规则），创建时取本次识图的结果
     var engineLine: String? = OCRRunInfo.engineLine
 
+    /// 2.0 (20) 小票卡片样式：1–2 笔逐笔详细卡片，3 笔以上一张小票逐行列出 + 合计
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(alignment: .firstTextBaseline) {
-                Label(title, systemImage: "text.viewfinder")
-                    .font(.subheadline.weight(.semibold))
-                Spacer()
-                if !totalText.isEmpty {
-                    Text(totalText)
-                        .font(.caption.weight(.medium))
-                        .foregroundStyle(.secondary)
-                }
-            }
-            if rows.isEmpty {
-                Text("没有待保存的记录。可以「添加一笔」，或取消。")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-                    .padding(.vertical, 6)
-            }
-            ForEach(rows.prefix(maxRows)) { row in
-                ReviewRowView(row: row)
-                if row.index != rows.prefix(maxRows).last?.index {
-                    Divider().padding(.leading, 44)
-                }
-            }
-            if rows.count > maxRows {
-                Text("还有 \(rows.count - maxRows) 笔…")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-            if let footnote {
-                Text(footnote)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-            if let engineLine, !rows.isEmpty || footnote != nil {
-                Label(engineLine, systemImage: engineLine.contains("Apple 智能") && !engineLine.contains("已用规则") ? "sparkles" : "text.magnifyingglass")
-                    .font(.caption2)
-                    .foregroundStyle(.tertiary)
-                    .lineLimit(2)
-            }
-        }
-        .padding(14)
+        ReceiptStackView(title: title, rows: rows, footnote: footnote, engineLine: engineLine,
+                         countText: countText, totals: totals, maxRows: maxRows)
     }
 
-    private var totalText: String {
+    private var countText: String {
         let saving = rows.filter { $0.duplicate != .skip }
         guard !rows.isEmpty else { return "" }
         let skipped = rows.count - saving.count
         return skipped > 0 ? "保存 \(saving.count) 笔 · 跳过 \(skipped) 笔" : "共 \(rows.count) 笔"
     }
-}
 
-struct ReviewRowView: View {
-    let row: ReviewRow
-
-    var body: some View {
-        HStack(alignment: .center, spacing: 10) {
-            ZStack(alignment: .topLeading) {
-                Image(systemName: row.icon)
-                    .font(.system(size: 15, weight: .semibold))
-                    .foregroundStyle(.white)
-                    .frame(width: 34, height: 34)
-                    .background(Color(hex: row.colorHex), in: Circle())
-                Text("\(row.index)")
-                    .font(.system(size: 10, weight: .bold, design: .rounded))
-                    .foregroundStyle(.white)
-                    .frame(width: 16, height: 16)
-                    .background(Color.primary.opacity(0.75), in: Circle())
-                    .offset(x: -4, y: -4)
-            }
-            VStack(alignment: .leading, spacing: 2) {
-                HStack(spacing: 6) {
-                    Text(row.merchant.isEmpty ? row.categoryName : row.merchant)
-                        .font(.subheadline.weight(.medium))
-                        .lineLimit(1)
-                    if row.isManual {
-                        Text("手动添加")
-                            .font(.caption2.weight(.semibold))
-                            .padding(.horizontal, 5).padding(.vertical, 1)
-                            .background(Color.blue.opacity(0.15), in: Capsule())
-                            .foregroundStyle(.blue)
-                    }
-                    switch row.duplicate {
-                    case .skip:
-                        badge("已存在 · 跳过", .orange)
-                    case .saveAnyway:
-                        badge("已存在 · 仍保存", .purple)
-                    case .none:
-                        EmptyView()
-                    }
-                }
-                Text(detail)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-            }
-            Spacer(minLength: 4)
-            Text(row.amountText)
-                .font(.subheadline.weight(.semibold).monospacedDigit())
-                .foregroundStyle(row.isIncome ? Color.green : Color.primary)
-                .strikethrough(row.duplicate == .skip, color: .secondary)
-                .opacity(row.duplicate == .skip ? 0.5 : 1)
+    /// 合计（只算会保存的）：按支出 / 收入 / 还款 / 转账分别合计
+    private var totals: [(String, String)] {
+        let saving = rows.filter { $0.duplicate != .skip }
+        return ["支出", "收入", "还款", "转账"].compactMap { kind in
+            let list = saving.filter { $0.resolvedKind == kind }
+            guard !list.isEmpty else { return nil }
+            return (kind, Money.format(list.reduce(0) { $0 + $1.amount }))
         }
-    }
-
-    private var detail: String {
-        var parts: [String] = [row.categoryName == "信用卡还款" ? "还款" : (row.isIncome ? "收入" : "支出")]
-        if !row.merchant.isEmpty { parts.append(row.categoryName) }
-        parts.append(row.accountName)
-        parts.append(row.timeText)
-        if !row.note.isEmpty { parts.append(row.note) }
-        return parts.joined(separator: " · ")
-    }
-
-    private func badge(_ text: String, _ color: Color) -> some View {
-        Text(text)
-            .font(.caption2.weight(.semibold))
-            .padding(.horizontal, 5).padding(.vertical, 1)
-            .background(color.opacity(0.15), in: Capsule())
-            .foregroundStyle(color)
     }
 }
 
 // MARK: - 截图演示：模拟快捷指令弹窗（仅 -UIScreenshotDemo reviewsnippet）
 
 struct ReviewSnippetDemoView: View {
-    static let rows: [ReviewRow] = [
-        ReviewRow(index: 1, isIncome: false, amountText: "-¥35.00", categoryName: "餐饮", icon: "fork.knife", colorHex: "#FF9500",
-                  merchant: "星巴克咖啡", note: "", accountName: "微信", timeText: "10月19日 12:18", duplicate: .none, isManual: false),
-        ReviewRow(index: 2, isIncome: false, amountText: "-¥23.50", categoryName: "交通", icon: "car.fill", colorHex: "#0A84FF",
-                  merchant: "滴滴出行", note: "打车去公司", accountName: "支付宝", timeText: "10月19日 08:45", duplicate: .none, isManual: false),
-        ReviewRow(index: 3, isIncome: false, amountText: "-¥18.00", categoryName: "餐饮", icon: "fork.knife", colorHex: "#FF9500",
-                  merchant: "", note: "早餐", accountName: "现金", timeText: "10月19日 07:30", duplicate: .skip, isManual: false),
-        ReviewRow(index: 4, isIncome: true, amountText: "+¥200.00", categoryName: "红包", icon: "gift.fill", colorHex: "#FF2D55",
-                  merchant: "微信红包", note: "", accountName: "微信", timeText: "10月18日 10:00", duplicate: .none, isManual: true),
-    ]
+    static let rows: [ReviewRow] = Array(ReviewRow.samples.prefix(4))
 
     var body: some View {
         ZStack(alignment: .bottom) {

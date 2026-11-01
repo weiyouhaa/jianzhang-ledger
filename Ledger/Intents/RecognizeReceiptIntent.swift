@@ -115,6 +115,7 @@ struct RecognizeReceiptIntent: AppIntent {
 
         let parsedList: [ParsedReceipt]
         var statusBarClock: (hour: Int, minute: Int)?
+        var sourceTitle: String?
         OCRRunInfo.engineLine = nil
         do {
             // 快捷指令可能在后台运行：端侧模型在后台会被限流，失败时自动回退规则并在结果里注明
@@ -127,6 +128,7 @@ struct RecognizeReceiptIntent: AppIntent {
                                                                             context: .shortcut)
             parsedList = recognition.receipts
             statusBarClock = recognition.statusBarClock
+            sourceTitle = recognition.sourceTitle
             OCRRunInfo.engineLine = recognition.engineLine
         } catch {
             let ns = error as NSError
@@ -176,6 +178,7 @@ struct RecognizeReceiptIntent: AppIntent {
                                   merchant: merchant, note: note ?? p.discountNote ?? "", accountID: resolved.account?.id,
                                   date: times[index].date, dateRecognized: times[index].source == .recognized)
             item.dateSource = times[index].source
+            item.channel = sourceTitle
             item.accountTail = p.isCardRepayment ? nil : p.accountHint?.cardTail
             // 信用卡还款截图：付款账户 → 信用卡 的转账（未指定类型 / 分类时）。
             // 信用卡没匹配上也保持「还款」，在审核里选卡（不再退回成「支出 · 其他」）

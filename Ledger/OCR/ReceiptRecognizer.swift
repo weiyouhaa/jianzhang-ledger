@@ -17,6 +17,8 @@ struct OCRRecognition {
     var note: String?
     /// 截图顶部状态栏的时钟（只有时分）：找不到交易时间、也拿不到截图时间时的弱线索（2.0 (19)）
     var statusBarClock: (hour: Int, minute: Int)? = nil
+    /// 截图来源（微信 / 支付宝 / 云闪付 / 银行公众号…），审核卡片里显示（2.0 (20)）
+    var sourceTitle: String? = nil
 
     /// 结果页 / 审核弹窗里显示的一小行字
     var engineLine: String {
@@ -154,6 +156,7 @@ enum ReceiptRecognizer {
             var r = raw
             r.receipts = sanitize(r.receipts)
             r.statusBarClock = ReceiptParser.statusBarClock(lines)
+            r.sourceTitle = screen.layout.title ?? (screen.app == .unknown ? nil : screen.app.title)
             let found = r.receipts.filter { ($0.amount ?? 0) > 0 }
             RunLog.shared.log(.info, "engine-result",
                               "引擎：\(r.engine.title)，\(found.count) 笔" + ((reason ?? r.note).map { "（\($0)）" } ?? ""))

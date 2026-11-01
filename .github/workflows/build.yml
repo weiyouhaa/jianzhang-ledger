@@ -108,6 +108,21 @@ jobs:
           swiftc Ledger/OCR/ReceiptParser.swift Ledger/Dedupe/DedupeEngine.swift Tools/DedupeCheck/main.swift -o "$RUNNER_TEMP/dedupecheck"
           "$RUNNER_TEMP/dedupecheck"
 
+      - name: Render receipt card preview (synthetic data only)
+        continue-on-error: true
+        run: |
+          mkdir -p "$RUNNER_TEMP/preview"
+          swiftc -parse-as-library -target arm64-apple-macos14.0 Ledger/Intents/ReceiptCardView.swift Tools/RenderPreview/RenderPreview.swift -o "$RUNNER_TEMP/renderpreview"
+          "$RUNNER_TEMP/renderpreview" "$RUNNER_TEMP/preview"
+
+      - name: Upload preview images
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: JianZhang-preview
+          path: ${{ runner.temp }}/preview
+          if-no-files-found: ignore
+
       - name: Install XcodeGen
         run: brew install xcodegen
 
