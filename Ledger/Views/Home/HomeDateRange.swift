@@ -43,10 +43,10 @@ struct HomeDateRange: Equatable {
         let thisMonthStart = monthStart(now, calendar)
         switch preset {
         case .thisMonth, .month:
-            return monthRange(thisMonthStart, preset: .thisMonth, calendar: calendar)
+            return monthRange(thisMonthStart, preset: .thisMonth, now: now, calendar: calendar)
         case .lastMonth:
             let s = calendar.date(byAdding: .month, value: -1, to: thisMonthStart) ?? thisMonthStart
-            return monthRange(s, preset: .lastMonth, calendar: calendar)
+            return monthRange(s, preset: .lastMonth, now: now, calendar: calendar)
         case .last7Days, .last30Days:
             let days = preset == .last7Days ? 7 : 30
             let s = calendar.date(byAdding: .day, value: -(days - 1), to: today) ?? today
