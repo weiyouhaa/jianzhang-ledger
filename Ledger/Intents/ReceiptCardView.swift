@@ -552,7 +552,7 @@ struct SkinChromeDemo: View {
             Text(receipt ? "小票" : "默认").font(.caption2.bold()).foregroundStyle(faint)
             VStack(alignment: .leading, spacing: 12) {
                 HStack {
-                    Text("2026年10月").font(receipt ? ReceiptFont.typewriter(size: 15, relativeTo: .headline) : .headline)
+                    Text("2026年10月").font(receipt ? ReceiptFont.typewriter(15, relativeTo: .headline) : .headline)
                     Spacer()
                     Text("12 笔").font(.caption).opacity(0.8)
                 }
@@ -560,18 +560,18 @@ struct SkinChromeDemo: View {
                 if receipt { DashedRule(color: p.rule) }
                 Text("本月结余").font(.caption).foregroundStyle(heroFaint)
                 Text("¥1,234.50")
-                    .font(receipt ? ReceiptFont.typewriter(size: 28, relativeTo: .title) : .system(size: 28, weight: .bold, design: .rounded))
+                    .font(receipt ? ReceiptFont.typewriter(28, relativeTo: .title) : .system(size: 28, weight: .bold, design: .rounded))
                     .foregroundStyle(heroInk)
                 if receipt { DashedRule(color: p.rule) }
                 HStack {
                     VStack(alignment: .leading, spacing: 2) {
                         Text("支出").font(.caption).foregroundStyle(heroFaint)
-                        Text("¥2,000.00").font(receipt ? ReceiptFont.typewriter(size: 15, relativeTo: .headline) : .headline).foregroundStyle(heroInk)
+                        Text("¥2,000.00").font(receipt ? ReceiptFont.typewriter(15, relativeTo: .headline) : .headline).foregroundStyle(heroInk)
                     }
                     Spacer()
                     VStack(alignment: .trailing, spacing: 2) {
                         Text("收入").font(.caption).foregroundStyle(heroFaint)
-                        Text("¥3,234.50").font(receipt ? ReceiptFont.typewriter(size: 15, relativeTo: .headline) : .headline).foregroundStyle(heroInk)
+                        Text("¥3,234.50").font(receipt ? ReceiptFont.typewriter(15, relativeTo: .headline) : .headline).foregroundStyle(heroInk)
                     }
                 }
             }
@@ -589,17 +589,17 @@ struct SkinChromeDemo: View {
             // day row
             HStack {
                 Text("19")
-                    .font(receipt ? ReceiptFont.typewriter(size: 20, relativeTo: .title2) : .title2.bold())
+                    .font(receipt ? ReceiptFont.typewriter(20, relativeTo: .title2) : .title2.bold())
                     .foregroundStyle(receipt ? paper : .white)
                     .frame(width: 40, height: 40)
                     .background(RoundedRectangle(cornerRadius: receipt ? 4 : 12).fill(accent))
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("今天").font(receipt ? ReceiptFont.typewriter(size: 15, relativeTo: .headline) : .headline).foregroundStyle(accent)
+                    Text("今天").font(receipt ? ReceiptFont.typewriter(15, relativeTo: .headline) : .headline).foregroundStyle(accent)
                     Text("10月19日 · 3 笔").font(.caption).foregroundStyle(faint)
                 }
                 Spacer()
                 Text("-¥128.00")
-                    .font(receipt ? ReceiptFont.typewriter(size: 16, relativeTo: .headline) : .headline.monospacedDigit())
+                    .font(receipt ? ReceiptFont.typewriter(16, relativeTo: .headline) : .headline.monospacedDigit())
                     .foregroundStyle(ink)
             }
             .padding(10)
