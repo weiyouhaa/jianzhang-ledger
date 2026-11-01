@@ -71,6 +71,8 @@ struct ReviewItem: Identifiable {
     /// 时间来源（截图文字 / 截图拍摄时间 / 状态栏 / 现在）：不是识别到的时在时间后面小字注明，方便修改
     var dateSource: TimeSource = .recognized
     var isDuplicate = false
+    /// 3.3 (24) 相似的那一笔（账本里的记录或本批第 N 笔），片段 / 编辑页里红字显示
+    var duplicateHit: DuplicateHit? = nil
     /// 重复项默认跳过；用户可改为仍然保存
     var saveDuplicate = false
     /// 用户手动改过分类 / 账户：保存后更新分类记忆
@@ -126,7 +128,9 @@ enum ReviewFormatter {
             toAccount: isTransfer ? (toAccount?.name ?? (isRepay ? "未选信用卡" : "未选账户")) : nil,
             channel: item.channel,
             amount: item.amount,
-            discount: item.discount
+            discount: item.discount,
+            duplicateText: item.isDuplicate
+                ? DuplicateHint.banner(item.duplicateHit, skip: !item.saveDuplicate, symbol: Money.symbol) : nil
         )
     }
 

@@ -108,6 +108,23 @@ jobs:
           swiftc Ledger/OCR/ReceiptParser.swift Ledger/Dedupe/DedupeEngine.swift Tools/DedupeCheck/main.swift -o "$RUNNER_TEMP/dedupecheck"
           "$RUNNER_TEMP/dedupecheck"
 
+      - name: Receipt duplicate-warning tests (all time sources checked, match summary text)
+        run: |
+          swiftc Ledger/OCR/ReceiptParser.swift Ledger/OCR/CaptureTime.swift Ledger/Dedupe/DuplicateHint.swift Tools/DupFlagCheck/main.swift -o "$RUNNER_TEMP/dupflagcheck"
+          "$RUNNER_TEMP/dupflagcheck"
+          # 回归保护：识图查重不能再只限于「识别到时间」的笔（2.0 (19)–3.2 的问题）
+          if grep -nE "isDuplicate = item\.dateRecognized|where .*dateRecognized" Ledger/Intents/RecognizeReceiptIntent.swift; then
+            echo "识图查重又被 dateRecognized 限制了"; exit 1
+          fi
+          grep -q "duplicateBanner" Ledger/Intents/ReceiptCardView.swift
+
+      - name: Receipt skin large-title guard
+        run: |
+          # 3.2 小票皮肤大标题用 Special Elite 时中文不绘制，顶部空出一块；大标题必须用能显示中文的字体
+          if grep -nE "largeTitleTextAttributes.*ReceiptTypeface\.display" Ledger/Theme/ThemeChrome.swift; then
+            echo "大标题不能用 Special Elite（中文不显示）"; exit 1
+          fi
+
       - name: Render receipt card preview (synthetic data only)
         continue-on-error: true
         run: |

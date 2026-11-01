@@ -12,8 +12,8 @@ settings:
   base:
     JZ_BUILD_COMMIT: dev
     # 每次发布：CURRENT_PROJECT_VERSION +1；3.0 起功能版本 MARKETING_VERSION 每次 +0.1（3.1、3.2…）
-    MARKETING_VERSION: "3.2"
-    CURRENT_PROJECT_VERSION: "23"
+    MARKETING_VERSION: "3.3"
+    CURRENT_PROJECT_VERSION: "24"
     # Xcode 只接受 4.0 / 4.2 / 5.0 / 6.0；5.0 即 Swift 5 语言模式（由新编译器编译，支持 5.9+ 语法），避免 Swift 6 严格并发报错
     SWIFT_VERSION: "5.0"
     SWIFT_STRICT_CONCURRENCY: minimal

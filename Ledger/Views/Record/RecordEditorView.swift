@@ -381,7 +381,18 @@ struct RecordEditorView: View {
         let badge: String? = source == "ocr" ? "识图" : (source == "recurring" ? "周期账单" : nil)
         return RecordCardInfo(kindText: kindText, amountText: amountText, tone: tone, amountPlaceholder: placeholder,
                               title: title, dateText: ReviewFormatter.fullDate.string(from: date),
-                              icon: icon, colorHex: colorHex, lines: lines, badge: badge)
+                              icon: icon, colorHex: colorHex, lines: lines, badge: badge,
+                              duplicate: duplicateWarning(amount: placeholder ? nil : amount, merchant: trimmedMerchant))
+    }
+
+    /// 3.3 (24) 编辑页顶部卡片的「可能重复」：账本里金额相同、商户相近 / 同账户、时间相近的另一笔
+    /// （时间不是从截图识别到的放宽到 30 分钟）。余额校准 / 缴存不查。
+    private func duplicateWarning(amount: Double?, merchant: String) -> String? {
+        guard let amount, amount > 0, kind == .expense || kind == .income || kind == .transfer || repayMode else { return nil }
+        let window = (ocrTimeHint != nil && ocrTimeHintDate == date) ? DuplicateHint.window(for: .screenshot) : DuplicateMatcher.window
+        guard let hit = IntentRecorder.duplicateHit(amount: amount, merchant: merchant, date: date, accountID: accountID,
+                                                    window: window, excluding: record?.id, in: context) else { return nil }
+        return DuplicateHint.banner(hit, skip: nil, symbol: Money.symbol)
     }
 
     // MARK: - Sections

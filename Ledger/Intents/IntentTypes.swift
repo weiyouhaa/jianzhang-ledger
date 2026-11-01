@@ -285,15 +285,32 @@ enum IntentRecorder {
     /// 同一笔交易的银行推送、支付助手、云闪付详情截图只记一次
     @MainActor
     static func isDuplicate(amount: Double, merchant: String, date: Date, accountID: UUID? = nil) -> Bool {
-        let context = DataStore.shared.mainContext
-        let start = date.addingTimeInterval(-DuplicateMatcher.window), end = date.addingTimeInterval(DuplicateMatcher.window)
-        let descriptor = FetchDescriptor<LedgerRecord>(predicate: #Predicate<LedgerRecord> { $0.date >= start && $0.date <= end })
-        let list = (try? context.fetch(descriptor)) ?? []
+        duplicateHit(amount: amount, merchant: merchant, date: date, accountID: accountID) != nil
+    }
+
+    /// 3.3 (24) 返回账本里相似的那一笔（时间 / 金额 / 标题，用于「可能重复：与 … 相似」提示）。
+    /// window：识别到的时间 5 分钟；截图时间 / 状态栏 / 现在 30 分钟（见 DuplicateHint.window）
+    @MainActor
+    static func duplicateHit(amount: Double, merchant: String, date: Date, accountID: UUID? = nil,
+                             window: TimeInterval = DuplicateMatcher.window, excluding: UUID? = nil,
+                             in context: ModelContext? = nil) -> DuplicateHit? {
+        let context = context ?? DataStore.shared.mainContext
+        let span = max(window, DuplicateMatcher.window)
+        let start = date.addingTimeInterval(-span), end = date.addingTimeInterval(span)
+        let descriptor = FetchDescriptor<LedgerRecord>(predicate: #Predicate<LedgerRecord> { $0.date >= start && $0.date <= end },
+                                                       sortBy: [SortDescriptor(\LedgerRecord.date)])
+        let list = ((try? context.fetch(descriptor)) ?? []).filter { $0.id != excluding && $0.kind != .adjustment }
         let entry = DuplicateMatcher.Entry(amount: (amount * 100).rounded() / 100, merchant: merchant, date: date,
                                            account: accountID?.uuidString)
-        return DuplicateMatcher.isDuplicate(entry, among: list.map {
+        let entries = list.map {
             DuplicateMatcher.Entry(amount: $0.amount, merchant: $0.merchant, date: $0.date, account: $0.accountRef?.id.uuidString)
-        })
+        }
+        // 时间最近的优先
+        let order = entries.indices.sorted { abs(entries[$0].date.timeIntervalSince(date)) < abs(entries[$1].date.timeIntervalSince(date)) }
+        guard let k = DuplicateHint.firstMatch(entry, among: order.map { entries[$0] }, window: window) else { return nil }
+        let r = list[order[k]]
+        let title = !r.merchant.isEmpty ? r.merchant : (!r.note.isEmpty ? r.note : r.categoryName)
+        return DuplicateHit(date: r.date, amount: r.amount, title: title)
     }
 
     static func summary(of record: LedgerRecord) -> String {

@@ -198,7 +198,9 @@ enum ThemeChrome {
         bar.backgroundColor = ui(.backdrop)
         bar.shadowColor = rule
         bar.titleTextAttributes = [.font: bold(17), .foregroundColor: ink]
-        bar.largeTitleTextAttributes = [.font: ReceiptTypeface.uiFont(ReceiptTypeface.display, size: 32), .foregroundColor: ink]
+        // 大标题用粗体等宽（与行内标题同一条字体路径）。3.2 用 Special Elite 时 UIKit 大标题里中文整段不绘制，
+        // 「简账 / 统计 / 资产 / 设置」位置只剩一块空白（3.3 修复）。
+        bar.largeTitleTextAttributes = [.font: bold(30), .foregroundColor: ink]
         let button = UIBarButtonItemAppearance()
         button.normal.titleTextAttributes = [.font: mono(17), .foregroundColor: accent]
         bar.buttonAppearance = button

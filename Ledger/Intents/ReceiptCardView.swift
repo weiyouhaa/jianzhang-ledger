@@ -37,6 +37,8 @@ struct ReviewRow: Identifiable, Hashable {
     var amount: Double = 0
     /// 3.2 (23) 优惠 / 立减说明（截图上识别到时）
     var discount: String? = nil
+    /// 3.3 (24) 「⚠︎ 可能重复：与 10月31日 14:03 ¥39.80 · 某商户 的记录相似（默认跳过）」
+    var duplicateText: String? = nil
 
     enum DuplicateState: Hashable { case none, skip, saveAnyway }
 
@@ -60,15 +62,17 @@ struct ReceiptPalette {
     let accent: Color
     let income: Color
     let backdrop: Color
+    /// 3.3 (24) 醒目的警告红（可能重复）
+    var warn: Color = .cardHex("#C62828")
 
     static func paper(_ scheme: ColorScheme) -> ReceiptPalette {
         scheme == .dark
             ? ReceiptPalette(paper: .cardHex("#2B2722"), ink: .cardHex("#EFE7DA"), faint: .cardHex("#A79E90"),
                              rule: .cardHex("#5A5248"), accent: .cardHex("#E58A7C"), income: .cardHex("#8CC9A0"),
-                             backdrop: .cardHex("#1C1A17"))
+                             backdrop: .cardHex("#1C1A17"), warn: .cardHex("#FF6B60"))
             : ReceiptPalette(paper: .cardHex("#FBF7EE"), ink: .cardHex("#26221E"), faint: .cardHex("#857C70"),
                              rule: .cardHex("#CFC6B6"), accent: .cardHex("#9E2B25"), income: .cardHex("#2F7D4F"),
-                             backdrop: .cardHex("#EDE7DB"))
+                             backdrop: .cardHex("#EDE7DB"), warn: .cardHex("#C62828"))
     }
 }
 
@@ -260,7 +264,7 @@ struct ReceiptCardView: View {
             DashedRule(color: palette.rule)
             ReceiptFields(row: row, palette: palette)
             if row.duplicate != .none {
-                ReceiptDuplicateNote(state: row.duplicate, palette: palette)
+                ReceiptDuplicateNote(state: row.duplicate, palette: palette, text: row.duplicateText)
             }
         }
         .receiptPaper(palette)
@@ -327,18 +331,18 @@ struct ReceiptBadges: View {
 struct ReceiptDuplicateNote: View {
     let state: ReviewRow.DuplicateState
     let palette: ReceiptPalette
+    var text: String? = nil
 
     var body: some View {
-        Label(state == .skip ? "可能重复：账本里已有相同的记录，默认跳过不保存"
-                             : "可能重复：账本里已有相同的记录，已选择仍然保存",
-              systemImage: "exclamationmark.triangle")
-            .font(ReceiptFont.mono(.caption2))
-            .foregroundStyle(palette.accent)
+        Text(text ?? (state == .skip ? "⚠︎ 可能重复：账本里已有相同的记录，默认跳过不保存"
+                                     : "⚠︎ 可能重复：账本里已有相同的记录，已选择仍然保存"))
+            .font(ReceiptFont.mono(.caption, .bold))
+            .foregroundStyle(palette.warn)
             .fixedSize(horizontal: false, vertical: true)
             .padding(8)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .overlay(RoundedRectangle(cornerRadius: 4).stroke(palette.accent.opacity(0.7),
-                                                               style: StrokeStyle(lineWidth: 1, dash: [4, 3])))
+            .background(RoundedRectangle(cornerRadius: 4).fill(palette.warn.opacity(0.10)))
+            .overlay(RoundedRectangle(cornerRadius: 4).stroke(palette.warn.opacity(0.8), lineWidth: 1))
     }
 }
 
@@ -372,7 +376,13 @@ struct ReceiptLineItem: View {
                 if let hint = row.timeHint {
                     Text(hint).font(ReceiptFont.mono(.caption2)).foregroundStyle(palette.accent)
                 }
-                if row.isManual || row.duplicate != .none {
+                if let banner = row.duplicateBanner {
+                    Text(banner)
+                        .font(ReceiptFont.mono(.caption2, .bold))
+                        .foregroundStyle(palette.warn)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                if row.isManual {
                     ReceiptBadges(row: row, palette: palette)
                 }
             }
@@ -582,16 +592,20 @@ extension ReviewRow {
         return dateText
     }
 
-    /// 片段里的提示：时间来源 / 手动添加 / 可能重复
+    /// 3.3 (24) 可能重复的红色提示（单独一行，比其它提示醒目）；没有重复为 nil
+    var duplicateBanner: String? {
+        switch duplicate {
+        case .none: return nil
+        case .skip: return duplicateText ?? "⚠︎ 可能重复：账本里已有相似的记录（默认跳过）"
+        case .saveAnyway: return duplicateText ?? "⚠︎ 可能重复：账本里已有相似的记录（仍保存）"
+        }
+    }
+
+    /// 片段里的提示：时间来源 / 手动添加（可能重复见 duplicateBanner）
     var snippetFlags: [String] {
         var flags: [String] = []
         if let timeHint { flags.append(timeHint) }
         if isManual { flags.append("手动添加") }
-        switch duplicate {
-        case .skip: flags.append("可能重复 · 默认跳过")
-        case .saveAnyway: flags.append("可能重复 · 仍保存")
-        case .none: break
-        }
         return flags
     }
 
@@ -642,6 +656,18 @@ struct SnippetRecord: View {
                     .strikethrough(row.duplicate == .skip, color: palette.faint)
                     .opacity(row.duplicate == .skip ? 0.55 : 1)
                     .fixedSize()
+            }
+            if let banner = row.duplicateBanner {
+                Text(banner)
+                    .font(ReceiptTypeface.fixed(ReceiptTypeface.monoBold, 11 * s))
+                    .foregroundStyle(palette.warn)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.horizontal, 5 * s)
+                    .padding(.vertical, 3 * s)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(RoundedRectangle(cornerRadius: 3).fill(palette.warn.opacity(0.12)))
+                    .overlay(RoundedRectangle(cornerRadius: 3).stroke(palette.warn.opacity(0.85), lineWidth: 1))
+                    .accessibilityIdentifier("snippet-duplicate")
             }
             pair(("类型", row.resolvedKind, false), ("分类", row.categoryName, false))
             pair(("时间", row.shortDateText, false), ("来源", row.sourceText, false))
@@ -721,6 +747,8 @@ struct RecordCardInfo: Hashable {
     var lines: [RecordCardLine] = []
     /// 识图 / 周期账单 等来源标记
     var badge: String? = nil
+    /// 3.3 (24) 「⚠︎ 可能重复：与 … 的记录相似」：折叠时也显示
+    var duplicate: String? = nil
 }
 
 /// 卡片配色：跟随皮肤（默认 / 小票）和深浅色
@@ -772,6 +800,19 @@ struct RecordSummaryCard: View {
             }
             .buttonStyle(.plain)
             .accessibilityHint(collapsed ? "展开卡片" : "折叠卡片")
+            if let duplicate = info.duplicate {
+                Text(duplicate)
+                    .font(style.receipt ? ReceiptFont.mono(.caption, .bold) : .caption.weight(.semibold))
+                    .foregroundStyle(warnColor)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.horizontal, 8).padding(.vertical, 5)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(RoundedRectangle(cornerRadius: style.receipt ? 3 : 8, style: .continuous)
+                        .fill(warnColor.opacity(0.12)))
+                    .overlay(RoundedRectangle(cornerRadius: style.receipt ? 3 : 8, style: .continuous)
+                        .stroke(warnColor.opacity(0.8), lineWidth: 1))
+                    .accessibilityIdentifier("record-card-duplicate")
+            }
             if !collapsed && !info.lines.isEmpty {
                 divider
                 VStack(alignment: .leading, spacing: 6) {
@@ -788,6 +829,9 @@ struct RecordSummaryCard: View {
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("record-summary-card")
     }
+
+    /// 可能重复的警告红（系统红；不跟随皮肤强调色，保证醒目）
+    private var warnColor: Color { Color(red: 0.86, green: 0.18, blue: 0.16) }
 
     private var amountColor: Color {
         if info.amountPlaceholder { return style.faint }
@@ -911,7 +955,8 @@ extension RecordCardInfo {
             RecordCardLine(label: "备注", value: "示例立减 2.00"),
             RecordCardLine(label: "时间来源", value: "时间取自截图", warn: true),
         ],
-        badge: "识图")
+        badge: "识图",
+        duplicate: "⚠︎ 可能重复：与 10月19日 12:15 ¥39.80 · 示例烧腊饭店 的记录相似")
 
     static let sampleRepay = RecordCardInfo(
         kindText: "还款", amountText: "¥1,000.00", tone: .neutral, title: "信用卡还款",
@@ -932,8 +977,9 @@ extension ReviewRow {
                   amount: 39.80, discount: "示例立减 2.00"),
         ReviewRow(index: 2, isIncome: false, amountText: "-¥23.50", categoryName: "交通", icon: "car.fill", colorHex: "#0A84FF",
                   merchant: "示例出行", note: "打车去公司", accountName: "支付宝", timeText: "10月19日 08:45",
-                  duplicate: .none, isManual: false, kindText: "支出", dateText: "2026年10月19日 08:45",
-                  timeHint: "时间取自截图", channel: "支付宝", amount: 23.50),
+                  duplicate: .skip, isManual: false, kindText: "支出", dateText: "2026年10月19日 08:45",
+                  timeHint: "时间取自截图", channel: "支付宝", amount: 23.50,
+                  duplicateText: "⚠︎ 可能重复：与 10月19日 08:41 ¥23.50 · 示例出行 的记录相似（默认跳过）"),
         ReviewRow(index: 3, isIncome: false, amountText: "-¥18.00", categoryName: "餐饮", icon: "fork.knife", colorHex: "#FF9500",
                   merchant: "", note: "早餐", accountName: "现金", timeText: "10月19日 07:30",
                   duplicate: .skip, isManual: false, kindText: "支出", dateText: "2026年10月19日 07:30", amount: 18.00),
