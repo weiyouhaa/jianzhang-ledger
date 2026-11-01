@@ -38,7 +38,7 @@ struct QuickBalanceSheet: View {
                 Spacer()
                 HStack(spacing: 6) {
                     CategoryIcon(icon: account.iconName, color: account.color, size: 22)
-                    Text(account.name).font(.headline).lineLimit(1)
+                    Text(account.name).font(.ui(.headline)).lineLimit(1)
                 }
                 Spacer()
                 Button("保存", action: save)
@@ -48,22 +48,22 @@ struct QuickBalanceSheet: View {
 
             VStack(spacing: 4) {
                 Text(liability ? "实际欠款" : "实际余额")
-                    .font(.caption)
+                    .font(.ui(.caption))
                     .foregroundStyle(.secondary)
                 HStack(alignment: .firstTextBaseline, spacing: 4) {
                     Text(Money.symbol)
-                        .font(.system(size: 26, weight: .semibold, design: .rounded))
+                        .font(.uiSystem(size: 26, weight: .semibold, design: .rounded))
                         .foregroundStyle(.secondary)
                     TextField("0.00", text: $text)
                         .accessibilityIdentifier("quickbalance-field")
-                        .font(.system(size: 42, weight: .bold, design: .rounded))
+                        .font(.uiSystem(size: 42, weight: .bold, design: .rounded))
                         .keyboardType(shown < 0 ? .numbersAndPunctuation : .decimalPad)
                         .focused($focused)
                         .multilineTextAlignment(.center)
                         .fixedSize()
                 }
                 Text(differenceText)
-                    .font(.footnote.monospacedDigit())
+                    .font(.ui(.footnote).monospacedDigit())
                     .foregroundStyle(differenceColor)
             }
 
@@ -98,7 +98,7 @@ struct QuickBalanceSheet: View {
 
     private var differenceColor: Color {
         guard let delta, abs(delta) >= 0.005 else { return .secondary }
-        return delta > 0 ? .green : .red
+        return delta > 0 ? Color.themeIncome : .red
     }
 
     private func save() {

@@ -179,6 +179,7 @@ struct RecognizeReceiptIntent: AppIntent {
                                   date: times[index].date, dateRecognized: times[index].source == .recognized)
             item.dateSource = times[index].source
             item.channel = sourceTitle
+            item.discount = p.discountNote
             item.accountTail = p.isCardRepayment ? nil : p.accountHint?.cardTail
             // 信用卡还款截图：付款账户 → 信用卡 的转账（未指定类型 / 分类时）。
             // 信用卡没匹配上也保持「还款」，在审核里选卡（不再退回成「支出 · 其他」）
@@ -339,7 +340,7 @@ struct RecognizeReceiptIntent: AppIntent {
     // MARK: - 审核循环
 
     private enum Action: String {
-        case saveAll, edit, delete, add, toggleDuplicates, cancel
+        case saveAll, edit, delete, add, toggleDuplicates, nextPage, cancel
     }
 
     private struct Option {
@@ -364,6 +365,8 @@ struct RecognizeReceiptIntent: AppIntent {
     private func runReview(_ start: [ReviewItem], steps: inout Int, context: ModelContext, emptyHint: String?) async throws -> [ReviewItem]? {
         var items = start
         var hint = emptyHint
+        // 3.2 (23) 片段每页最多 3 笔（全部字段都显示），多的用「下一页」翻
+        var page = 0
         while true {
             if steps >= Self.maxSteps {
                 // 步数用尽：最后确认一次，取消则抛出错误、不保存
@@ -376,12 +379,21 @@ struct RecognizeReceiptIntent: AppIntent {
             let rows = rowsFor(items, context: context)
             let saving = items.filter(\.willSave)
             let single = items.count == 1
+            let pages = SnippetPager.pageCount(items.count)
+            page = SnippetPager.clamp(page, total: items.count)
             var options: [Option] = []
             if !saving.isEmpty {
                 let total = saving.reduce(0) { $0 + $1.amount }
                 options.append(Option(key: Action.saveAll.rawValue,
                                       title: single ? "✅ 保存" : "✅ 全部保存（\(saving.count) 笔）",
                                       subtitle: "合计 \(Money.format(total))", icon: "checkmark.circle.fill"))
+            }
+            if pages > 1 {
+                let next = (page + 1) % pages
+                options.append(Option(key: Action.nextPage.rawValue,
+                                      title: next == 0 ? "📄 回到第一页（\(SnippetPager.rangeText(total: items.count, page: 0))）"
+                                                       : "📄 下一页（\(SnippetPager.rangeText(total: items.count, page: next))）",
+                                      subtitle: "共 \(items.count) 笔，每页 \(ReceiptStackView.pageSize) 笔", icon: "doc.on.doc"))
             }
             if !items.isEmpty {
                 options.append(Option(key: Action.edit.rawValue, title: single ? "✏️ 修改" : "✏️ 修改第几笔…",
@@ -408,6 +420,9 @@ struct RecognizeReceiptIntent: AppIntent {
                 dialog = (hint ?? "已没有待保存的记录。") + "可以手动添加一笔。"
             } else {
                 dialog = single ? "识别到 1 笔，确认无误就保存：" : "识别到 \(items.count) 笔，请核对："
+                if pages > 1, #available(iOS 26.0, *) {
+                    dialog = "识别到 \(items.count) 笔，当前\(SnippetPager.rangeText(total: items.count, page: page))，请核对："
+                }
                 if items.contains(where: { !$0.isComplete }) {
                     dialog += "\n还款 / 转账还没选好账户：点「修改」→「账户」选择。"
                 }
@@ -418,7 +433,7 @@ struct RecognizeReceiptIntent: AppIntent {
             }
             hint = nil
             RunLog.shared.log(.info, "review-step", "审核第 \(steps) 步：\(items.count) 笔，\(options.count) 个选项")
-            let snippet = ReviewSnippetView(title: items.isEmpty ? "识图记账" : "识别结果", rows: rows)
+            let snippet = ReviewSnippetView(title: items.isEmpty ? "识图记账" : "识别结果", rows: rows, page: page)
             let key = try await choose(options, dialog: dialog, view: snippet)
             RunLog.shared.log(.info, "review-choice", "选择：\(key)")
 
@@ -427,14 +442,18 @@ struct RecognizeReceiptIntent: AppIntent {
                 return items
             case .cancel:
                 return nil
+            case .nextPage:
+                // 翻页不算操作步数
+                steps -= 1
+                page = (page + 1) % max(1, pages)
             case .toggleDuplicates:
                 let allSaving = dups.allSatisfy(\.saveDuplicate)
                 for i in items.indices where items[i].isDuplicate { items[i].saveDuplicate = !allSaving }
             case .delete:
-                guard let index = try await pickItem(items, verb: "删除", steps: &steps, context: context) else { continue }
+                guard let index = try await pickItem(items, verb: "删除", page: page, steps: &steps, context: context) else { continue }
                 items.remove(at: index)
             case .edit:
-                guard let index = try await pickItem(items, verb: "修改", steps: &steps, context: context) else { continue }
+                guard let index = try await pickItem(items, verb: "修改", page: page, steps: &steps, context: context) else { continue }
                 do {
                     items[index] = try await editItem(items[index], number: index + 1, steps: &steps, context: context,
                                                       allItems: items, index: index)
@@ -461,7 +480,7 @@ struct RecognizeReceiptIntent: AppIntent {
 
     /// 选择第几笔；只有一笔时直接返回
     @MainActor
-    private func pickItem(_ items: [ReviewItem], verb: String, steps: inout Int, context: ModelContext) async throws -> Int? {
+    private func pickItem(_ items: [ReviewItem], verb: String, page: Int = 0, steps: inout Int, context: ModelContext) async throws -> Int? {
         guard items.count > 1 else { return items.isEmpty ? nil : 0 }
         steps += 1
         let rows = rowsFor(items, context: context)
@@ -471,7 +490,7 @@ struct RecognizeReceiptIntent: AppIntent {
         }
         options.append(Option(key: "back", title: "返回", icon: "chevron.backward"))
         let key = try await choose(options, dialog: "\(verb)哪一笔？",
-                                   view: ReviewSnippetView(title: "识别结果", rows: rows))
+                                   view: ReviewSnippetView(title: "识别结果", rows: rows, page: page))
         return Int(key)
     }
 

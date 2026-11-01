@@ -33,7 +33,7 @@ struct RulesView: View {
     var body: some View {
         let manual = filtered(rules.filter { !$0.isLearned })
         let learned = filtered(rules.filter(\.isLearned))
-        List {
+        ThemedList {
             Section {
                 Toggle(isOn: $learnEnabled) {
                     Label("自动记住商户分类", systemImage: "brain.head.profile")
@@ -58,7 +58,7 @@ struct RulesView: View {
             Section {
                 if learned.isEmpty {
                     Text(searchText.isEmpty ? "还没有学习到的商户。记几笔带商户的账后会出现在这里。" : "没有匹配的规则")
-                        .font(.subheadline)
+                        .font(.ui(.subheadline))
                         .foregroundStyle(.secondary)
                 }
                 ForEach(learned) { rule in row(rule) }
@@ -115,24 +115,24 @@ struct RulesView: View {
                 VStack(alignment: .leading, spacing: 3) {
                     HStack(spacing: 6) {
                         Text(rule.displayName.isEmpty ? rule.keyword : rule.displayName)
-                            .font(.body)
+                            .font(.ui(.body))
                             .foregroundStyle(rule.isEnabled ? Color.primary : Color.secondary)
                         if !rule.isLearned {
-                            Text("关键词").font(.caption2).padding(.horizontal, 5).padding(.vertical, 1)
-                                .background(Capsule().fill(Color.accentColor.opacity(0.15)))
+                            Text("关键词").font(.ui(.caption2)).padding(.horizontal, 5).padding(.vertical, 1)
+                                .background(Capsule().fill(Color.themeAccent.opacity(0.15)))
                         }
                         if !rule.isEnabled {
-                            Text("已停用").font(.caption2).foregroundStyle(.secondary)
+                            Text("已停用").font(.ui(.caption2)).foregroundStyle(.secondary)
                         }
                     }
                     Text("→ " + target(rule))
-                        .font(.caption)
+                        .font(.ui(.caption))
                         .foregroundStyle(.secondary)
                 }
                 Spacer()
                 if rule.hitCount > 0 {
                     Text("用过 \(rule.hitCount) 次")
-                        .font(.caption2)
+                        .font(.ui(.caption2))
                         .foregroundStyle(.tertiary)
                 }
             }
@@ -165,7 +165,7 @@ struct RuleEditorView: View {
 
     var body: some View {
         NavigationStack {
-            Form {
+            ThemedForm {
                 Section {
                     TextField(isLearned ? "商户名" : "关键词，如：高速、医保、工资", text: $keyword)
                     Picker("类型", selection: $kind) {

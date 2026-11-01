@@ -6,7 +6,7 @@ struct OCRDiagnosticsView: View {
     @State private var status: AppleIntelligenceStatus = .unavailable
 
     var body: some View {
-        List {
+        ThemedList {
             Section {
                 LabeledContent("Apple 智能", value: status.title)
                 LabeledContent("识别引擎", value: OCREngineSetting.preferAppleIntelligence ? "自动（优先 Apple 智能）" : "仅规则")
@@ -26,19 +26,19 @@ struct OCRDiagnosticsView: View {
                     ForEach(items) { d in
                         VStack(alignment: .leading, spacing: 4) {
                             HStack {
-                                Text(d.engine).font(.subheadline.weight(.semibold))
-                                Text(d.context.title).font(.caption).foregroundStyle(.secondary)
+                                Text(d.engine).font(.ui(.subheadline).weight(.semibold))
+                                Text(d.context.title).font(.ui(.caption)).foregroundStyle(.secondary)
                                 Spacer()
-                                Text(DateText.monthDayTime.string(from: d.date)).font(.caption).foregroundStyle(.secondary)
+                                Text(DateText.monthDayTime.string(from: d.date)).font(.ui(.caption)).foregroundStyle(.secondary)
                             }
-                            Text(timing(d)).font(.caption.monospacedDigit())
+                            Text(timing(d)).font(.ui(.caption).monospacedDigit())
                             if let r = d.fallbackReason, !r.isEmpty {
-                                Text(r).font(.caption).foregroundStyle(.orange)
+                                Text(r).font(.ui(.caption)).foregroundStyle(.orange)
                             }
                             if let m = d.modelDetail, !m.isEmpty {
-                                Text(m).font(.caption2).foregroundStyle(.secondary)
+                                Text(m).font(.ui(.caption2)).foregroundStyle(.secondary)
                             }
-                            Text("Apple 智能状态：\(d.aiStatus)").font(.caption2).foregroundStyle(.secondary)
+                            Text("Apple 智能状态：\(d.aiStatus)").font(.ui(.caption2)).foregroundStyle(.secondary)
                         }
                         .padding(.vertical, 2)
                     }

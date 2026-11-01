@@ -42,7 +42,7 @@ struct AccountEditorView: View {
 
     var body: some View {
         NavigationStack {
-            Form {
+            ThemedForm {
                 Section {
                     HStack(spacing: 12) {
                         CategoryIcon(icon: icon, color: Color(hex: colorHex), size: 44)
@@ -335,7 +335,7 @@ struct AccountManagerView: View {
     var body: some View {
         let active = accounts.filter { !$0.isArchived }
         let archived = accounts.filter { $0.isArchived }
-        List {
+        ThemedList {
             Section {
                 ForEach(active) { a in
                     row(a)
@@ -383,11 +383,11 @@ struct AccountManagerView: View {
                 CategoryIcon(icon: a.iconName, color: a.color, size: 34)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(a.name).foregroundStyle(.primary)
-                    Text(a.type.title).font(.caption).foregroundStyle(.secondary)
+                    Text(a.type.title).font(.ui(.caption)).foregroundStyle(.secondary)
                 }
                 Spacer()
                 Text(Money.format(a.type.isLiability ? -a.balance() : a.balance()))
-                    .font(.system(.subheadline, design: .rounded))
+                    .font(.ui(.subheadline, design: .rounded))
                     .foregroundStyle(.secondary)
             }
         }
@@ -398,7 +398,7 @@ struct AccountManagerView: View {
                     a.sortOrder = (accounts.filter { !$0.isArchived }.map(\.sortOrder).max() ?? -1) + 1
                     try? context.save()
                 } label: { Label("恢复", systemImage: "tray.and.arrow.up") }
-                    .tint(.green)
+                    .tint(Color.themeIncome)
             } else {
                 Button {
                     a.isArchived = true

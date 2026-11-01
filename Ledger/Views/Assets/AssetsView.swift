@@ -60,7 +60,7 @@ struct AssetsView: View {
 
         NavigationStack {
           ScrollViewReader { proxy in
-            List {
+            ThemedList {
                 Section {
                     NetWorthCard(netWorth: totalAssets - totalLiabilities, assets: totalAssets,
                                  liabilities: totalLiabilities,
@@ -72,11 +72,8 @@ struct AssetsView: View {
 
                 if active.isEmpty {
                     Section {
-                        ContentUnavailableView {
-                            Label("还没有账户", systemImage: "wallet.pass")
-                        } description: {
-                            Text("添加储蓄卡、支付宝、微信、信用卡等账户，记账时选择账户即可自动计算余额和净资产。")
-                        } actions: {
+                        ThemedEmptyState("还没有账户", systemImage: "wallet.pass",
+                                         description: Text("添加储蓄卡、支付宝、微信、信用卡等账户，记账时选择账户即可自动计算余额和净资产。")) {
                             Button("添加账户") { editorTarget = .new }
                                 .buttonStyle(.borderedProminent)
                         }
@@ -215,7 +212,7 @@ struct AssetsView: View {
                      ? "欠 " + Money.masked(max(0, -total), hidden: hideAmounts)
                      : Money.masked(total, hidden: hideAmounts))
             }
-            .font(.caption)
+            .font(.ui(.caption))
             .textCase(nil)
         }
     }
@@ -233,7 +230,7 @@ struct AssetsView: View {
                 Spacer()
                 Text(Money.masked(total, hidden: hideAmounts))
             }
-            .font(.caption)
+            .font(.ui(.caption))
             .textCase(nil)
         } footer: {
             if list.contains(where: { !$0.includeInNetWorth }) {
@@ -361,7 +358,7 @@ struct NetWorthCard: View {
                     withAnimation { hidden.toggle() }
                 } label: {
                     Image(systemName: hidden ? "eye.slash.fill" : "eye.fill")
-                        .font(.subheadline)
+                        .font(.ui(.subheadline))
                         .foregroundStyle(theme.heroFaint)
                 }
                 .buttonStyle(.plain)
@@ -478,18 +475,18 @@ struct AccountRow: View {
                 HStack(spacing: 4) {
                     Text(account.name).lineLimit(1)
                     if !account.includeInNetWorth {
-                        Image(systemName: "minus.circle").font(.caption2).foregroundStyle(.secondary)
+                        Image(systemName: "minus.circle").font(.ui(.caption2)).foregroundStyle(.secondary)
                     }
                 }
                 Text(subtitle)
-                    .font(.caption)
+                    .font(.ui(.caption))
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
             }
             Spacer(minLength: 8)
             VStack(alignment: .trailing, spacing: 3) {
                 Text(balanceText)
-                    .font(.system(.body, design: .rounded).weight(.semibold))
+                    .font(.ui(.body, design: .rounded).weight(.semibold))
                     .foregroundStyle(balanceColor)
                 if account.type.hasCreditLimit, account.creditLimit > 0, !hidden {
                     CreditUsageBar(used: max(0, -balance), limit: account.creditLimit)
@@ -508,7 +505,7 @@ struct AccountRow: View {
     }
 
     private var balanceColor: Color {
-        if account.type.isLiability { return balance < 0 ? .red : .green }
+        if account.type.isLiability { return balance < 0 ? .red : Color.themeIncome }
         return balance < 0 ? .red : .primary
     }
 
@@ -553,17 +550,17 @@ struct AccountPreviewCard: View {
             HStack(spacing: 10) {
                 CategoryIcon(icon: account.iconName, color: .white, size: 34)
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(account.name).font(.headline)
+                    Text(account.name).font(.ui(.headline))
                     Text(account.type.title + (account.includeInNetWorth ? "" : " · 不计入净资产"))
-                        .font(.caption).opacity(0.85)
+                        .font(.ui(.caption)).opacity(0.85)
                 }
             }
             Text(liability ? (balance <= 0 ? "当前欠款" : "溢缴款") : "当前余额")
-                .font(.caption).opacity(0.85)
+                .font(.ui(.caption)).opacity(0.85)
             Text(Money.masked(liability ? abs(balance) : balance, hidden: hidden))
-                .font(.system(size: 30, weight: .bold, design: .rounded))
+                .font(.uiSystem(size: 30, weight: .bold, design: .rounded))
             if !account.note.isEmpty {
-                Text(account.note).font(.caption).opacity(0.85).lineLimit(2)
+                Text(account.note).font(.ui(.caption)).opacity(0.85).lineLimit(2)
             }
         }
         .foregroundStyle(.white)

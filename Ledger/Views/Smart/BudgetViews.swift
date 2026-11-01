@@ -12,18 +12,18 @@ struct BudgetLineRow: View {
             HStack(spacing: 10) {
                 CategoryIcon(icon: line.icon, color: Color(hex: line.colorHex), size: compact ? 28 : 34)
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(line.name).font(.subheadline.weight(.medium))
+                    Text(line.name).font(.ui(.subheadline).weight(.medium))
                     Text(line.isOver ? "超支 \(Money.format(line.spent - line.budget))" : "剩余 \(Money.format(line.remaining))")
-                        .font(.caption)
+                        .font(.ui(.caption))
                         .foregroundStyle(line.isOver ? Color.red : Color.secondary)
                 }
                 Spacer()
                 VStack(alignment: .trailing, spacing: 2) {
                     Text("\(Money.percent(ratio))%")
-                        .font(.subheadline.weight(.semibold).monospacedDigit())
+                        .font(.ui(.subheadline).weight(.semibold).monospacedDigit())
                         .foregroundStyle(Self.color(ratio))
                     Text("\(Money.format(line.spent)) / \(Money.format(line.budget))")
-                        .font(.caption2.monospacedDigit())
+                        .font(.ui(.caption2).monospacedDigit())
                         .foregroundStyle(.secondary)
                 }
             }
@@ -37,7 +37,7 @@ struct BudgetLineRow: View {
             .frame(height: 6)
             if line.carry != 0 {
                 Text("含上月结转 \(line.carry > 0 ? "+" : "")\(Money.format(line.carry))")
-                    .font(.caption2)
+                    .font(.ui(.caption2))
                     .foregroundStyle(.secondary)
             }
         }
@@ -46,7 +46,7 @@ struct BudgetLineRow: View {
     static func color(_ ratio: Double) -> Color {
         if ratio > 1 { return .red }
         if ratio >= 0.8 { return .orange }
-        return .green
+        return Color.themeIncome
     }
 }
 
@@ -80,7 +80,7 @@ struct BudgetView: View {
         }, by: { $0.category?.id }).mapValues { $0.reduce(0) { $0 + $1.amount } }
         let categorySum = expenseCategories.reduce(0) { $0 + $1.monthlyBudget }
 
-        Form {
+        ThemedForm {
             if status.total != nil || status.yearly != nil {
                 Section("本期进度") {
                     if let t = status.total { BudgetLineRow(line: t).padding(.vertical, 4) }
@@ -115,7 +115,7 @@ struct BudgetView: View {
                                 Text(c.name)
                                 Spacer()
                                 Text("本月 \(Money.format(spentByCategory[c.id] ?? 0)) · 未设置")
-                                    .font(.caption)
+                                    .font(.ui(.caption))
                                     .foregroundStyle(.secondary)
                             }
                         }
@@ -216,7 +216,7 @@ struct BudgetStatsCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
-                Label("预算", systemImage: "target").font(.headline)
+                Label("预算", systemImage: "target").font(.ui(.headline))
                 Spacer()
                 NavigationLink {
                     BudgetView()
@@ -225,7 +225,7 @@ struct BudgetStatsCard: View {
                         Text("管理")
                         Image(systemName: "chevron.right")
                     }
-                    .font(.subheadline)
+                    .font(.ui(.subheadline))
                 }
             }
             if let t = status.total {

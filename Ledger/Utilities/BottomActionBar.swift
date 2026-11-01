@@ -10,15 +10,37 @@ extension View {
             .toolbar(.hidden, for: .tabBar)
             .safeAreaInset(edge: .bottom, spacing: 0) {
                 if isPresented {
-                    VStack(spacing: 0) {
-                        Divider()
+                    ThemedActionBarChrome {
                         content
                             .padding(.horizontal, 16)
                             .padding(.vertical, 10)
                     }
-                    .frame(maxWidth: .infinity)
-                    .background(.bar)
                 }
             }
+    }
+}
+
+/// 3.2 (23) 底部操作栏外观：默认皮肤 = 原来的分隔线 + 系统栏材质；小票皮肤 = 虚线 + 纸色底 + 打字机字体
+private struct ThemedActionBarChrome<Content: View>: View {
+    @Environment(\.appTheme) private var theme
+    @ViewBuilder let content: Content
+
+    var body: some View {
+        if theme.isReceipt {
+            VStack(spacing: 0) {
+                ThemedDashedRule()
+                content
+                    .font(theme.mono(.body, weight: .bold))
+            }
+            .frame(maxWidth: .infinity)
+            .background(theme.paper.ignoresSafeArea(edges: .bottom))
+        } else {
+            VStack(spacing: 0) {
+                Divider()
+                content
+            }
+            .frame(maxWidth: .infinity)
+            .background(.bar)
+        }
     }
 }

@@ -76,7 +76,7 @@ struct DecoyDataEditorHost: View {
         // （TabView 外层的 safeAreaInset 在 iOS 26/27 上不会传进各 tab 的 NavigationStack。）
         VStack(spacing: 0) {
             HStack {
-                Text("编辑防窥数据").font(.subheadline.weight(.semibold))
+                Text("编辑防窥数据").font(.ui(.subheadline).weight(.semibold))
                 Spacer()
                 Button("完成") { dismiss() }
                     .fontWeight(.semibold)
@@ -100,9 +100,9 @@ struct DecoyDataEditorHost: View {
                             .tabItem { Label("资产", systemImage: "wallet.pass.fill") }
                             .tag(1)
                         NavigationStack {
-                            Form {
+                            ThemedForm {
                                 Text("这里改的是防窥账本里的账户和流水，不影响真实数据。改完点「完成」。")
-                                    .font(.subheadline)
+                                    .font(.ui(.subheadline))
                                     .foregroundStyle(.secondary)
                             }
                             .navigationTitle("说明")

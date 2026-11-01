@@ -18,7 +18,7 @@ struct RecurringListView: View {
             if a.isPaused != b.isPaused { return !a.isPaused }
             return (RecurringEngine.nextOccurrence(a, keys: keys) ?? .distantFuture) < (RecurringEngine.nextOccurrence(b, keys: keys) ?? .distantFuture)
         }
-        List {
+        ThemedList {
             Section {
                 HStack {
                     StatBlock(title: "本月预计支出", value: Money.format(monthExpense))
@@ -31,7 +31,7 @@ struct RecurringListView: View {
             }
 
             if rules.isEmpty {
-                ContentUnavailableView("还没有周期账单", systemImage: "arrow.triangle.2.circlepath",
+                ThemedEmptyState("还没有周期账单", systemImage: "arrow.triangle.2.circlepath",
                                        description: Text("房租、会员、还款、工资……点右上角 ＋ 添加，或在记录详情里「设为周期账单」"))
                     .listRowBackground(Color.clear)
             } else {
@@ -92,20 +92,20 @@ struct RecurringListView: View {
                 HStack(spacing: 6) {
                     Text(rule.name).lineLimit(1)
                     Text(rule.autoCreate ? "自动" : "提醒")
-                        .font(.caption2)
+                        .font(.ui(.caption2))
                         .padding(.horizontal, 5).padding(.vertical, 1)
-                        .background(Capsule().fill((rule.autoCreate ? Color.green : Color.orange).opacity(0.15)))
-                        .foregroundStyle(rule.autoCreate ? Color.green : Color.orange)
-                    if rule.remindEnabled { Image(systemName: "bell.fill").font(.caption2).foregroundStyle(.secondary) }
+                        .background(Capsule().fill((rule.autoCreate ? Color.themeIncome : Color.orange).opacity(0.15)))
+                        .foregroundStyle(rule.autoCreate ? Color.themeIncome : Color.orange)
+                    if rule.remindEnabled { Image(systemName: "bell.fill").font(.ui(.caption2)).foregroundStyle(.secondary) }
                 }
                 Text(rule.spec.description(calendar: DateText.calendar) + " · " + nextText(next, paused: rule.isPaused, overdue: overdue))
-                    .font(.caption)
+                    .font(.ui(.caption))
                     .foregroundStyle(overdue ? Color.orange : Color.secondary)
             }
             Spacer()
             Text(rule.kind.sign + Money.format(rule.amount))
-                .font(.callout.weight(.semibold).monospacedDigit())
-                .foregroundStyle(rule.kind == .income ? Color.green
+                .font(.ui(.callout).weight(.semibold).monospacedDigit())
+                .foregroundStyle(rule.kind == .income ? Color.themeIncome
                                  : (rule.kind == .contribution ? Color(hex: "#E8A33D")
                                     : (rule.kind == .transfer ? Color.secondary : Color.primary)))
         }
@@ -179,7 +179,7 @@ struct RecurringEditorView: View {
     }
 
     var body: some View {
-        Form {
+        ThemedForm {
             Section {
                 TextField("名称，如：房租、视频会员", text: $name)
                 Picker("类型", selection: $kind) {
@@ -190,7 +190,7 @@ struct RecurringEditorView: View {
                     Text(Money.symbol).foregroundStyle(.secondary)
                     TextField("金额", text: $amountText)
                         .keyboardType(.decimalPad)
-                        .font(.title3.weight(.semibold).monospacedDigit())
+                        .font(.ui(.title3).weight(.semibold).monospacedDigit())
                 }
             }
 

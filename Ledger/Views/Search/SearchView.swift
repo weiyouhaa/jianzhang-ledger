@@ -63,7 +63,7 @@ struct SearchView: View {
         let expense = results.filter { $0.countsAsExpense(includeRepayment: repaymentAsExpense) }.reduce(0) { $0 + $1.amount }
         let income = results.filter { $0.kind == .income }.reduce(0) { $0 + $1.amount }
 
-        List {
+        ThemedList {
             Section {
                 Picker("类型", selection: $kindFilter) {
                     Text("全部").tag(0)

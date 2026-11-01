@@ -9,11 +9,16 @@ struct RootView: View {
     @AppStorage(SettingsKey.skin, store: .standard) private var skinRaw = AppSkin.default.rawValue
     @AppStorage(SettingsKey.hideInAppSwitcher, store: .standard) private var hideInAppSwitcher = true
     @State private var lockWindowShown = false
+    /// 3.2 (23) 当前已应用到 UIKit 外观（导航栏 / 标签栏）的皮肤；变化时整棵主界面重建一次
+    @State private var chromeSkin = AppSkin.current.rawValue
+    /// 提到这里：皮肤切换重建主界面后仍停留在原来的标签页
+    @State private var tab = ScreenshotDemo.initialTab
 
     var body: some View {
         ZStack {
-            MainTabView()
-                .modifier(RootThemeInjector(skinRaw: skinRaw))
+            MainTabView(tab: $tab)
+                .modifier(RootThemeInjector(skinRaw: chromeSkin))
+                .id(chromeSkin)
 
             if ScreenshotDemo.screen == "reviewsnippet" {
                 ReviewSnippetDemoView().zIndex(3)
@@ -36,6 +41,7 @@ struct RootView: View {
             // 兜底：如果无法创建独立锁屏窗口，则在视图层级内显示锁屏
             if lock.isLocked && !lockWindowShown {
                 LockScreenView()
+                    .themedChrome()
                     .transition(.opacity)
                     .zIndex(2)
             }
@@ -49,6 +55,11 @@ struct RootView: View {
             }
             guard url.scheme == "jianzhang" else { return }
             if !lock.isLocked { PendingAppEdit.consumeIfNeeded() }
+        }
+        .onChange(of: skinRaw) { _, newValue in
+            // 先改 UIKit 外观，再重建界面（新建的导航栏 / 标签栏才会用新外观）
+            ThemeChrome.apply(AppSkin.stored(newValue))
+            chromeSkin = newValue
         }
         .onAppear {
             syncLockWindow(lock.isLocked)
@@ -144,7 +155,7 @@ struct RootView: View {
 }
 
 struct MainTabView: View {
-    @State private var tab = ScreenshotDemo.initialTab
+    @Binding var tab: Int
     @ObservedObject private var router = NotificationRouter.shared
 
     var body: some View {
@@ -193,8 +204,17 @@ private struct RootThemeInjector: ViewModifier {
 
     func body(content: Content) -> some View {
         let theme = AppTheme.resolve(skin: AppSkin.stored(skinRaw), scheme: scheme)
-        content
-            .environment(\.appTheme, theme)
-            .tint(theme.accent)
+        if theme.isReceipt {
+            // 小票皮肤：默认文字颜色 / 字体也统一（.secondary 等层级色随之变成暖灰）
+            content
+                .environment(\.appTheme, theme)
+                .tint(theme.accent)
+                .foregroundStyle(theme.ink)
+                .font(.ui(.body))
+        } else {
+            content
+                .environment(\.appTheme, theme)
+                .tint(theme.accent)
+        }
     }
 }

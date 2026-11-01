@@ -35,6 +35,8 @@ struct ReviewRow: Identifiable, Hashable {
     var channel: String? = nil
     /// 金额数值（合计用）
     var amount: Double = 0
+    /// 3.2 (23) 优惠 / 立减说明（截图上识别到时）
+    var discount: String? = nil
 
     enum DuplicateState: Hashable { case none, skip, saveAnyway }
 
@@ -82,12 +84,19 @@ extension Color {
 }
 
 enum ReceiptFont {
-    /// 标题「RECEIPT」用打字机字体；中文自动回落到系统字体
+    /// 3.2 (23) 数字 / 粗体打字机：Courier Prime Bold（中文回落宋体），随动态字体缩放
     static func typewriter(_ size: CGFloat, relativeTo style: Font.TextStyle) -> Font {
-        .custom("CourierNewPS-BoldMT", size: size, relativeTo: style)
+        ReceiptTypeface.scaled(ReceiptTypeface.monoBold, size, relativeTo: style)
     }
+    /// 大标题：Special Elite（做旧打字机）
+    static func display(_ size: CGFloat, relativeTo style: Font.TextStyle) -> Font {
+        ReceiptTypeface.scaled(ReceiptTypeface.display, size, relativeTo: style)
+    }
+    /// 正文：Courier Prime，粗细只分常规 / 粗体
     static func mono(_ style: Font.TextStyle, _ weight: Font.Weight = .regular) -> Font {
-        .system(style, design: .monospaced).weight(weight)
+        let bold = weight == .semibold || weight == .bold || weight == .heavy || weight == .black
+        return ReceiptTypeface.scaled(bold ? ReceiptTypeface.monoBold : ReceiptTypeface.mono,
+                                      ReceiptTypeface.baseSize(style), relativeTo: style)
     }
 }
 
@@ -390,91 +399,166 @@ struct ReceiptLineItem: View {
     }
 }
 
-// MARK: - 整个片段（3.1 (22) 紧凑版）
+// MARK: - 整个片段（3.2 (23) 全量信息版）
 
-/// 快捷指令 / Siri 的确认弹窗对片段有高度上限，超出的部分会被裁掉，按钮也被挤得看不全。
-/// 3.1 (22) 起片段只放「核对用」的紧凑小票：金额 + 标题一行、两列键值、提示合成一行；
-/// 并给内容一个高度预算，用 ViewThatFits 依次尝试 紧凑 → 精简 → 极简，放不下就降级而不是被裁掉。
-/// 完整的逐项小票移到 App 编辑页顶部（RecordSummaryCard）。
+/// 快捷指令 / Siri 的确认弹窗对片段有高度上限（HIG 建议自定义片段不超过约 340–400pt，超出会被裁掉）。
+/// 3.1 (22) 用「紧凑 → 精简 → 极简」逐级隐藏字段 / 行，结果信息不全。3.2 (23) 改为：
+/// 1. 每一笔都显示全部信息（类型、金额、商户、分类、时间、来源、账户、备注、优惠、时间来源 / 重复提醒），
+///    用 11pt 等宽小字 + 两列「标签 值」网格，长文字换行而不是截断；
+/// 2. 一页最多 3 笔（更多的用「下一页」选项翻页，合计行始终按全部记录计算）；
+/// 3. 仍然放不下时只做等比缩小字号（1.0 → 0.56），绝不再隐藏任何字段或行；
+/// 4. 去掉原来的标题行 / RECEIPT / 引擎行，笔数和引擎并入底部一行小字，省出空间。
 struct ReceiptStackView: View {
     let title: String
+    /// 当前页要显示的记录
     let rows: [ReviewRow]
     var footnote: String? = nil
     var engineLine: String? = nil
-    /// 「保存 2 笔 · 跳过 1 笔」/「共 3 笔」
+    /// 「共 5 笔 · 第 1–3 笔」等
     var countText: String = ""
-    /// 合计行：例如 [("支出", "¥59.50"), ("收入", "¥200.00")]
+    /// 合计行：例如 [("支出", "¥59.50"), ("收入", "¥200.00")]（按全部记录）
     var totals: [(String, String)] = []
-    var maxRows = 8
-    /// 片段内容的高度预算（pt）；nil = 不限高度，只用「紧凑」一级
+    /// 片段内容的高度预算（pt）；nil = 不限高度，按原大小显示
     var heightBudget: CGFloat? = ReceiptStackView.defaultBudget
-    static let defaultBudget: CGFloat = 360
+    /// 比系统建议的 340pt 再保守一点
+    static let defaultBudget: CGFloat = 320
+    /// 一页最多几笔
+    static let pageSize = 3
+    /// 放不下时依次尝试的字号缩放（每一级都是完整信息）
+    static let scales: [CGFloat] = [1.0, 0.9, 0.8, 0.72, 0.64, 0.56]
 
     @Environment(\.colorScheme) var scheme
-
-    enum Density: Int { case compact, minimal, tiny }
 
     var body: some View {
         let palette = ReceiptPalette.paper(scheme)
         if let heightBudget {
             ViewThatFits(in: .vertical) {
-                content(.compact, palette)
-                content(.minimal, palette)
-                content(.tiny, palette)
+                content(Self.scales[0], palette)
+                content(Self.scales[1], palette)
+                content(Self.scales[2], palette)
+                content(Self.scales[3], palette)
+                content(Self.scales[4], palette)
+                content(Self.scales[5], palette)
             }
             .frame(maxHeight: heightBudget, alignment: .top)
         } else {
-            content(.compact, palette)
+            content(1, palette)
         }
     }
 
-    /// 某一密度下的完整片段（预览 / 测试也可以直接指定密度）
-    func content(_ density: Density, _ palette: ReceiptPalette) -> some View {
-        VStack(alignment: .leading, spacing: density == .compact ? 8 : 6) {
-            header(density)
-            if rows.isEmpty {
+    /// 只有出错 / 已取消 / 第 N 笔这类标题才显示（「识别结果」不占一行）
+    private var showsTitle: Bool { !title.isEmpty && title != "识别结果" }
+
+    /// 某一缩放下的完整片段（预览也可以直接调用）
+    func content(_ s: CGFloat, _ palette: ReceiptPalette) -> some View {
+        VStack(alignment: .leading, spacing: 5 * s) {
+            if showsTitle {
+                Text(title)
+                    .font(ReceiptTypeface.fixed(ReceiptTypeface.display, 13 * s))
+                    .foregroundStyle(palette.ink)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            if rows.isEmpty && footnote == nil {
                 Text("没有待保存的记录。可以「添加一笔」，或取消。")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-            } else if rows.count == 1 && density != .tiny {
-                SnippetSingleCard(row: rows[0], density: density, palette: palette)
-            } else {
-                SnippetLineList(rows: rows, density: density, maxRows: maxRows, totals: totals, palette: palette)
+                    .font(ReceiptTypeface.fixed(ReceiptTypeface.mono, 11 * s))
+                    .foregroundStyle(palette.faint)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            ForEach(Array(rows.enumerated()), id: \.element.id) { offset, row in
+                if offset > 0 { DashedRule(color: palette.rule) }
+                SnippetRecord(row: row, scale: s, palette: palette)
+            }
+            if !totals.isEmpty || !footerMeta.isEmpty {
+                DashedRule(color: palette.rule)
+                footer(s, palette)
             }
             if let footnote {
                 Text(footnote)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(density == .compact ? 3 : 1)
-            }
-            if density == .compact, let engineLine, !rows.isEmpty || footnote != nil {
-                Label(engineLine, systemImage: engineLine.contains("Apple 智能") && !engineLine.contains("已用规则") ? "sparkles" : "text.magnifyingglass")
-                    .font(ReceiptFont.mono(.caption2))
-                    .foregroundStyle(.tertiary)
-                    .lineLimit(1)
+                    .font(ReceiptTypeface.fixed(ReceiptTypeface.mono, 10.5 * s))
+                    .foregroundStyle(palette.accent)
+                    .fixedSize(horizontal: false, vertical: true)
             }
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, density == .compact ? 10 : 8)
+        .compactReceiptPaper(palette, padding: max(5, 8 * s))
+        .padding(.horizontal, 6)
+        .padding(.vertical, 4)
     }
 
-    private func header(_ density: Density) -> some View {
-        HStack(alignment: .firstTextBaseline, spacing: 6) {
-            Text(title)
-                .font(.system(.subheadline, design: .serif).weight(.bold))
-                .lineLimit(1)
-            if density == .compact {
-                Text("RECEIPT")
-                    .font(ReceiptFont.typewriter(12, relativeTo: .caption))
-                    .foregroundStyle(.secondary)
+    /// 底部小字：笔数 / 页码 · 识别引擎
+    private var footerMeta: String {
+        var parts: [String] = []
+        if !countText.isEmpty { parts.append(countText) }
+        if let engineLine, !engineLine.isEmpty {
+            parts.append(engineLine.replacingOccurrences(of: "识别引擎：", with: "引擎 "))
+        }
+        return parts.joined(separator: " · ")
+    }
+
+    private func footer(_ s: CGFloat, _ palette: ReceiptPalette) -> some View {
+        VStack(alignment: .leading, spacing: 2 * s) {
+            if !totals.isEmpty {
+                totalsText(palette)
+                    .font(ReceiptTypeface.fixed(ReceiptTypeface.monoBold, 11 * s))
+                    .fixedSize(horizontal: false, vertical: true)
             }
-            Spacer(minLength: 4)
-            if !countText.isEmpty {
-                Text(countText)
-                    .font(ReceiptFont.mono(.caption, .medium))
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
+            if !footerMeta.isEmpty {
+                Text(footerMeta)
+                    .font(ReceiptTypeface.fixed(ReceiptTypeface.mono, 9.5 * s))
+                    .foregroundStyle(palette.faint)
+                    .fixedSize(horizontal: false, vertical: true)
             }
+        }
+    }
+
+    private func totalsText(_ palette: ReceiptPalette) -> Text {
+        var text = Text("合计").foregroundStyle(palette.faint)
+        for t in totals {
+            text = text + Text("  \(t.0) \(t.1)").foregroundStyle(t.0 == "收入" ? palette.income : palette.ink)
+        }
+        return text
+    }
+}
+
+/// 片段分页（快捷指令里用「下一页」选项翻页）
+enum SnippetPager {
+    static func pageCount(_ total: Int) -> Int {
+        max(1, (total + ReceiptStackView.pageSize - 1) / ReceiptStackView.pageSize)
+    }
+
+    static func clamp(_ page: Int, total: Int) -> Int { min(max(page, 0), pageCount(total) - 1) }
+
+    static func slice(_ rows: [ReviewRow], page: Int) -> [ReviewRow] {
+        let p = clamp(page, total: rows.count)
+        return Array(rows.dropFirst(p * ReceiptStackView.pageSize).prefix(ReceiptStackView.pageSize))
+    }
+
+    /// 「第 1–3 笔」
+    static func rangeText(total: Int, page: Int) -> String {
+        let p = clamp(page, total: total)
+        let first = p * ReceiptStackView.pageSize + 1
+        let last = min(total, first + ReceiptStackView.pageSize - 1)
+        return first == last ? "第 \(first) 笔" : "第 \(first)–\(last) 笔"
+    }
+
+    /// 「共 5 笔（保存 4 · 跳过 1）· 第 1–3 笔」
+    static func countText(_ rows: [ReviewRow], page: Int) -> String {
+        guard !rows.isEmpty else { return "" }
+        let skipped = rows.filter { $0.duplicate == .skip }.count
+        var s = "共 \(rows.count) 笔"
+        if skipped > 0 { s += "（保存 \(rows.count - skipped) · 跳过 \(skipped)）" }
+        if pageCount(rows.count) > 1 {
+            s += " · \(rangeText(total: rows.count, page: page))（\(clamp(page, total: rows.count) + 1)/\(pageCount(rows.count)) 页）"
+        }
+        return s
+    }
+
+    /// 合计（只算会保存的），按支出 / 收入 / 还款 / 转账分别合计
+    static func totals(_ rows: [ReviewRow], format: (Double) -> String) -> [(String, String)] {
+        let saving = rows.filter { $0.duplicate != .skip }
+        return ["支出", "收入", "还款", "转账"].compactMap { kind in
+            let list = saving.filter { $0.resolvedKind == kind }
+            guard !list.isEmpty else { return nil }
+            return (kind, format(list.reduce(0) { $0 + $1.amount }))
         }
     }
 }
@@ -498,7 +582,7 @@ extension ReviewRow {
         return dateText
     }
 
-    /// 片段里的提示：时间来源 / 手动添加 / 可能重复，合成一行
+    /// 片段里的提示：时间来源 / 手动添加 / 可能重复
     var snippetFlags: [String] {
         var flags: [String] = []
         if let timeHint { flags.append(timeHint) }
@@ -521,182 +605,92 @@ extension ReviewRow {
     }
 
     var trimmedAmount: String { amountText.trimmingCharacters(in: .whitespaces) }
+
+    /// 截图来源：微信 / 支付宝…；手动添加的写「手动」
+    var sourceText: String {
+        if let channel, !channel.isEmpty { return channel }
+        return isManual ? "手动" : "截图"
+    }
 }
 
-/// 片段里只有 1 笔：紧凑小票（头部金额 + 标题，两列键值）
-struct SnippetSingleCard: View {
+/// 片段里的一笔：所有字段都显示，长文字换行
+struct SnippetRecord: View {
     let row: ReviewRow
-    let density: ReceiptStackView.Density
+    let scale: CGFloat
     let palette: ReceiptPalette
-    @Environment(\.dynamicTypeSize) private var typeSize
+
+    private var s: CGFloat { scale }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: density == .compact ? 7 : 4) {
-            HStack(alignment: .center, spacing: 8) {
+        VStack(alignment: .leading, spacing: 2.5 * s) {
+            HStack(alignment: .firstTextBaseline, spacing: 5 * s) {
+                Text("\(row.index)")
+                    .font(ReceiptTypeface.fixed(ReceiptTypeface.monoBold, 10 * s))
+                    .foregroundStyle(palette.faint)
                 Image(systemName: row.icon)
-                    .font(.caption.weight(.bold))
+                    .font(.system(size: 10 * s, weight: .bold))
                     .foregroundStyle(Color.cardHex(row.colorHex))
-                    .frame(width: 26, height: 26)
-                    .background(Circle().fill(Color.cardHex(row.colorHex).opacity(0.16)))
                     .accessibilityHidden(true)
-                VStack(alignment: .leading, spacing: 1) {
-                    Text(row.title)
-                        .font(.system(.subheadline, design: .serif).weight(.bold))
-                        .foregroundStyle(palette.ink)
-                        .lineLimit(density == .compact ? 2 : 1)
-                    Text(density == .compact ? "\(row.resolvedKind) · \(row.categoryName)"
-                                             : "\(row.resolvedKind) · \(row.snippetMeta)")
-                        .font(ReceiptFont.mono(.caption2))
-                        .foregroundStyle(palette.faint)
-                        .lineLimit(1)
-                }
-                Spacer(minLength: 6)
+                Text(row.title)
+                    .font(ReceiptTypeface.fixed(ReceiptTypeface.monoBold, 12 * s))
+                    .foregroundStyle(palette.ink)
+                    .fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: 4 * s)
                 Text(row.trimmedAmount)
-                    .font(.system(density == .compact ? .title3 : .headline, design: .monospaced).weight(.bold))
+                    .font(ReceiptTypeface.fixed(ReceiptTypeface.monoBold, 14 * s))
                     .foregroundStyle(row.isIncome ? palette.income : palette.ink)
                     .strikethrough(row.duplicate == .skip, color: palette.faint)
-                    .opacity(row.duplicate == .skip ? 0.5 : 1)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.7)
-                    .layoutPriority(1)
+                    .opacity(row.duplicate == .skip ? 0.55 : 1)
+                    .fixedSize()
             }
-            if density == .compact {
-                DashedRule(color: palette.rule)
-                Grid(alignment: .leading, horizontalSpacing: 10, verticalSpacing: 4) {
-                    GridRow {
-                        kv("时间", row.shortDateText)
-                        kv("来源", row.channel.flatMap { $0.isEmpty ? nil : $0 } ?? (row.isManual ? "手动" : "截图"))
-                    }
-                    if row.isTransfer {
-                        GridRow { kv("付款", row.fromAccount ?? "—", warn: (row.fromAccount ?? "未").hasPrefix("未")).gridCellColumns(2) }
-                        GridRow {
-                            kv(row.categoryName == "信用卡还款" ? "还入" : "收款", row.toAccount ?? "—",
-                               warn: (row.toAccount ?? "未").hasPrefix("未")).gridCellColumns(2)
-                        }
-                    } else {
-                        GridRow { kv("账户", row.accountName, warn: row.accountName.hasPrefix("未")).gridCellColumns(2) }
-                    }
-                    if !row.note.isEmpty, !row.noteIsTitle {
-                        GridRow { kv("备注", row.note).gridCellColumns(2) }
-                    }
-                }
+            pair(("类型", row.resolvedKind, false), ("分类", row.categoryName, false))
+            pair(("时间", row.shortDateText, false), ("来源", row.sourceText, false))
+            if row.isTransfer {
+                kv("付款", row.fromAccount ?? "—", warn: (row.fromAccount ?? "未").hasPrefix("未"))
+                kv(row.categoryName == "信用卡还款" ? "还入" : "收款", row.toAccount ?? "—",
+                   warn: (row.toAccount ?? "未").hasPrefix("未"))
+            } else {
+                kv("账户", row.accountName, warn: row.accountName.hasPrefix("未"))
+            }
+            if !row.merchant.isEmpty, row.title != row.merchant {
+                kv("商户", row.merchant)
+            }
+            if !row.note.isEmpty, !row.noteIsTitle, row.note != row.discount {
+                kv("备注", row.note)
+            }
+            if let discount = row.discount, !discount.isEmpty {
+                kv("优惠", discount)
             }
             if !row.snippetFlags.isEmpty {
-                Label(row.snippetFlags.joined(separator: " · "),
-                      systemImage: row.duplicate == .none ? "info.circle" : "exclamationmark.triangle")
-                    .font(ReceiptFont.mono(.caption2))
+                Text("⚠︎ " + row.snippetFlags.joined(separator: " · "))
+                    .font(ReceiptTypeface.fixed(ReceiptTypeface.mono, 10 * s))
                     .foregroundStyle(palette.accent)
-                    .lineLimit(1)
+                    .fixedSize(horizontal: false, vertical: true)
             }
         }
-        .compactReceiptPaper(palette, padding: density == .compact ? 10 : 8)
         .accessibilityElement(children: .combine)
+    }
+
+    /// 两列：左右各一个「标签 值」，等宽
+    private func pair(_ a: (String, String, Bool), _ b: (String, String, Bool)) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 8 * s) {
+            kv(a.0, a.1, warn: a.2)
+            kv(b.0, b.1, warn: b.2)
+        }
     }
 
     private func kv(_ label: String, _ value: String, warn: Bool = false) -> some View {
-        HStack(alignment: .firstTextBaseline, spacing: 5) {
+        HStack(alignment: .firstTextBaseline, spacing: 4 * s) {
             Text(label)
-                .font(ReceiptFont.mono(.caption2))
+                .font(ReceiptTypeface.fixed(ReceiptTypeface.mono, 9.5 * s))
                 .foregroundStyle(palette.faint)
                 .fixedSize()
-            Text(value)
-                .font(ReceiptFont.mono(.caption, .medium))
+            Text(value.isEmpty ? "—" : value)
+                .font(ReceiptTypeface.fixed(ReceiptTypeface.mono, 11 * s))
                 .foregroundStyle(warn ? palette.accent : palette.ink)
-                .lineLimit(typeSize.isAccessibilitySize ? 2 : 1)
-                .truncationMode(.middle)
+                .fixedSize(horizontal: false, vertical: true)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-    }
-}
-
-/// 片段里有多笔：每笔一到两行 + 合计；精简时每笔一行，极简时只剩合计
-struct SnippetLineList: View {
-    let rows: [ReviewRow]
-    let density: ReceiptStackView.Density
-    var maxRows = 8
-    var totals: [(String, String)] = []
-    let palette: ReceiptPalette
-
-    private var limit: Int {
-        switch density {
-        case .compact: return min(maxRows, 5)
-        case .minimal: return min(maxRows, 3)
-        case .tiny: return 0
-        }
-    }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: density == .compact ? 6 : 4) {
-            ForEach(Array(rows.prefix(limit).enumerated()), id: \.element.id) { offset, row in
-                if offset > 0 { DashedRule(color: palette.rule.opacity(0.55)) }
-                line(row)
-            }
-            if rows.count > limit {
-                Text(limit == 0 ? "共 \(rows.count) 笔，详情见下方选项" : "还有 \(rows.count - limit) 笔…")
-                    .font(ReceiptFont.mono(.caption2))
-                    .foregroundStyle(palette.faint)
-            }
-            if !totals.isEmpty {
-                DashedRule(color: palette.rule)
-                totalsLine
-            }
-        }
-        .compactReceiptPaper(palette, padding: density == .compact ? 10 : 8)
-    }
-
-    private func line(_ row: ReviewRow) -> some View {
-        HStack(alignment: .firstTextBaseline, spacing: 6) {
-            Text("\(row.index)")
-                .font(ReceiptFont.mono(.caption2, .bold))
-                .foregroundStyle(palette.faint)
-                .frame(minWidth: 12, alignment: .leading)
-            Image(systemName: row.icon)
-                .font(.caption2.weight(.bold))
-                .foregroundStyle(Color.cardHex(row.colorHex))
-                .accessibilityHidden(true)
-            VStack(alignment: .leading, spacing: 1) {
-                Text(row.title)
-                    .font(.system(.footnote, design: .serif).weight(.semibold))
-                    .foregroundStyle(palette.ink)
-                    .lineLimit(1)
-                if density == .compact {
-                    meta(row)
-                        .font(ReceiptFont.mono(.caption2))
-                        .lineLimit(1)
-                }
-            }
-            Spacer(minLength: 6)
-            Text(row.trimmedAmount)
-                .font(ReceiptFont.mono(.footnote, .bold))
-                .foregroundStyle(row.isIncome ? palette.income : palette.ink)
-                .strikethrough(row.duplicate == .skip, color: palette.faint)
-                .opacity(row.duplicate == .skip ? 0.5 : 1)
-                .lineLimit(1)
-                .fixedSize()
-        }
-        .accessibilityElement(children: .combine)
-    }
-
-    private func meta(_ row: ReviewRow) -> Text {
-        let flags = row.snippetFlags
-        let flagText = flags.isEmpty ? Text("") : Text(flags.joined(separator: " · ") + " · ").foregroundStyle(palette.accent)
-        return flagText + Text(row.snippetMeta).foregroundStyle(palette.faint)
-    }
-
-    private var totalsLine: some View {
-        HStack(alignment: .firstTextBaseline, spacing: 8) {
-            Text("合计")
-                .font(ReceiptFont.mono(.caption2, .semibold))
-                .foregroundStyle(palette.faint)
-            Spacer(minLength: 4)
-            ForEach(Array(totals.enumerated()), id: \.offset) { _, t in
-                Text("\(t.0) \(t.1)")
-                    .font(ReceiptFont.mono(.caption, .bold))
-                    .foregroundStyle(t.0 == "收入" ? palette.income : palette.ink)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.8)
-            }
-        }
     }
 }
 
@@ -933,22 +927,23 @@ extension RecordCardInfo {
 extension ReviewRow {
     static let samples: [ReviewRow] = [
         ReviewRow(index: 1, isIncome: false, amountText: "-¥39.80", categoryName: "餐饮", icon: "fork.knife", colorHex: "#FF9500",
-                  merchant: "示例烧腊饭店（示例大厦店）", note: "示例立减 2.00", accountName: "储蓄卡-示例银行", timeText: "10月19日 12:18",
-                  duplicate: .none, isManual: false, kindText: "支出", dateText: "2026年10月19日 12:18", channel: "云闪付"),
+                  merchant: "示例烧腊饭店（示例大厦店）", note: "午餐 两人份", accountName: "储蓄卡-示例银行", timeText: "10月19日 12:18",
+                  duplicate: .none, isManual: false, kindText: "支出", dateText: "2026年10月19日 12:18", channel: "云闪付",
+                  amount: 39.80, discount: "示例立减 2.00"),
         ReviewRow(index: 2, isIncome: false, amountText: "-¥23.50", categoryName: "交通", icon: "car.fill", colorHex: "#0A84FF",
                   merchant: "示例出行", note: "打车去公司", accountName: "支付宝", timeText: "10月19日 08:45",
                   duplicate: .none, isManual: false, kindText: "支出", dateText: "2026年10月19日 08:45",
-                  timeHint: "时间取自截图", channel: "支付宝"),
+                  timeHint: "时间取自截图", channel: "支付宝", amount: 23.50),
         ReviewRow(index: 3, isIncome: false, amountText: "-¥18.00", categoryName: "餐饮", icon: "fork.knife", colorHex: "#FF9500",
                   merchant: "", note: "早餐", accountName: "现金", timeText: "10月19日 07:30",
-                  duplicate: .skip, isManual: false, kindText: "支出", dateText: "2026年10月19日 07:30"),
+                  duplicate: .skip, isManual: false, kindText: "支出", dateText: "2026年10月19日 07:30", amount: 18.00),
         ReviewRow(index: 4, isIncome: true, amountText: "+¥200.00", categoryName: "红包", icon: "gift.fill", colorHex: "#FF2D55",
                   merchant: "示例红包", note: "", accountName: "微信", timeText: "10月18日 10:00",
-                  duplicate: .none, isManual: true, kindText: "收入", dateText: "2026年10月18日 10:00", channel: "微信"),
+                  duplicate: .none, isManual: true, kindText: "收入", dateText: "2026年10月18日 10:00", channel: "微信", amount: 200.00),
         ReviewRow(index: 5, isIncome: false, amountText: "¥1,000.00", categoryName: "信用卡还款", icon: "creditcard.and.123", colorHex: "#30B0C7",
                   merchant: "", note: "", accountName: "储蓄卡-示例银行 → 未选信用卡", timeText: "10月18日 09:12",
                   duplicate: .none, isManual: false, kindText: "还款", dateText: "2026年10月18日 09:12",
-                  fromAccount: "储蓄卡-示例银行", toAccount: "未选信用卡", channel: "银行"),
+                  fromAccount: "储蓄卡-示例银行", toAccount: "未选信用卡", channel: "银行", amount: 1000.00),
     ]
 }
 
@@ -1069,7 +1064,7 @@ struct DayCardDemo: View {
         let ink = receipt ? p.ink : Color.cardHex(scheme == .dark ? "#F5F5F7" : "#1C1C1E")
         let faint = receipt ? p.faint : Color.cardHex(scheme == .dark ? "#98989F" : "#6C6C70")
         let body: (Font.TextStyle) -> Font = { style in
-            receipt ? .custom("CourierNewPSMT", size: style == .caption ? 12 : 15, relativeTo: style) : .system(style)
+            receipt ? ReceiptTypeface.scaled(ReceiptTypeface.mono, style == .caption ? 12 : 15, relativeTo: style) : .system(style)
         }
         let positive = balance.contains("+")
         return HStack(spacing: 10) {
@@ -1144,16 +1139,13 @@ struct ReceiptStackView_Previews: PreviewProvider {
     static var previews: some View {
         Group {
             ReceiptStackView(title: "识别结果", rows: [ReviewRow.samples[0]], engineLine: "识别引擎：Apple 智能 · 模型 6.9 秒",
-                             countText: "共 1 笔")
+                             countText: "共 1 笔", totals: [("支出", "¥39.80")])
                 .previewDisplayName("1 笔")
-            ReceiptStackView(title: "识别结果", rows: [ReviewRow.samples[1], ReviewRow.samples[4]], engineLine: "识别引擎：规则",
-                             countText: "共 2 笔", totals: [("支出", "¥23.50"), ("还款", "¥1,000.00")])
+            ReceiptStackView(title: "识别结果", rows: SnippetPager.slice(ReviewRow.samples, page: 0), engineLine: "识别引擎：规则",
+                             countText: SnippetPager.countText(ReviewRow.samples, page: 0),
+                             totals: [("支出", "¥63.30"), ("收入", "¥200.00"), ("还款", "¥1,000.00")])
                 .preferredColorScheme(.dark)
-                .previewDisplayName("2 笔 · 深色")
-            ReceiptStackView(title: "识别结果", rows: ReviewRow.samples, engineLine: "识别引擎：Apple 智能",
-                             countText: "保存 4 笔 · 跳过 1 笔", totals: [("支出", "¥63.30"), ("收入", "¥200.00")],
-                             heightBudget: 200)
-                .previewDisplayName("多笔 · 降级")
+                .previewDisplayName("5 笔 · 第 1 页 · 深色")
             RecordSummaryCard(info: .sample, style: .receipt(.light), collapsed: .constant(false))
                 .padding()
                 .previewDisplayName("编辑页卡片")

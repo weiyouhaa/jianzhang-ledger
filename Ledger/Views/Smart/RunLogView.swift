@@ -22,7 +22,7 @@ struct RunLogView: View {
     static let displayLimit = 500
 
     var body: some View {
-        List {
+        ThemedList {
             Section {
                 if let exportURL {
                     ShareLink(item: exportURL) {
@@ -55,17 +55,17 @@ struct RunLogView: View {
                     VStack(alignment: .leading, spacing: 2) {
                         HStack(spacing: 6) {
                             Text(e.level)
-                                .font(.caption2.weight(.bold))
+                                .font(.ui(.caption2).weight(.bold))
                                 .foregroundStyle(color(e.level))
-                            Text(e.step).font(.caption.monospaced().weight(.semibold))
+                            Text(e.step).font(.ui(.caption).monospaced().weight(.semibold))
                             Spacer()
-                            Text(e.time).font(.caption2.monospacedDigit()).foregroundStyle(.secondary)
+                            Text(e.time).font(.ui(.caption2).monospacedDigit()).foregroundStyle(.secondary)
                         }
                         if !e.message.isEmpty {
-                            Text(e.message).font(.caption)
+                            Text(e.message).font(.ui(.caption))
                         }
                         if !e.resources.isEmpty {
-                            Text(e.resources).font(.caption2.monospacedDigit()).foregroundStyle(.secondary)
+                            Text(e.resources).font(.ui(.caption2).monospacedDigit()).foregroundStyle(.secondary)
                         }
                     }
                     .padding(.vertical, 1)

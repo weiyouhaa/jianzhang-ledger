@@ -32,7 +32,7 @@ struct AccountDetailView: View {
         let balance = account.balance()
         let points = balanceTrend(entries)
 
-        List {
+        ThemedList {
             Section {
                 header(balance: balance)
                     .listRowInsets(EdgeInsets())
@@ -122,22 +122,22 @@ struct AccountDetailView: View {
             HStack(spacing: 10) {
                 CategoryIcon(icon: account.iconName, color: .white, size: 36)
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(account.type.title).font(.subheadline.weight(.semibold))
+                    Text(account.type.title).font(.ui(.subheadline).weight(.semibold))
                     if !account.includeInNetWorth {
-                        Text("不计入净资产").font(.caption2).opacity(0.8)
+                        Text("不计入净资产").font(.ui(.caption2)).opacity(0.8)
                     }
                 }
                 Spacer()
                 if account.isArchived {
-                    Text("已归档").font(.caption).padding(.horizontal, 8).padding(.vertical, 3)
+                    Text("已归档").font(.ui(.caption)).padding(.horizontal, 8).padding(.vertical, 3)
                         .background(Capsule().fill(.white.opacity(0.2)))
                 }
             }
             VStack(alignment: .leading, spacing: 4) {
                 Text(liability ? (balance <= 0 ? "当前欠款" : "溢缴款") : "当前余额")
-                    .font(.caption).opacity(0.85)
+                    .font(.ui(.caption)).opacity(0.85)
                 Text(Money.masked(liability ? abs(balance) : balance, hidden: hideAmounts))
-                    .font(.system(size: 34, weight: .bold, design: .rounded))
+                    .font(.uiSystem(size: 34, weight: .bold, design: .rounded))
                     .lineLimit(1)
                     .minimumScaleFactor(0.5)
             }
@@ -164,7 +164,7 @@ struct AccountDetailView: View {
             }
             if account.type.isSocialSecurity, let rule = RecurringEngine.contributionRule(for: account, in: context), !rule.isPaused {
                 Label("每月 \(rule.monthDay) 日缴存 \(Money.masked(rule.amount, hidden: hideAmounts))", systemImage: "arrow.triangle.2.circlepath")
-                    .font(.caption)
+                    .font(.ui(.caption))
             }
             if account.billingDay > 0 || account.repaymentDay > 0 {
                 HStack(spacing: 14) {
@@ -177,12 +177,12 @@ struct AccountDetailView: View {
                     Spacer()
                     if let days = account.daysUntilRepayment() {
                         Text(days == 0 ? "今天还款" : "\(days) 天后还款")
-                            .font(.caption.weight(.semibold))
+                            .font(.ui(.caption).weight(.semibold))
                             .padding(.horizontal, 8).padding(.vertical, 3)
                             .background(Capsule().fill(.white.opacity(days <= 3 ? 0.35 : 0.2)))
                     }
                 }
-                .font(.caption)
+                .font(.ui(.caption))
             }
         }
         .foregroundStyle(.white)
@@ -198,12 +198,12 @@ struct AccountDetailView: View {
     private func actionButton(_ title: String, icon: String, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             VStack(spacing: 6) {
-                Image(systemName: icon).font(.title3)
-                Text(title).font(.caption)
+                Image(systemName: icon).font(.ui(.title3))
+                Text(title).font(.ui(.caption))
             }
             .frame(maxWidth: .infinity)
             .padding(.vertical, 12)
-            .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(Color(.secondarySystemGroupedBackground)))
+            .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(Color.themeCard))
         }
         .buttonStyle(.plain)
         .foregroundStyle(account.color)
@@ -296,7 +296,7 @@ struct BalanceAdjustView: View {
         let delta: Double? = target.map { ((liability ? -$0 : $0) - current) }
 
         NavigationStack {
-            Form {
+            ThemedForm {
                 Section {
                     LabeledContent(liability ? "账面欠款" : "账面余额", value: Money.format(shown))
                     HStack {

@@ -26,7 +26,7 @@ final class OverlayWindowManager {
         let window = UIWindow(windowScene: scene)
         window.windowLevel = UIWindow.Level(rawValue: UIWindow.Level.alert.rawValue + 2)
         window.overrideUserInterfaceStyle = style
-        let host = UIHostingController(rootView: AnyView(LockScreenView().environmentObject(lock)))
+        let host = UIHostingController(rootView: AnyView(LockScreenView().environmentObject(lock).themedChrome()))
         host.view.backgroundColor = .systemBackground
         window.rootViewController = host
         window.makeKeyAndVisible()
@@ -56,7 +56,7 @@ final class OverlayWindowManager {
         window.windowLevel = UIWindow.Level(rawValue: UIWindow.Level.alert.rawValue + 1)
         window.overrideUserInterfaceStyle = style
         window.isUserInteractionEnabled = false
-        let host = UIHostingController(rootView: AnyView(PrivacyCoverView()))
+        let host = UIHostingController(rootView: AnyView(PrivacyCoverView().themedChrome()))
         host.view.backgroundColor = .clear
         window.rootViewController = host
         window.isHidden = false

@@ -49,7 +49,7 @@ struct BackupSettingsView: View {
     }
 
     var body: some View {
-        Form {
+        ThemedForm {
             syncSection
             encryptionSection
             manualSection
@@ -155,7 +155,7 @@ struct BackupSettingsView: View {
                 Label("当前状态", systemImage: DataStore.syncStatus.isCloud ? "icloud.fill" : "internaldrive.fill")
                 Spacer()
                 Text(DataStore.syncStatus.title)
-                    .foregroundStyle(DataStore.syncStatus.isCloud ? Color.green : Color.secondary)
+                    .foregroundStyle(DataStore.syncStatus.isCloud ? Color.themeIncome : Color.secondary)
             }
             Toggle(isOn: $syncToggle) {
                 Label("iCloud 同步（CloudKit）", systemImage: "arrow.triangle.2.circlepath.icloud.fill")
@@ -163,7 +163,7 @@ struct BackupSettingsView: View {
             .disabled(checkingICloud)
             if syncEnabled != DataStore.syncStatus.isCloud && pendingRestartNeeded {
                 Label("设置将在完全退出并重新打开 App 后生效", systemImage: "arrow.clockwise.circle")
-                    .font(.footnote)
+                    .font(.ui(.footnote))
                     .foregroundStyle(.orange)
             }
         } header: {
@@ -342,7 +342,7 @@ struct BackupSettingsView: View {
                         VStack(alignment: .leading, spacing: 2) {
                             Label("另存每日快照", systemImage: "calendar.badge.clock")
                             Text("防止误删数据后被覆盖，可从快照找回")
-                                .font(.caption)
+                                .font(.ui(.caption))
                                 .foregroundStyle(.secondary)
                         }
                     }
@@ -395,7 +395,7 @@ struct BackupSettingsView: View {
                         .foregroundStyle(.secondary)
                         .multilineTextAlignment(.trailing)
                 }
-                .font(.subheadline)
+                .font(.ui(.subheadline))
             }
         } header: {
             Text("自动备份")
@@ -498,7 +498,7 @@ struct BackupPreviewView: View {
     var body: some View {
         let b = item.backup
         NavigationStack {
-            Form {
+            ThemedForm {
                 Section("备份信息") {
                     row("文件", item.fileName)
                     row("备份时间", DateText.full.string(from: b.createdAt))

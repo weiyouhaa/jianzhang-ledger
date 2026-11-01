@@ -44,7 +44,7 @@ struct ImportPreviewView: View {
         let dupItems = items.filter { if case .likelyDuplicate = $0.status { return true }; return $0.status == .imported }
         let skipped = items.filter { $0.status.isSkipped }
         NavigationStack {
-            List {
+            ThemedList {
                 Section { summaryCard(new: newItems.count, dup: dupItems.count, skipped: skipped.count) }
                     .listRowInsets(EdgeInsets(top: 12, leading: 16, bottom: 12, trailing: 16))
 
@@ -101,18 +101,18 @@ struct ImportPreviewView: View {
         return VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 10) {
                 Image(systemName: session.result.source.icon)
-                    .font(.title2)
+                    .font(.ui(.title2))
                     .foregroundStyle(session.result.source == .alipay ? Color(hex: "#1677FF") : Color(hex: "#07C160"))
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(session.fileName).font(.subheadline.weight(.medium)).lineLimit(1)
+                    Text(session.fileName).font(.ui(.subheadline).weight(.medium)).lineLimit(1)
                     if let lo = dates.min(), let hi = dates.max() {
                         Text("\(DateText.shortDate.string(from: lo)) – \(DateText.shortDate.string(from: hi)) · 共 \(items.count) 行")
-                            .font(.caption).foregroundStyle(.secondary)
+                            .font(.ui(.caption)).foregroundStyle(.secondary)
                     }
                 }
             }
             HStack {
-                countBlock("新交易", new, .green)
+                countBlock("新交易", new, Color.themeIncome)
                 countBlock("重复", dup, .orange)
                 countBlock("跳过", skipped, .secondary)
             }
@@ -122,11 +122,11 @@ struct ImportPreviewView: View {
                 Text("支出 \(Money.format(expense))  收入 \(Money.format(income))")
                     .monospacedDigit()
             }
-            .font(.caption)
+            .font(.ui(.caption))
             .foregroundStyle(.secondary)
             if preserved > 0 {
                 Text("\(preserved) 笔日期不晚于最新记录，导入后不会改变账户余额")
-                    .font(.caption2)
+                    .font(.ui(.caption2))
                     .foregroundStyle(.secondary)
             }
         }
@@ -134,8 +134,8 @@ struct ImportPreviewView: View {
 
     private func countBlock(_ title: String, _ value: Int, _ color: Color) -> some View {
         VStack(spacing: 2) {
-            Text("\(value)").font(.title2.weight(.bold).monospacedDigit()).foregroundStyle(color)
-            Text(title).font(.caption).foregroundStyle(.secondary)
+            Text("\(value)").font(.ui(.title2).weight(.bold).monospacedDigit()).foregroundStyle(color)
+            Text(title).font(.ui(.caption)).foregroundStyle(.secondary)
         }
         .frame(maxWidth: .infinity)
     }
@@ -156,8 +156,8 @@ struct ImportPreviewView: View {
                 toggle(item)
             } label: {
                 Image(systemName: item.include ? "checkmark.circle.fill" : "circle")
-                    .font(.title3)
-                    .foregroundStyle(item.include ? Color.accentColor : (item.canImport ? Color.secondary : Color.secondary.opacity(0.4)))
+                    .font(.ui(.title3))
+                    .foregroundStyle(item.include ? Color.themeAccent : (item.canImport ? Color.secondary : Color.secondary.opacity(0.4)))
             }
             .buttonStyle(.plain)
             .disabled(!item.canImport)
@@ -177,19 +177,19 @@ struct ImportPreviewView: View {
                         Text(e.merchant.isEmpty ? (category?.name ?? item.kind.title) : e.merchant)
                             .lineLimit(1)
                         Text(subtitle(item, category: category, account: account, toAccount: toAccount))
-                            .font(.caption)
+                            .font(.ui(.caption))
                             .foregroundStyle(.secondary)
                             .lineLimit(1)
                         if let reason = reason(item) {
                             Text(reason)
-                                .font(.caption2)
+                                .font(.ui(.caption2))
                                 .foregroundStyle(item.status.isSkipped ? Color.secondary : Color.orange)
                         }
                     }
                     Spacer(minLength: 4)
                     Text((item.kind == .income ? "+" : (item.kind == .expense ? "-" : "")) + Money.format(e.amount))
-                        .font(.callout.weight(.semibold).monospacedDigit())
-                        .foregroundStyle(item.kind == .income ? Color.green : (item.kind == .transfer ? Color.secondary : Color.primary))
+                        .font(.ui(.callout).weight(.semibold).monospacedDigit())
+                        .foregroundStyle(item.kind == .income ? Color.themeIncome : (item.kind == .transfer ? Color.secondary : Color.primary))
                         .opacity(item.include ? 1 : 0.5)
                 }
             }
@@ -299,7 +299,7 @@ struct ImportItemEditor: View {
     var body: some View {
         let e = item.entry
         NavigationStack {
-            Form {
+            ThemedForm {
                 Section {
                     LabeledContent("金额", value: Money.format(e.amount))
                     LabeledContent("时间", value: DateText.monthDayTime.string(from: e.date))
@@ -383,9 +383,9 @@ struct ImportBatchesView: View {
     @State private var undoneMessage: String?
 
     var body: some View {
-        List {
+        ThemedList {
             if batches.isEmpty {
-                ContentUnavailableView("还没有导入记录", systemImage: "tray.and.arrow.down",
+                ThemedEmptyState("还没有导入记录", systemImage: "tray.and.arrow.down",
                                        description: Text("在设置中选择「导入支付宝 / 微信账单」"))
                     .listRowBackground(Color.clear)
             }
@@ -425,19 +425,19 @@ struct ImportBatchesView: View {
     private func row(_ batch: ImportBatch) -> some View {
         HStack(spacing: 12) {
             Image(systemName: batch.source.icon)
-                .font(.title2)
+                .font(.ui(.title2))
                 .foregroundStyle(batch.source == .alipay ? Color(hex: "#1677FF") : Color(hex: "#07C160"))
                 .frame(width: 34)
             VStack(alignment: .leading, spacing: 3) {
                 Text(batch.fileName.isEmpty ? batch.source.title : batch.fileName).lineLimit(1)
                 Text("\(DateText.monthDayTime.string(from: batch.createdAt)) · \(batch.recordCount) 笔")
-                    .font(.caption).foregroundStyle(.secondary)
+                    .font(.ui(.caption)).foregroundStyle(.secondary)
             }
             Spacer()
             VStack(alignment: .trailing, spacing: 2) {
-                Text("-\(Money.format(batch.expenseTotal))").font(.subheadline.monospacedDigit())
+                Text("-\(Money.format(batch.expenseTotal))").font(.ui(.subheadline).monospacedDigit())
                 if batch.incomeTotal > 0 {
-                    Text("+\(Money.format(batch.incomeTotal))").font(.caption.monospacedDigit()).foregroundStyle(.green)
+                    Text("+\(Money.format(batch.incomeTotal))").font(.ui(.caption).monospacedDigit()).foregroundStyle(Color.themeIncome)
                 }
             }
         }

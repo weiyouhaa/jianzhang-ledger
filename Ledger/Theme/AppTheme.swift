@@ -109,58 +109,50 @@ struct AppTheme: Equatable {
         }
     }
 
-    // MARK: 字体
+    // MARK: 字体（3.2 (23)：小票皮肤用打包的 Special Elite / Courier Prime，中文回落宋体）
 
     func title(_ style: Font.TextStyle = .headline, weight: Font.Weight = .bold) -> Font {
         if usesTypewriter {
-            return Font.custom("CourierNewPS-BoldMT", size: pointSize(style), relativeTo: style)
-                .weight(weight)
+            return ReceiptTypeface.scaled(ReceiptTypeface.name(for: style, weight: weight), pointSize(style), relativeTo: style)
         }
         return .system(style, design: .default).weight(weight)
     }
 
     func amount(_ style: Font.TextStyle = .title, weight: Font.Weight = .bold) -> Font {
         if usesTypewriter {
-            return Font.custom("CourierNewPS-BoldMT", size: pointSize(style), relativeTo: style)
-                .weight(weight)
+            return ReceiptTypeface.scaled(ReceiptTypeface.monoBold, pointSize(style), relativeTo: style)
         }
         return .system(style, design: .rounded).weight(weight)
     }
 
     func amountSize(_ size: CGFloat, weight: Font.Weight = .bold) -> Font {
         if usesTypewriter {
-            return Font.custom("CourierNewPS-BoldMT", size: size, relativeTo: .largeTitle).weight(weight)
+            return ReceiptTypeface.scaled(ReceiptTypeface.monoBold, size, relativeTo: .largeTitle)
         }
         return .system(size: size, weight: weight, design: .rounded)
     }
 
     func mono(_ style: Font.TextStyle = .body, weight: Font.Weight = .regular) -> Font {
         if usesTypewriter {
-            return Font.custom("CourierNewPSMT", size: pointSize(style), relativeTo: style).weight(weight)
+            let bold = weight == .semibold || weight == .bold || weight == .heavy || weight == .black
+            return ReceiptTypeface.scaled(bold ? ReceiptTypeface.monoBold : ReceiptTypeface.mono, pointSize(style), relativeTo: style)
         }
         return .system(style, design: .monospaced).weight(weight)
+    }
+
+    /// 大标题（做旧打字机 Special Elite）；默认皮肤同 title
+    func display(_ style: Font.TextStyle = .title2) -> Font {
+        if usesTypewriter {
+            return ReceiptTypeface.scaled(ReceiptTypeface.display, pointSize(style), relativeTo: style)
+        }
+        return .system(style, design: .default).weight(.bold)
     }
 
     func body(_ style: Font.TextStyle = .body) -> Font {
         usesTypewriter ? mono(style) : .system(style)
     }
 
-    private func pointSize(_ style: Font.TextStyle) -> CGFloat {
-        switch style {
-        case .largeTitle: return 34
-        case .title: return 28
-        case .title2: return 22
-        case .title3: return 20
-        case .headline: return 17
-        case .body: return 17
-        case .callout: return 16
-        case .subheadline: return 15
-        case .footnote: return 13
-        case .caption: return 12
-        case .caption2: return 11
-        @unknown default: return 17
-        }
-    }
+    private func pointSize(_ style: Font.TextStyle) -> CGFloat { ReceiptTypeface.baseSize(style) }
 }
 
 private struct AppThemeKey: EnvironmentKey {
@@ -183,6 +175,7 @@ struct ThemedScreenBackground: ViewModifier {
             content
                 .scrollContentBackground(.hidden)
                 .background(theme.backdrop.ignoresSafeArea())
+                .modifier(ThemedChrome())
         } else {
             content
         }

@@ -116,7 +116,7 @@ struct RecordEditorView: View {
 
     var body: some View {
         NavigationStack {
-            Form {
+            ThemedForm {
                 // 3.1 (22) 顶部小票卡片：当笔记录的全部信息，随下方每一处修改实时更新
                 Section {
                     RecordSummaryCard(info: cardInfo, style: cardStyle, collapsed: $cardCollapsed)
@@ -145,11 +145,11 @@ struct RecordEditorView: View {
 
                     HStack(alignment: .firstTextBaseline, spacing: 6) {
                         Text(Money.symbol)
-                            .font(.system(size: 28, weight: .semibold, design: .rounded))
+                            .font(.uiSystem(size: 28, weight: .semibold, design: .rounded))
                             .foregroundStyle(.secondary)
                         TextField("0.00", text: $amountText)
                             .keyboardType(kind == .adjustment ? .numbersAndPunctuation : .decimalPad)
-                            .font(.system(size: 40, weight: .bold, design: .rounded))
+                            .font(.uiSystem(size: 40, weight: .bold, design: .rounded))
                             .foregroundStyle(amountColor)
                             .focused($amountFocused)
                     }
@@ -179,7 +179,7 @@ struct RecordEditorView: View {
                     DatePicker("时间", selection: $date)
                     if let ocrTimeHint, ocrTimeHintDate == date {
                         Label(ocrTimeHint, systemImage: "clock.badge.questionmark")
-                            .font(.caption)
+                            .font(.ui(.caption))
                             .foregroundStyle(.secondary)
                             .accessibilityIdentifier("ocr-time-source")
                     }
@@ -218,7 +218,7 @@ struct RecordEditorView: View {
                             Text("在本机识别金额、商户、时间与付款账户，图片不会上传。")
                             if let ocrEngineLine {
                                 Text(ocrEngineLine)
-                                    .font(.caption2)
+                                    .font(.ui(.caption2))
                                     .accessibilityIdentifier("ocr-engine-line")
                             }
                         }
@@ -396,7 +396,7 @@ struct RecordEditorView: View {
     private var amountColor: Color {
         if repayMode { return Color(hex: "#30B0C7") }
         switch kind {
-        case .income: return .green
+        case .income: return Color.themeIncome
         case .contribution: return Color(hex: "#E8A33D")
         case .expense: return .primary
         case .transfer, .adjustment: return Color(hex: "#30B0C7")
@@ -410,7 +410,7 @@ struct RecordEditorView: View {
                     VStack(spacing: 6) {
                         CategoryIcon(icon: LedgerRecord.repaymentIcon, color: LedgerRecord.repaymentColor, size: 44, selected: repayMode)
                         Text("信用卡还款")
-                            .font(.caption2)
+                            .font(.ui(.caption2))
                             .lineLimit(1)
                             .minimumScaleFactor(0.8)
                             .foregroundStyle(repayMode ? Color.primary : Color.secondary)
@@ -429,7 +429,7 @@ struct RecordEditorView: View {
                     VStack(spacing: 6) {
                         CategoryIcon(icon: c.icon, color: c.color, size: 44, selected: !repayMode && c.id == selectedCategoryID)
                         Text(c.name)
-                            .font(.caption2)
+                            .font(.ui(.caption2))
                             .lineLimit(1)
                             .foregroundStyle(!repayMode && c.id == selectedCategoryID ? Color.primary : Color.secondary)
                     }
@@ -457,7 +457,7 @@ struct RecordEditorView: View {
                 Text("分类")
                 Spacer()
                 NavigationLink("管理") { CategoryManagerView(initialKind: kind) }
-                    .font(.caption)
+                    .font(.ui(.caption))
                     .textCase(nil)
             }
         }

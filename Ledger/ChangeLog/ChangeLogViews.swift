@@ -34,23 +34,20 @@ struct ChangeLogView: View {
     }
 
     var body: some View {
-        List {
+        ThemedList {
             if entityFilter != nil || sourceFilter != nil {
                 Section {
                     HStack {
                         Text("筛选：" + [entityFilter?.title, sourceFilter?.title].compactMap { $0 }.joined(separator: " · "))
-                            .font(.subheadline)
+                            .font(.ui(.subheadline))
                         Spacer()
-                        Button("清除") { entityFilter = nil; sourceFilter = nil }.font(.subheadline)
+                        Button("清除") { entityFilter = nil; sourceFilter = nil }.font(.ui(.subheadline))
                     }
                 }
             }
             if filtered.isEmpty {
-                ContentUnavailableView {
-                    Label(entries.isEmpty ? "还没有变动记录" : "没有符合条件的记录", systemImage: "clock.arrow.circlepath")
-                } description: {
-                    Text(entries.isEmpty ? "记账、账户、分类、预算、规则、周期账单、设置与安全的每次变动都会记在这里。" : "换个关键词或筛选条件试试。")
-                }
+                ThemedEmptyState(entries.isEmpty ? "还没有变动记录" : "没有符合条件的记录", systemImage: "clock.arrow.circlepath",
+                                 description: Text(entries.isEmpty ? "记账、账户、分类、预算、规则、周期账单、设置与安全的每次变动都会记在这里。" : "换个关键词或筛选条件试试。"))
                 .listRowBackground(Color.clear)
             }
             ForEach(groups, id: \.day) { group in
@@ -174,21 +171,21 @@ struct ChangeLogRow: View {
     var body: some View {
         HStack(spacing: 12) {
             Image(systemName: entry.entity.icon)
-                .font(.body)
+                .font(.ui(.body))
                 .foregroundStyle(tint)
                 .frame(width: 32, height: 32)
                 .background(tint.opacity(0.14), in: RoundedRectangle(cornerRadius: 8))
             VStack(alignment: .leading, spacing: 3) {
                 Text(entry.summary)
-                    .font(.subheadline)
+                    .font(.ui(.subheadline))
                     .lineLimit(2)
                 Text("\(entry.action.title) · \(entry.entity.title) · \(entry.source.title)")
-                    .font(.caption)
+                    .font(.ui(.caption))
                     .foregroundStyle(.secondary)
             }
             Spacer(minLength: 4)
             Text(DateText.time.string(from: entry.timestamp))
-                .font(.caption)
+                .font(.ui(.caption))
                 .foregroundStyle(.secondary)
                 .monospacedDigit()
         }
@@ -197,7 +194,7 @@ struct ChangeLogRow: View {
 
     private var tint: Color {
         switch entry.action {
-        case .create: return .green
+        case .create: return Color.themeIncome
         case .update: return .blue
         case .delete: return .red
         case .batch: return .orange
@@ -209,9 +206,9 @@ struct ChangeLogDetailView: View {
     let entry: ChangeLogEntry
 
     var body: some View {
-        List {
+        ThemedList {
             Section {
-                Text(entry.summary).font(.body)
+                Text(entry.summary).font(.ui(.body))
                 LabeledContent("时间", value: DateText.full.string(from: entry.timestamp))
                 LabeledContent("操作", value: entry.action.title)
                 LabeledContent("对象", value: entry.entity.title)
@@ -231,13 +228,13 @@ struct ChangeLogDetailView: View {
                     ForEach(Array(children.enumerated()), id: \.offset) { _, c in
                         VStack(alignment: .leading, spacing: 4) {
                             Text("\(ChangeAction(rawValue: c.action)?.title ?? c.action) · \(ChangeEntity(rawValue: c.entity)?.title ?? c.entity)")
-                                .font(.caption)
+                                .font(.ui(.caption))
                                 .foregroundStyle(.secondary)
-                            Text(c.summary).font(.subheadline)
+                            Text(c.summary).font(.ui(.subheadline))
                             if let ds = c.diffs, c.action == ChangeAction.update.rawValue {
                                 ForEach(Array(ds.enumerated()), id: \.offset) { _, d in
                                     Text("\(d.field)：\(d.old ?? "（空）") → \(d.new ?? "（空）")")
-                                        .font(.caption)
+                                        .font(.ui(.caption))
                                         .foregroundStyle(.secondary)
                                 }
                             }
@@ -258,7 +255,7 @@ private struct DiffRow: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text(diff.field).font(.caption).foregroundStyle(.secondary)
+            Text(diff.field).font(.ui(.caption)).foregroundStyle(.secondary)
             HStack(alignment: .firstTextBaseline, spacing: 6) {
                 if let old = diff.old {
                     Text(old)
@@ -268,16 +265,16 @@ private struct DiffRow: View {
                 } else {
                     Text("（空）").foregroundStyle(.secondary)
                 }
-                Image(systemName: "arrow.right").font(.caption).foregroundStyle(.secondary)
+                Image(systemName: "arrow.right").font(.ui(.caption)).foregroundStyle(.secondary)
                 if let new = diff.new {
                     Text(new)
-                        .foregroundStyle(.green)
+                        .foregroundStyle(Color.themeIncome)
                         .accessibilityIdentifier("diff-new-\(diff.field)")
                 } else {
                     Text("（空）").foregroundStyle(.secondary)
                 }
             }
-            .font(.subheadline)
+            .font(.ui(.subheadline))
         }
     }
 }

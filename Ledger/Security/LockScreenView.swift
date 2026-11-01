@@ -7,18 +7,23 @@ struct LockScreenView: View {
 
     var body: some View {
         ZStack {
-            LinearGradient(colors: [Color.accentColor.opacity(0.35), Color(.systemBackground)],
-                           startPoint: .top, endPoint: .bottom)
-                .ignoresSafeArea()
-            Rectangle().fill(.ultraThinMaterial).ignoresSafeArea()
+            if AppSkin.current == .receipt {
+                // 3.2 (23) 小票皮肤：暖纸底色（皮肤是设备级设置，真实 / 防窥一样，不暴露模式）
+                Color.themeBackdrop.ignoresSafeArea()
+            } else {
+                LinearGradient(colors: [Color.themeAccent.opacity(0.35), Color(.systemBackground)],
+                               startPoint: .top, endPoint: .bottom)
+                    .ignoresSafeArea()
+                Rectangle().fill(.ultraThinMaterial).ignoresSafeArea()
+            }
 
             VStack(spacing: 24) {
                 Spacer(minLength: 20)
                 Image(systemName: "lock.fill")
                     .font(.system(size: 34))
-                    .foregroundStyle(Color.accentColor)
+                    .foregroundStyle(Color.themeAccent)
                     .padding(18)
-                    .background(Circle().fill(Color.accentColor.opacity(0.15)))
+                    .background(Circle().fill(Color.themeAccent.opacity(0.15)))
 
                 TimelineView(.periodic(from: .now, by: 1)) { context in
                     PasscodePad(
@@ -57,12 +62,16 @@ struct LockScreenView: View {
 struct PrivacyCoverView: View {
     var body: some View {
         ZStack {
-            Rectangle().fill(.regularMaterial).ignoresSafeArea()
+            if AppSkin.current == .receipt {
+                Color.themeBackdrop.ignoresSafeArea()
+            } else {
+                Rectangle().fill(.regularMaterial).ignoresSafeArea()
+            }
             VStack(spacing: 12) {
                 Image(systemName: "book.closed.fill")
                     .font(.system(size: 48))
-                    .foregroundStyle(Color.accentColor)
-                Text("简账").font(.title2.weight(.semibold))
+                    .foregroundStyle(Color.themeAccent)
+                Text("简账").font(.ui(.title2).weight(.semibold))
             }
         }
     }

@@ -79,7 +79,7 @@ struct RecordRow: View {
                     .foregroundStyle(theme.faint)
                 if let runningBalanceText {
                     Text(runningBalanceText)
-                        .font(.caption2)
+                        .font(.ui(.caption2))
                         .foregroundStyle(.tertiary)
                         .lineLimit(1)
                         .minimumScaleFactor(0.7)
@@ -116,7 +116,7 @@ struct BudgetProgressView: View {
                 Spacer()
                 Text(over ? "超支 \(Money.format(spent - budget))" : "剩余 \(Money.format(budget - spent))")
             }
-            .font(.caption)
+            .font(.ui(.caption))
             .foregroundStyle(light ? Color.white.opacity(0.9) : Color.secondary)
 
             GeometryReader { geo in
@@ -134,7 +134,7 @@ struct BudgetProgressView: View {
     private func barColor(_ ratio: Double) -> Color {
         if ratio > 1 { return .red }
         if ratio > 0.8 { return .orange }
-        return light ? .white : .green
+        return light ? .white : Color.themeIncome
     }
 }
 

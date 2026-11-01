@@ -44,7 +44,7 @@ struct SettingsView: View {
 
     var body: some View {
         NavigationStack {
-            Form {
+            ThemedForm {
                 securitySection
                 if !session.isDecoy {
                     bookkeepingSection
@@ -256,7 +256,7 @@ struct SettingsView: View {
                     Label("预算", systemImage: "target")
                     Spacer()
                     Text(budget > 0 ? "每月 \(Money.format(budget))" : "未设置")
-                        .font(.subheadline)
+                        .font(.ui(.subheadline))
                         .foregroundStyle(.secondary)
                 }
             }
@@ -307,8 +307,8 @@ struct SettingsView: View {
                 VStack(alignment: .leading, spacing: 2) {
                     Label("识别引擎", systemImage: "text.viewfinder")
                     Text(ocrEngine == OCREngineSetting.rulesOnly ? "仅用本地规则 · \(aiStatus.title)" : aiStatus.title)
-                        .font(.caption)
-                        .foregroundStyle(aiStatus.isAvailable && ocrEngine != OCREngineSetting.rulesOnly ? Color.green : Color.secondary)
+                        .font(.ui(.caption))
+                        .foregroundStyle(aiStatus.isAvailable && ocrEngine != OCREngineSetting.rulesOnly ? Color.themeIncome : Color.secondary)
                         .accessibilityIdentifier("ai-status")
                 }
             }
@@ -319,7 +319,7 @@ struct SettingsView: View {
                     VStack(alignment: .leading, spacing: 2) {
                         Label("快捷指令中使用 Apple 智能", systemImage: "square.2.layers.3d")
                         Text("默认关闭：背面轻点等快捷指令在后台运行，系统会限制模型调用和运行时长。开启后最多等 \(Int(OCREngineSetting.shortcutTimeout)) 秒（按识图已用时间调整），出错会用更短的提示词重试一次，仍不行自动改用规则。")
-                            .font(.caption)
+                            .font(.ui(.caption))
                             .foregroundStyle(.secondary)
                     }
                 }
@@ -366,7 +366,7 @@ struct SettingsView: View {
             Label(title, systemImage: icon)
             Spacer()
             if !detail.isEmpty {
-                Text(detail).font(.subheadline).foregroundStyle(.secondary)
+                Text(detail).font(.ui(.subheadline)).foregroundStyle(.secondary)
             }
         }
     }
@@ -376,7 +376,7 @@ struct SettingsView: View {
         Section {
             Label("账本保存在本机", systemImage: "internaldrive.fill")
             Text("当前不会使用 iCloud 同步或自动备份。")
-                .font(.subheadline)
+                .font(.ui(.subheadline))
                 .foregroundStyle(.secondary)
         } header: {
             Text("数据")
@@ -394,20 +394,20 @@ struct SettingsView: View {
                     Label("iCloud 同步与备份", systemImage: DataStore.syncStatus.isCloud ? "icloud.fill" : "externaldrive.badge.icloud")
                     Spacer()
                     Text(DataStore.syncStatus.title)
-                        .font(.subheadline)
+                        .font(.ui(.subheadline))
                         .foregroundStyle(.secondary)
                 }
             }
             if backupNeedsPassword {
                 Label("自动备份已暂停：需要设置备份密码", systemImage: "exclamationmark.triangle.fill")
-                    .font(.subheadline)
+                    .font(.ui(.subheadline))
                     .foregroundStyle(.orange)
             }
             HStack {
                 Label("上次备份", systemImage: "clock")
                 Spacer()
                 Text(lastBackupAt > 0 ? DateText.full.string(from: Date(timeIntervalSince1970: lastBackupAt)) : "从未")
-                    .font(.subheadline)
+                    .font(.ui(.subheadline))
                     .foregroundStyle(.secondary)
             }
         } header: {
@@ -523,7 +523,7 @@ struct SettingsView: View {
             .accessibilityElement(children: .combine)
             .accessibilityIdentifier("about-version-row")
             Label("数据本地存储 · 识别在本机完成 · 无网络请求", systemImage: "checkmark.shield.fill")
-                .font(.footnote)
+                .font(.ui(.footnote))
                 .foregroundStyle(.secondary)
         }
     }

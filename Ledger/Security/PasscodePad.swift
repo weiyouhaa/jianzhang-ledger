@@ -21,9 +21,9 @@ struct PasscodePad: View {
     var body: some View {
         VStack(spacing: 28) {
             VStack(spacing: 8) {
-                Text(title).font(.title3.weight(.semibold))
+                Text(title).font(.ui(.title3).weight(.semibold))
                 if let subtitle {
-                    Text(subtitle).font(.subheadline).foregroundStyle(.secondary).multilineTextAlignment(.center)
+                    Text(subtitle).font(.ui(.subheadline)).foregroundStyle(.secondary).multilineTextAlignment(.center)
                 }
             }
 
@@ -38,7 +38,7 @@ struct PasscodePad: View {
             .modifier(ShakeEffect(animatableData: shakes))
 
             Text(message ?? " ")
-                .font(.footnote)
+                .font(.ui(.footnote))
                 .foregroundStyle(.red)
                 .frame(height: 18)
 
@@ -62,7 +62,7 @@ struct PasscodePad: View {
         case "bio":
             if let biometricIcon, let onBiometric {
                 Button(action: onBiometric) {
-                    Image(systemName: biometricIcon).font(.title)
+                    Image(systemName: biometricIcon).font(.ui(.title))
                         .frame(width: 76, height: 76)
                 }
                 .buttonStyle(.plain)
@@ -74,7 +74,7 @@ struct PasscodePad: View {
             Button {
                 if !input.isEmpty { input.removeLast() }
             } label: {
-                Image(systemName: "delete.left").font(.title2)
+                Image(systemName: "delete.left").font(.ui(.title2))
                     .frame(width: 76, height: 76)
             }
             .buttonStyle(.plain)
@@ -82,7 +82,7 @@ struct PasscodePad: View {
         default:
             Button { tap(key) } label: {
                 Text(key)
-                    .font(.system(size: 32, weight: .regular, design: .rounded))
+                    .font(.uiSystem(size: 32, weight: .regular, design: .rounded))
                     .frame(width: 76, height: 76)
                     .background(Circle().fill(Color.primary.opacity(0.08)))
             }

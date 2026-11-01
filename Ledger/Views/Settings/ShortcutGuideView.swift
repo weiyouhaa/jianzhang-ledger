@@ -4,13 +4,13 @@ import AppIntents
 /// 「识图记账」快捷指令设置教程
 struct ShortcutGuideView: View {
     var body: some View {
-        List {
+        ThemedList {
             Section {
                 VStack(alignment: .leading, spacing: 8) {
                     Label("截一张支付成功页，自动记一笔", systemImage: "sparkles")
-                        .font(.headline)
+                        .font(.ui(.headline))
                     Text("支持支付宝、微信、云闪付、银行 App 的支付结果页 / 账单详情，以及小票照片和银行短信截图。识别在本机完成，不联网。")
-                        .font(.subheadline)
+                        .font(.ui(.subheadline))
                         .foregroundStyle(.secondary)
                 }
                 .padding(.vertical, 4)
@@ -24,7 +24,7 @@ struct ShortcutGuideView: View {
                 step(5, "把快捷指令命名为「识图记账」。")
                 step(6, "前往 设置 › 辅助功能 › 触控 › 轻点背面，选择「轻点两下」→ 该快捷指令；iPhone 15 Pro 及以上也可在 设置 › 操作按钮 中绑定。")
                 Text("之后在支付成功页轻点两下手机背面，即可自动截屏并记账。")
-                    .font(.footnote)
+                    .font(.ui(.footnote))
                     .foregroundStyle(.secondary)
             }
 
@@ -45,7 +45,7 @@ struct ShortcutGuideView: View {
             } footer: {
                 Text("iOS 26+ 用按钮 + 卡片；iOS 17 / 18 用列表。因系统限制，弹窗内无法稳定弹出键盘，需要打字的修改会跳进 App。")
             }
-            .font(.subheadline)
+            .font(.ui(.subheadline))
 
             Section("方案三：直接用 Siri") {
                 Text("对 Siri 说「简账记一笔」「简账本月收支」，或「用简账识图记账」。")
@@ -65,12 +65,12 @@ struct ShortcutGuideView: View {
     private func step(_ n: Int, _ text: String) -> some View {
         HStack(alignment: .top, spacing: 10) {
             Text("\(n)")
-                .font(.caption.weight(.bold))
+                .font(.ui(.caption).weight(.bold))
                 .foregroundStyle(.white)
                 .frame(width: 22, height: 22)
-                .background(Circle().fill(Color.accentColor))
+                .background(Circle().fill(Color.themeAccent))
             Text(text)
-                .font(.subheadline)
+                .font(.ui(.subheadline))
         }
         .padding(.vertical, 2)
     }

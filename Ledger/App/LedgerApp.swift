@@ -10,6 +10,8 @@ struct LedgerApp: App {
     init() {
         // 最早的时机：在任何数据库 / 设置读取之前打开运行日志并安装崩溃捕获
         RunLog.shared.bootstrap(reason: "进程启动")
+        // 3.2 (23) 小票皮肤：导航栏 / 标签栏 / 分段控件外观（默认皮肤不改动）
+        ThemeChrome.applyAtLaunch()
     }
 
     var body: some Scene {

@@ -94,7 +94,7 @@ struct StatsView: View {
                     } else if yearlyBudget > 0 {
                         card {
                             VStack(alignment: .leading, spacing: 10) {
-                                Label("年度预算", systemImage: "target").font(.headline)
+                                Label("年度预算", systemImage: "target").font(.ui(.headline))
                                 BudgetProgressView(spent: expense, budget: yearlyBudget, title: "\(periodTitle)预算")
                             }
                         }
@@ -107,7 +107,7 @@ struct StatsView: View {
 
                     if kindRecords.isEmpty {
                         card {
-                            ContentUnavailableView("暂无\(kind.title)数据", systemImage: "chart.pie",
+                            ThemedEmptyState("暂无\(kind.title)数据", systemImage: "chart.pie",
                                                    description: Text("换个时间段看看吧"))
                         }
                     } else {
@@ -122,7 +122,7 @@ struct StatsView: View {
                 }
                 .padding()
             }
-            .background(Color(.systemGroupedBackground))
+            .background(Color.themeBackdrop)
             .themedScreenBackground()
             .navigationTitle("统计")
             .onChange(of: period) { _, _ in clearChartSelection() }
@@ -135,11 +135,11 @@ struct StatsView: View {
 
     private var periodNavigator: some View {
         HStack {
-            Button { shift(-1) } label: { Image(systemName: "chevron.left.circle.fill").font(.title2) }
+            Button { shift(-1) } label: { Image(systemName: "chevron.left.circle.fill").font(.ui(.title2)) }
             Spacer()
-            Text(periodTitle).font(.title3.weight(.semibold))
+            Text(periodTitle).font(.ui(.title3).weight(.semibold))
             Spacer()
-            Button { shift(1) } label: { Image(systemName: "chevron.right.circle.fill").font(.title2) }
+            Button { shift(1) } label: { Image(systemName: "chevron.right.circle.fill").font(.ui(.title2)) }
                 .disabled(!canGoNext)
         }
         .symbolRenderingMode(.hierarchical)
@@ -170,7 +170,7 @@ struct StatsView: View {
         let selected = totals.first { $0.id == selectedPieID }
         return card {
             VStack(alignment: .leading, spacing: 12) {
-                Text("\(kind.title)构成").font(.headline)
+                Text("\(kind.title)构成").font(.ui(.headline))
                 Chart(totals) { item in
                     SectorMark(
                         angle: .value("金额", item.total),
@@ -200,20 +200,20 @@ struct StatsView: View {
                     VStack(spacing: 2) {
                         if let selected {
                             Text(selected.name)
-                                .font(.caption)
+                                .font(.ui(.caption))
                                 .foregroundStyle(.secondary)
                                 .lineLimit(1)
                             Text(Money.format(selected.total))
-                                .font(.system(.headline, design: .rounded))
+                                .font(.ui(.headline, design: .rounded))
                                 .lineLimit(1)
                                 .minimumScaleFactor(0.5)
                             Text(percent(selected.total, of: total))
-                                .font(.caption2)
+                                .font(.ui(.caption2))
                                 .foregroundStyle(.secondary)
                         } else {
-                            Text("总\(kind.title)").font(.caption).foregroundStyle(.secondary)
+                            Text("总\(kind.title)").font(.ui(.caption)).foregroundStyle(.secondary)
                             Text(Money.format(total))
-                                .font(.system(.headline, design: .rounded))
+                                .font(.ui(.headline, design: .rounded))
                                 .lineLimit(1)
                                 .minimumScaleFactor(0.5)
                         }
@@ -245,9 +245,9 @@ struct StatsView: View {
                         } label: {
                             HStack(spacing: 6) {
                                 Circle().fill(item.color).frame(width: 8, height: 8)
-                                Text(item.name).font(.caption).lineLimit(1)
+                                Text(item.name).font(.ui(.caption)).lineLimit(1)
                                     .fontWeight(selectedPieID == item.id ? .semibold : .regular)
-                                Text(percent(item.total, of: total)).font(.caption2).foregroundStyle(.secondary)
+                                Text(percent(item.total, of: total)).font(.ui(.caption2)).foregroundStyle(.secondary)
                             }
                             .opacity(selectedPieID == nil || selectedPieID == item.id ? 1 : 0.45)
                         }
@@ -260,11 +260,11 @@ struct StatsView: View {
 
     private func trendCard(trend: [TrendPoint]) -> some View {
         let unit: Calendar.Component = period == .month ? .day : .month
-        let barColor: Color = kind == .expense ? .orange : .green
+        let barColor: Color = kind == .expense ? .orange : Color.themeIncome
         let selected = nearestTrendPoint(to: selectedTrendDate, in: trend)
         return card {
             VStack(alignment: .leading, spacing: 12) {
-                Text(period == .month ? "每日趋势" : "每月趋势").font(.headline)
+                Text(period == .month ? "每日趋势" : "每月趋势").font(.ui(.headline))
                 Chart {
                     ForEach(trend) { p in
                         BarMark(
@@ -277,7 +277,7 @@ struct StatsView: View {
                     }
                     if let selected {
                         RuleMark(x: .value("选中", selected.date, unit: unit))
-                            .foregroundStyle(Color.accentColor.opacity(0.45))
+                            .foregroundStyle(Color.themeAccent.opacity(0.45))
                             .lineStyle(StrokeStyle(lineWidth: 1.5, dash: [4, 3]))
                     }
                 }
@@ -331,7 +331,7 @@ struct StatsView: View {
     private func rankingCard(totals: [CategoryTotal], total: Double, records: [LedgerRecord]) -> some View {
         card {
             VStack(alignment: .leading, spacing: 14) {
-                Text("分类排行").font(.headline)
+                Text("分类排行").font(.ui(.headline))
                 ForEach(totals) { item in
                     NavigationLink {
                         CategoryRecordsView(
@@ -343,10 +343,10 @@ struct StatsView: View {
                             CategoryIcon(icon: item.icon, color: item.color, size: 34)
                             VStack(alignment: .leading, spacing: 5) {
                                 HStack {
-                                    Text(item.name).font(.subheadline)
-                                    Text(percent(item.total, of: total)).font(.caption).foregroundStyle(.secondary)
+                                    Text(item.name).font(.ui(.subheadline))
+                                    Text(percent(item.total, of: total)).font(.ui(.caption)).foregroundStyle(.secondary)
                                     Spacer()
-                                    Text(Money.format(item.total)).font(.system(.subheadline, design: .rounded).weight(.semibold))
+                                    Text(Money.format(item.total)).font(.ui(.subheadline, design: .rounded).weight(.semibold))
                                 }
                                 GeometryReader { geo in
                                     ZStack(alignment: .leading) {
@@ -356,9 +356,9 @@ struct StatsView: View {
                                     }
                                 }
                                 .frame(height: 6)
-                                Text("\(item.count) 笔").font(.caption2).foregroundStyle(.secondary)
+                                Text("\(item.count) 笔").font(.ui(.caption2)).foregroundStyle(.secondary)
                             }
-                            Image(systemName: "chevron.right").font(.caption).foregroundStyle(.tertiary)
+                            Image(systemName: "chevron.right").font(.ui(.caption)).foregroundStyle(.tertiary)
                         }
                         .contentShape(Rectangle())
                     }
@@ -377,7 +377,7 @@ struct StatsView: View {
         let balanceAmt = incomeAmt - expenseAmt
         return card {
             VStack(alignment: .leading, spacing: 12) {
-                Text("收支对比").font(.headline)
+                Text("收支对比").font(.ui(.headline))
                 Chart {
                     ForEach(points) { p in
                         BarMark(
@@ -391,11 +391,11 @@ struct StatsView: View {
                     }
                     if let selectedKey {
                         RuleMark(x: .value("选中", selectedKey, unit: .month))
-                            .foregroundStyle(Color.accentColor.opacity(0.45))
+                            .foregroundStyle(Color.themeAccent.opacity(0.45))
                             .lineStyle(StrokeStyle(lineWidth: 1.5, dash: [4, 3]))
                     }
                 }
-                .chartForegroundStyleScale(["支出": Color.orange, "收入": Color.green])
+                .chartForegroundStyleScale(["支出": Color.orange, "收入": Color.themeIncome])
                 .chartYAxis {
                     AxisMarks(position: .leading) { value in
                         AxisGridLine()
@@ -431,15 +431,15 @@ struct StatsView: View {
                 if let selectedKey {
                     VStack(alignment: .leading, spacing: 8) {
                         Text(DateText.month.string(from: selectedKey))
-                            .font(.subheadline.weight(.semibold))
+                            .font(.ui(.subheadline).weight(.semibold))
                         HStack(spacing: 16) {
                             compareAmountRow(title: "支出", amount: expenseAmt, color: .orange)
-                            compareAmountRow(title: "收入", amount: incomeAmt, color: .green)
+                            compareAmountRow(title: "收入", amount: incomeAmt, color: Color.themeIncome)
                             Spacer(minLength: 0)
                             compareAmountRow(
                                 title: "结余",
                                 amount: balanceAmt,
-                                color: balanceAmt >= 0 ? .green : .orange
+                                color: balanceAmt >= 0 ? Color.themeIncome : .orange
                             )
                         }
                     }
@@ -451,7 +451,7 @@ struct StatsView: View {
                     )
                     .overlay(
                         RoundedRectangle(cornerRadius: 12, style: .continuous)
-                            .strokeBorder(Color.accentColor.opacity(0.35), lineWidth: 1)
+                            .strokeBorder(Color.themeAccent.opacity(0.35), lineWidth: 1)
                     )
                 } else {
                     chartHint
@@ -530,7 +530,7 @@ struct StatsView: View {
 
     private var chartHint: some View {
         Text("点按扇区或柱子查看详情")
-            .font(.caption)
+            .font(.ui(.caption))
             .foregroundStyle(.secondary)
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.vertical, 4)
@@ -544,15 +544,15 @@ struct StatsView: View {
                     .frame(width: 4, height: 36)
             }
             VStack(alignment: .leading, spacing: 2) {
-                Text(title).font(.subheadline.weight(.semibold))
+                Text(title).font(.ui(.subheadline).weight(.semibold))
                 HStack(spacing: 8) {
                     Text(Money.format(amount))
-                        .font(.system(.title3, design: .rounded).weight(.bold))
+                        .font(.ui(.title3, design: .rounded).weight(.bold))
                     if let percentText {
-                        Text(percentText).font(.caption).foregroundStyle(.secondary)
+                        Text(percentText).font(.ui(.caption)).foregroundStyle(.secondary)
                     }
                     if let count {
-                        Text("\(count) 笔").font(.caption).foregroundStyle(.secondary)
+                        Text("\(count) 笔").font(.ui(.caption)).foregroundStyle(.secondary)
                     }
                 }
             }
@@ -566,7 +566,7 @@ struct StatsView: View {
         )
         .overlay(
             RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .strokeBorder(Color.accentColor.opacity(0.35), lineWidth: 1)
+                .strokeBorder(Color.themeAccent.opacity(0.35), lineWidth: 1)
         )
     }
 
@@ -574,10 +574,10 @@ struct StatsView: View {
         VStack(alignment: .leading, spacing: 2) {
             HStack(spacing: 4) {
                 Circle().fill(color).frame(width: 6, height: 6)
-                Text(title).font(.caption2).foregroundStyle(.secondary)
+                Text(title).font(.ui(.caption2)).foregroundStyle(.secondary)
             }
             Text(Money.format(amount))
-                .font(.system(.caption, design: .rounded).weight(.semibold))
+                .font(.ui(.caption, design: .rounded).weight(.semibold))
                 .lineLimit(1)
                 .minimumScaleFactor(0.7)
         }
@@ -736,7 +736,7 @@ struct CategoryRecordsView: View {
     }
 
     var body: some View {
-        List {
+        ThemedList {
             Section {
                 ForEach(sortedRecords) { r in
                     RecordRow(record: r, showDate: true)

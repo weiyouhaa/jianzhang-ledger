@@ -40,7 +40,7 @@ struct DedupeView: View {
     }
 
     var body: some View {
-        List {
+        ThemedList {
             Section {
                 Picker("时间窗口", selection: $windowRaw) {
                     ForEach(DedupeWindow.allCases) { Text($0.title).tag($0.rawValue) }
@@ -67,9 +67,9 @@ struct DedupeView: View {
             } else if groups.isEmpty {
                 Section {
                     VStack(spacing: 8) {
-                        Image(systemName: "checkmark.seal").font(.largeTitle).foregroundStyle(.green)
-                        Text("没有发现可能重复的记录").font(.headline)
-                        if isReal { Text("已检查 \(scanned) 笔").font(.footnote).foregroundStyle(.secondary) }
+                        Image(systemName: "checkmark.seal").font(.ui(.largeTitle)).foregroundStyle(Color.themeIncome)
+                        Text("没有发现可能重复的记录").font(.ui(.headline))
+                        if isReal { Text("已检查 \(scanned) 笔").font(.ui(.footnote)).foregroundStyle(.secondary) }
                     }
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 16)
@@ -141,10 +141,10 @@ struct DedupeView: View {
         let likely = groups.filter { $0.confidence == .likely }.count
         let possible = groups.count - certain - likely
         return VStack(alignment: .leading, spacing: 6) {
-            Text("发现 \(groups.count) 组可能重复（已检查 \(scanned) 笔）").font(.headline)
-            Text("确定重复 \(certain) · 很可能 \(likely) · 可能 \(possible)").font(.subheadline).foregroundStyle(.secondary)
+            Text("发现 \(groups.count) 组可能重复（已检查 \(scanned) 笔）").font(.ui(.headline))
+            Text("确定重复 \(certain) · 很可能 \(likely) · 可能 \(possible)").font(.ui(.subheadline)).foregroundStyle(.secondary)
             Text("每组默认勾选建议保留的一笔，点按记录切换保留 / 删除。「自动处理」只处理确定重复的组。")
-                .font(.footnote).foregroundStyle(.secondary)
+                .font(.ui(.footnote)).foregroundStyle(.secondary)
         }
     }
 
@@ -183,21 +183,21 @@ struct DedupeView: View {
         } label: {
             HStack(alignment: .top, spacing: 10) {
                 Image(systemName: kept ? "checkmark.circle.fill" : "trash.circle")
-                    .foregroundStyle(kept ? Color.green : Color.red)
-                    .font(.title3)
+                    .foregroundStyle(kept ? Color.themeIncome : Color.red)
+                    .font(.ui(.title3))
                 VStack(alignment: .leading, spacing: 3) {
                     HStack {
-                        Text(rec?.displayTitle ?? r.merchant).font(.body).lineLimit(1)
+                        Text(rec?.displayTitle ?? r.merchant).font(.ui(.body)).lineLimit(1)
                         Spacer()
-                        Text(rec?.amountText ?? Money.format(r.amount)).font(.body.monospacedDigit())
+                        Text(rec?.amountText ?? Money.format(r.amount)).font(.ui(.body).monospacedDigit())
                     }
-                    Text(detailLine(r, rec)).font(.caption).foregroundStyle(.secondary).lineLimit(2)
+                    Text(detailLine(r, rec)).font(.ui(.caption)).foregroundStyle(.secondary).lineLimit(2)
                     HStack(spacing: 6) {
                         Text(DedupeEngine.sourceTitle(r.source))
-                        if r.id == group.suggestedKeepID { Text("建议保留").foregroundStyle(.green) }
+                        if r.id == group.suggestedKeepID { Text("建议保留").foregroundStyle(Color.themeIncome) }
                         if !kept { Text("将删除").foregroundStyle(.red) }
                     }
-                    .font(.caption2)
+                    .font(.ui(.caption2))
                 }
             }
             .contentShape(Rectangle())
@@ -232,21 +232,21 @@ struct DedupeView: View {
         let plan = autoPlan
         let deleteCount = plan.reduce(0) { $0 + $1.delete.count }
         let mergeCount = plan.reduce(0) { $0 + $1.patch.fieldCount }
-        return List {
+        return ThemedList {
             Section {
                 Text("将处理 \(plan.count) 组「确定重复」，删除 \(deleteCount) 笔，补全 \(mergeCount) 项信息。很可能 / 可能重复的组不会动，请手动确认。")
-                    .font(.subheadline)
+                    .font(.ui(.subheadline))
             }
             ForEach(plan) { item in
                 Section {
                     Label(lookup[item.keep.id]?.deleteSummary ?? item.keep.id, systemImage: "checkmark.circle.fill")
-                        .foregroundStyle(.green)
+                        .foregroundStyle(Color.themeIncome)
                     ForEach(item.delete, id: \.id) { d in
                         Label(lookup[d.id]?.deleteSummary ?? d.id, systemImage: "trash")
                             .foregroundStyle(.red)
                     }
                     if !item.patch.isEmpty {
-                        Text("补全：" + patchText(item.patch)).font(.caption).foregroundStyle(.secondary)
+                        Text("补全：" + patchText(item.patch)).font(.ui(.caption)).foregroundStyle(.secondary)
                     }
                 } footer: {
                     Text("保留 \(DedupeEngine.sourceTitle(item.keep.source))的一笔")

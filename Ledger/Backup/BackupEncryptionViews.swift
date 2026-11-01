@@ -60,10 +60,10 @@ struct BackupPasswordFields: View {
                             .foregroundStyle(.red)
                     }
                 }
-                .font(.footnote)
+                .font(.ui(.footnote))
                 if strength == .weak || strength == .medium {
                     Text("建议 12 位以上，混合字母、数字和符号（也可以用一句好记的中文）。")
-                        .font(.caption)
+                        .font(.ui(.caption))
                         .foregroundStyle(.secondary)
                 }
             }
@@ -74,7 +74,7 @@ struct BackupPasswordFields: View {
             switch strength {
             case .tooShort, .weak: return .red
             case .medium: return .orange
-            case .strong: return .green
+            case .strong: return Color.themeIncome
             }
         }
     }
@@ -87,7 +87,7 @@ struct CryptoProgressOverlay: View {
     var body: some View {
         VStack(spacing: 12) {
             ProgressView().controlSize(.large)
-            Text(title).font(.subheadline.weight(.medium))
+            Text(title).font(.ui(.subheadline).weight(.medium))
         }
         .padding(24)
         .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
@@ -119,7 +119,7 @@ struct BackupExportSheet: View {
 
     var body: some View {
         NavigationStack {
-            Form {
+            ThemedForm {
                 Section {
                     Toggle(isOn: $encrypt.animation()) {
                         Label("加密备份", systemImage: encrypt ? "lock.fill" : "lock.open.fill")
@@ -157,7 +157,7 @@ struct BackupExportSheet: View {
                                 VStack(alignment: .leading, spacing: 2) {
                                     Text(hasSaved ? "替换本机保存的备份密码" : "在本机钥匙串记住密码")
                                     Text("仅此设备、不同步；自动备份将用它加密")
-                                        .font(.caption)
+                                        .font(.ui(.caption))
                                         .foregroundStyle(.secondary)
                                 }
                             }
@@ -256,7 +256,7 @@ struct BackupPasswordSetupSheet: View {
 
     var body: some View {
         NavigationStack {
-            Form {
+            ThemedForm {
                 if let prompt {
                     Section {
                         Label(prompt, systemImage: "lock.trianglebadge.exclamationmark.fill")
@@ -321,7 +321,7 @@ struct BackupUnlockSheet: View {
 
     var body: some View {
         NavigationStack {
-            Form {
+            ThemedForm {
                 Section {
                     Label(item.fileName, systemImage: "lock.doc.fill")
                         .lineLimit(2)

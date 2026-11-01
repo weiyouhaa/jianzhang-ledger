@@ -112,7 +112,7 @@ jobs:
         continue-on-error: true
         run: |
           mkdir -p "$RUNNER_TEMP/preview"
-          swiftc -parse-as-library -target arm64-apple-macos14.0 Ledger/Intents/ReceiptCardView.swift Tools/RenderPreview/RenderPreview.swift -o "$RUNNER_TEMP/renderpreview"
+          swiftc -parse-as-library -target arm64-apple-macos14.0 Ledger/Theme/ReceiptTypeface.swift Ledger/Intents/ReceiptCardView.swift Tools/RenderPreview/RenderPreview.swift -o "$RUNNER_TEMP/renderpreview"
           "$RUNNER_TEMP/renderpreview" "$RUNNER_TEMP/preview"
 
       - name: Upload preview images

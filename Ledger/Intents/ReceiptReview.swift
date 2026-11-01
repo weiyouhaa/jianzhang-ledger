@@ -85,6 +85,8 @@ struct ReviewItem: Identifiable {
     var isSelfTransfer = false
     /// 截图来源（微信 / 支付宝 / 云闪付 / 银行公众号…），卡片里显示；不保存、不记日志
     var channel: String? = nil
+    /// 3.2 (23) 截图上的优惠 / 立减说明（片段里单独一行显示）
+    var discount: String? = nil
 
     /// 还款 / 转账必须两个账户都已选定
     var isComplete: Bool { kind != .transfer || (accountID != nil && toAccountID != nil) }
@@ -123,7 +125,8 @@ enum ReviewFormatter {
             fromAccount: isTransfer ? (account?.name ?? "未选付款账户") : nil,
             toAccount: isTransfer ? (toAccount?.name ?? (isRepay ? "未选信用卡" : "未选账户")) : nil,
             channel: item.channel,
-            amount: item.amount
+            amount: item.amount,
+            discount: item.discount
         )
     }
 
@@ -152,6 +155,8 @@ enum ReviewFormatter {
         if !row.merchant.isEmpty { parts.append(row.merchant) }
         parts.append(row.accountName)
         parts.append(row.timeText)
+        if !row.note.isEmpty, !row.noteIsTitle, row.note != row.discount { parts.append("备注 \(row.note)") }
+        if let discount = row.discount, !discount.isEmpty { parts.append("优惠 \(discount)") }
         var s = parts.joined(separator: " · ")
         switch row.duplicate {
         case .skip: s += "（已存在，跳过）"
@@ -166,34 +171,20 @@ enum ReviewFormatter {
 
 struct ReviewSnippetView: View {
     let title: String
+    /// 全部记录（合计按全部计算）；只显示 page 这一页
     let rows: [ReviewRow]
     var footnote: String? = nil
-    var maxRows = 8
+    /// 3.2 (23) 第几页（从 0 开始，每页 ReceiptStackView.pageSize 笔）
+    var page = 0
     /// 识别引擎（Apple 智能 / 规则），创建时取本次识图的结果
     var engineLine: String? = OCRRunInfo.engineLine
 
-    /// 3.1 (22) 紧凑小票：1 笔为紧凑卡片，多笔逐行 + 合计；有高度预算，放不下时依次降级（紧凑 → 精简 → 极简），
-    /// 保证快捷指令弹窗的按钮露出来。完整明细在 App 编辑页顶部的卡片里。
+    /// 3.2 (23) 全量信息小票：每笔所有字段都显示（小字、换行），多于 3 笔时分页，
+    /// 放不下只缩小字号、不隐藏任何内容。详见 ReceiptStackView。
     var body: some View {
-        ReceiptStackView(title: title, rows: rows, footnote: footnote, engineLine: engineLine,
-                         countText: countText, totals: totals, maxRows: maxRows)
-    }
-
-    private var countText: String {
-        let saving = rows.filter { $0.duplicate != .skip }
-        guard !rows.isEmpty else { return "" }
-        let skipped = rows.count - saving.count
-        return skipped > 0 ? "保存 \(saving.count) 笔 · 跳过 \(skipped) 笔" : "共 \(rows.count) 笔"
-    }
-
-    /// 合计（只算会保存的）：按支出 / 收入 / 还款 / 转账分别合计
-    private var totals: [(String, String)] {
-        let saving = rows.filter { $0.duplicate != .skip }
-        return ["支出", "收入", "还款", "转账"].compactMap { kind in
-            let list = saving.filter { $0.resolvedKind == kind }
-            guard !list.isEmpty else { return nil }
-            return (kind, Money.format(list.reduce(0) { $0 + $1.amount }))
-        }
+        ReceiptStackView(title: title, rows: SnippetPager.slice(rows, page: page), footnote: footnote, engineLine: engineLine,
+                         countText: SnippetPager.countText(rows, page: page),
+                         totals: SnippetPager.totals(rows, format: { Money.format($0) }))
     }
 }
 
@@ -224,7 +215,7 @@ struct ReviewSnippetDemoView: View {
                         choice("✏️ 修改第几笔…", .primary)
                         choice("🗑 删除第几笔…", .red)
                     }
-                    choice("⌨️ 在 App 里改金额 / 商户 / 时间", .primary)
+                    choice("📄 下一页（第 4 笔）", .primary)
                     HStack(spacing: 8) {
                         choice("➕ 添加一笔（打开 App）", .primary)
                         choice("♻️ 重复的 1 笔仍然保存", .primary)

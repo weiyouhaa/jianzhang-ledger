@@ -40,11 +40,11 @@ struct HomeView: View {
                     editorTarget = .new
                 } label: {
                     Image(systemName: "plus")
-                        .font(.title2.weight(.bold))
+                        .font(.ui(.title2).weight(.bold))
                         .foregroundStyle(.white)
                         .frame(width: 60, height: 60)
-                        .background(Circle().fill(Color.accentColor.gradient))
-                        .shadow(color: Color.accentColor.opacity(0.4), radius: 10, y: 5)
+                        .background(Circle().fill(Color.themeAccent.gradient))
+                        .shadow(color: Color.themeAccent.opacity(0.4), radius: 10, y: 5)
                 }
                 .accessibilityLabel("记一笔")
                 .accessibilityIdentifier("home-add")
@@ -181,7 +181,7 @@ private struct HomeRecordList: View {
         }()
         let allCollapsed = !groups.isEmpty && groups.allSatisfy { collapsedDays.contains($0.day) }
 
-        List {
+        ThemedList {
             Section {
                 SummaryCard(
                     title: range.title(calendar: calendar),
@@ -203,13 +203,10 @@ private struct HomeRecordList: View {
 
             if records.isEmpty {
                 Section {
-                    ContentUnavailableView {
-                        Label(range.emptyTitle, systemImage: "tray")
-                    } description: {
-                        Text(range.preset == .thisMonth
-                             ? "点右下角的 ＋ 记一笔，或在快捷指令中使用「识图记账」"
-                             : "点上方的日期换个范围，或用右上角的搜索查找全部记录")
-                    } actions: {
+                    ThemedEmptyState(range.emptyTitle, systemImage: "tray",
+                                     description: Text(range.preset == .thisMonth
+                                                       ? "点右下角的 ＋ 记一笔，或在快捷指令中使用「识图记账」"
+                                                       : "点上方的日期换个范围，或用右上角的搜索查找全部记录")) {
                         if range.preset != .thisMonth {
                             Button("回到本月") { resetToThisMonth() }
                         }
@@ -356,7 +353,7 @@ struct HomeRangeSheet: View {
 
     var body: some View {
         NavigationStack {
-            List {
+            ThemedList {
                 Section {
                     ForEach(HomeDateRange.Preset.menu.filter { $0 != .custom }) { p in
                         Button {
@@ -367,10 +364,10 @@ struct HomeRangeSheet: View {
                                 Text(p.label).foregroundStyle(.primary)
                                 Spacer()
                                 Text(HomeDateRange.make(p, calendar: DateText.calendar).title(calendar: DateText.calendar))
-                                    .font(.caption)
+                                    .font(.ui(.caption))
                                     .foregroundStyle(.secondary)
                                 if range.preset == p {
-                                    Image(systemName: "checkmark").foregroundStyle(Color.accentColor)
+                                    Image(systemName: "checkmark").foregroundStyle(Color.themeAccent)
                                 }
                             }
                         }
@@ -434,12 +431,12 @@ struct SummaryCard: View {
                 }
                 Button(action: onPickRange) {
                     HStack(spacing: 6) {
-                        Image(systemName: "calendar").font(.subheadline)
+                        Image(systemName: "calendar").font(.ui(.subheadline))
                         Text(title)
                             .font(theme.title(.headline))
                             .lineLimit(1)
                             .minimumScaleFactor(0.7)
-                        Image(systemName: "chevron.down").font(.caption2.weight(.bold))
+                        Image(systemName: "chevron.down").font(.ui(.caption2).weight(.bold))
                     }
                     .padding(.horizontal, 12)
                     .padding(.vertical, 6)

@@ -143,7 +143,7 @@ struct DaySummaryRow: View {
 
     private var chevron: some View {
         Image(systemName: "chevron.right")
-            .font(.footnote.weight(.semibold))
+            .font(.ui(.footnote).weight(.semibold))
             .foregroundStyle(.tertiary)
             .rotationEffect(.degrees(collapsed ? 0 : 90))
             .accessibilityHidden(true)

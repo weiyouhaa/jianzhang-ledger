@@ -26,7 +26,7 @@ struct CategoryManagerView: View {
     private var categories: [LedgerCategory] { allCategories.filter { $0.kind == kind } }
 
     var body: some View {
-        List {
+        ThemedList {
             Section {
                 Picker("类型", selection: $kind) {
                     ForEach(RecordKind.categoryKinds) { k in Text(k.title).tag(k) }
@@ -40,7 +40,7 @@ struct CategoryManagerView: View {
                         Text(c.name)
                         Spacer()
                         Text("\(c.records?.count ?? 0) 笔")
-                            .font(.caption)
+                            .font(.ui(.caption))
                             .foregroundStyle(.secondary)
                     }
                     .contentShape(Rectangle())
@@ -142,13 +142,13 @@ struct CategoryEditorView: View {
 
     var body: some View {
         NavigationStack {
-            Form {
+            ThemedForm {
                 Section {
                     HStack {
                         Spacer()
                         VStack(spacing: 8) {
                             CategoryIcon(icon: icon, color: Color(hex: colorHex), size: 64, selected: true)
-                            Text(name.isEmpty ? "分类名称" : name).font(.headline)
+                            Text(name.isEmpty ? "分类名称" : name).font(.ui(.headline))
                         }
                         Spacer()
                     }
