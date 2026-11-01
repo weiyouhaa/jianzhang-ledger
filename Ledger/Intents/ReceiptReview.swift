@@ -179,7 +179,7 @@ struct ReviewSnippetView: View {
     /// 识别引擎（Apple 智能 / 规则），创建时取本次识图的结果
     var engineLine: String? = OCRRunInfo.engineLine
 
-    /// 3.2 (23) 全量信息小票：每笔所有字段都显示（小字、换行），多于 3 笔时分页，
+    /// 3.2 (23) 全量信息小票：每笔所有字段都显示（小字、换行），多于 2 笔时分页，
     /// 放不下只缩小字号、不隐藏任何内容。详见 ReceiptStackView。
     var body: some View {
         ReceiptStackView(title: title, rows: SnippetPager.slice(rows, page: page), footnote: footnote, engineLine: engineLine,
@@ -215,7 +215,7 @@ struct ReviewSnippetDemoView: View {
                         choice("✏️ 修改第几笔…", .primary)
                         choice("🗑 删除第几笔…", .red)
                     }
-                    choice("📄 下一页（第 4 笔）", .primary)
+                    choice("📄 下一页（第 3–4 笔）", .primary)
                     HStack(spacing: 8) {
                         choice("➕ 添加一笔（打开 App）", .primary)
                         choice("♻️ 重复的 1 笔仍然保存", .primary)

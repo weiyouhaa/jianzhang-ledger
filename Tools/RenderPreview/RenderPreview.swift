@@ -44,8 +44,9 @@ struct RenderPreview {
                     .font(.caption.bold()).foregroundStyle(p.faint)
                 box("1 笔", snippet([s[0]], page: 0), p)
                 box("2 笔", snippet([s[0], s[4]], page: 0), p)
-                box("5 笔 · 第 1 页（第 1–3 笔）", snippet(s, page: 0), p)
-                box("5 笔 · 第 2 页（第 4–5 笔）", snippet(s, page: 1), p)
+                box("5 笔 · 第 1 页（第 1–2 笔）", snippet(s, page: 0), p)
+                box("5 笔 · 第 2 页（第 3–4 笔）", snippet(s, page: 1), p)
+                box("5 笔 · 第 3 页（第 5 笔）", snippet(s, page: 2), p)
             }
             .padding(16)
             .background(scheme == .dark ? Color(white: 0.11) : Color(white: 0.95))
@@ -56,7 +57,7 @@ struct RenderPreview {
             let p = ReceiptPalette.paper(scheme)
             return VStack(alignment: .leading, spacing: 14) {
                 Text("原大小（不限高度）· 用来核对字段是否齐全").font(.caption.bold()).foregroundStyle(p.faint)
-                ForEach(0..<2, id: \.self) { page in
+                ForEach(0..<3, id: \.self) { page in
                     snippet(s, page: page, budget: nil).frame(width: 360)
                         .background(RoundedRectangle(cornerRadius: 18).fill(Color.primary.opacity(0.05)))
                 }

@@ -405,7 +405,7 @@ struct ReceiptLineItem: View {
 /// 3.1 (22) 用「紧凑 → 精简 → 极简」逐级隐藏字段 / 行，结果信息不全。3.2 (23) 改为：
 /// 1. 每一笔都显示全部信息（类型、金额、商户、分类、时间、来源、账户、备注、优惠、时间来源 / 重复提醒），
 ///    用 11pt 等宽小字 + 两列「标签 值」网格，长文字换行而不是截断；
-/// 2. 一页最多 3 笔（更多的用「下一页」选项翻页，合计行始终按全部记录计算）；
+/// 2. 一页最多 2 笔（3 笔一页在 320pt 里要缩到约 0.56 倍、字太小，2 笔约 0.9 倍仍清晰；更多的用「下一页」选项翻页，合计行始终按全部记录计算）；
 /// 3. 仍然放不下时只做等比缩小字号（1.0 → 0.56），绝不再隐藏任何字段或行；
 /// 4. 去掉原来的标题行 / RECEIPT / 引擎行，笔数和引擎并入底部一行小字，省出空间。
 struct ReceiptStackView: View {
@@ -414,7 +414,7 @@ struct ReceiptStackView: View {
     let rows: [ReviewRow]
     var footnote: String? = nil
     var engineLine: String? = nil
-    /// 「共 5 笔 · 第 1–3 笔」等
+    /// 「共 5 笔 · 第 1–2 笔」等
     var countText: String = ""
     /// 合计行：例如 [("支出", "¥59.50"), ("收入", "¥200.00")]（按全部记录）
     var totals: [(String, String)] = []
@@ -423,7 +423,7 @@ struct ReceiptStackView: View {
     /// 比系统建议的 340pt 再保守一点
     static let defaultBudget: CGFloat = 320
     /// 一页最多几笔
-    static let pageSize = 3
+    static let pageSize = 2
     /// 放不下时依次尝试的字号缩放（每一级都是完整信息）
     static let scales: [CGFloat] = [1.0, 0.9, 0.8, 0.72, 0.64, 0.56]
 
@@ -532,7 +532,7 @@ enum SnippetPager {
         return Array(rows.dropFirst(p * ReceiptStackView.pageSize).prefix(ReceiptStackView.pageSize))
     }
 
-    /// 「第 1–3 笔」
+    /// 「第 1–2 笔」
     static func rangeText(total: Int, page: Int) -> String {
         let p = clamp(page, total: total)
         let first = p * ReceiptStackView.pageSize + 1
@@ -540,7 +540,7 @@ enum SnippetPager {
         return first == last ? "第 \(first) 笔" : "第 \(first)–\(last) 笔"
     }
 
-    /// 「共 5 笔（保存 4 · 跳过 1）· 第 1–3 笔」
+    /// 「共 5 笔（保存 4 · 跳过 1）· 第 1–2 笔」
     static func countText(_ rows: [ReviewRow], page: Int) -> String {
         guard !rows.isEmpty else { return "" }
         let skipped = rows.filter { $0.duplicate == .skip }.count

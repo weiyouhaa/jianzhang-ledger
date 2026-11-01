@@ -365,7 +365,7 @@ struct RecognizeReceiptIntent: AppIntent {
     private func runReview(_ start: [ReviewItem], steps: inout Int, context: ModelContext, emptyHint: String?) async throws -> [ReviewItem]? {
         var items = start
         var hint = emptyHint
-        // 3.2 (23) 片段每页最多 3 笔（全部字段都显示），多的用「下一页」翻
+        // 3.2 (23) 片段每页最多 2 笔（全部字段都显示），多的用「下一页」翻
         var page = 0
         while true {
             if steps >= Self.maxSteps {
