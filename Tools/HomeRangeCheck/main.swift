@@ -97,5 +97,14 @@ check(DaySummary.barRatio(expense: 1, maxExpense: 10_000) == 0.04, "占比条最
 check(DaySummary.barRatio(expense: 0, maxExpense: 100) == 0 && DaySummary.barRatio(expense: 10, maxExpense: 0) == 0, "无支出无条")
 check(DaySummary.barRatio(expense: 300, maxExpense: 200) == 1, "占比条封顶")
 
+// 每日结余（3.1 (22)）
+check(DaySummary.balance(expense: 88.4, income: 0) == -88.4, "只有支出：结余为负")
+check(DaySummary.balance(expense: 60.5, income: 100) == 39.5, "收入减支出")
+check(DaySummary.balance(expense: 0.1 + 0.2, income: 0.3) == 0, "浮点误差归零")
+check(DaySummary.balanceText(-88.4, formatted: "¥88.40", hidden: false) == "结余 -¥88.40", "负结余带减号")
+check(DaySummary.balanceText(39.5, formatted: "¥39.50", hidden: false) == "结余 +¥39.50", "正结余带加号")
+check(DaySummary.balanceText(0, formatted: "¥0.00", hidden: false) == "结余 ¥0.00", "零结余不带符号")
+check(DaySummary.balanceText(-10, formatted: "¥****", hidden: true) == "结余 ¥****", "隐藏金额时不显示正负")
+
 if failures > 0 { print("\(failures) FAILED"); exit(1) }
 print("All home range checks passed")

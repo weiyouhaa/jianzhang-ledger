@@ -46,6 +46,18 @@ enum DaySummary {
             .map { $0.1 }
     }
 
+    /// 每日结余 = 收入 − 支出（3.1 (22)）。两项都已按首页口径排除转账 / 余额校准 / 缴存。
+    static func balance(expense: Double, income: Double) -> Double {
+        ((income - expense) * 100).rounded() / 100
+    }
+
+    /// 结余文字：「结余 -¥88.40」/「结余 +¥40.00」/「结余 ¥0.00」。
+    /// formatted 为结余绝对值的金额文字（隐藏金额时传入 ¥****，此时不带正负号，不泄露盈亏方向）。
+    static func balanceText(_ balance: Double, formatted: String, hidden: Bool) -> String {
+        if hidden || abs(balance) < 0.005 { return "结余 " + formatted }
+        return "结余 " + (balance < 0 ? "-" : "+") + formatted
+    }
+
     /// 当天支出相对于范围内单日最高支出的比例；有支出时至少露出一点
     static func barRatio(expense: Double, maxExpense: Double) -> Double {
         guard expense > 0, maxExpense > 0 else { return 0 }

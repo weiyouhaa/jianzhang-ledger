@@ -17,6 +17,7 @@ enum ModeDefaults {
     private static let globalKeys: Set<String> = [
         SettingsKey.appearance,
         SettingsKey.skin,
+        SettingsKey.editorCardCollapsed,
         SettingsKey.hideInAppSwitcher,
         SettingsKey.iCloudSyncEnabled,
         SettingsKey.iCloudContainerOK,

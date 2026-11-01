@@ -1,7 +1,7 @@
 import SwiftUI
 
 /// 明细的「按天卡片」（2.0 (18) 重新设计的缩略界面）
-/// 折叠时每天就是一张卡片：日期徽章 + 今天/昨天/星期 + 日期·笔数，右侧当天支出（主色）/ 收入（绿色）、
+/// 折叠时每天就是一张卡片：日期徽章 + 今天/昨天/星期·笔数 + 日期，右侧当天支出（主色）/ 收入（绿色）/ 结余（小字）、
 /// 支出最多的分类图标，底部细条表示当天支出占范围内单日最高支出的比例。整行可点按展开 / 折叠。
 struct DaySummaryRow: View {
     struct Chip: Identifiable {
@@ -37,12 +37,21 @@ struct DaySummaryRow: View {
                 HStack(spacing: 12) {
                     dayBadge
                     VStack(alignment: .leading, spacing: 2) {
-                        Text(relative)
-                            .font(theme.title(.headline, weight: .semibold))
-                            .foregroundStyle(isToday ? theme.accent : theme.ink)
-                        Text("\(dateLabel) · \(count) 笔")
+                        // 3.1 (22) 笔数挪到第一行（小字），第二行只放日期，打字机字体下也不再折行
+                        HStack(alignment: .firstTextBaseline, spacing: 6) {
+                            Text(relative)
+                                .font(theme.title(.headline, weight: .semibold))
+                                .foregroundStyle(isToday ? theme.accent : theme.ink)
+                            Text("\(count) 笔")
+                                .font(theme.body(.caption))
+                                .foregroundStyle(theme.faint)
+                        }
+                        .lineLimit(large ? nil : 1)
+                        Text(dateLabel)
                             .font(theme.body(.subheadline))
                             .foregroundStyle(theme.faint)
+                            .lineLimit(large ? nil : 1)
+                            .minimumScaleFactor(0.8)
                     }
                     // 大字号时换行，不截断日期
                     .fixedSize(horizontal: false, vertical: true)
@@ -102,10 +111,23 @@ struct DaySummaryRow: View {
                 Text("无收支")
                     .font(theme.body(.subheadline))
                     .foregroundStyle(theme.faint)
+            } else {
+                // 3.1 (22) 每日结余 = 收入 − 支出（转账等不计），小字淡色
+                Text(balanceText)
+                    .font(theme.body(.caption))
+                    .monospacedDigit()
+                    .foregroundStyle(balance > 0.004 && !hideAmounts ? theme.income.opacity(0.8) : theme.faint)
+                    .accessibilityIdentifier("home-day-balance")
             }
         }
         .lineLimit(1)
         .minimumScaleFactor(0.75)
+    }
+
+    private var balance: Double { DaySummary.balance(expense: expense, income: income) }
+
+    private var balanceText: String {
+        DaySummary.balanceText(balance, formatted: Money.masked(abs(balance), hidden: hideAmounts), hidden: hideAmounts)
     }
 
     private var chipStrip: some View {
@@ -144,6 +166,7 @@ struct DaySummaryRow: View {
         var parts = ["\(relative)，\(dateLabel)", "\(count) 笔"]
         if expense > 0 { parts.append("支出 " + Money.masked(expense, hidden: hideAmounts)) }
         if income > 0 { parts.append("收入 " + Money.masked(income, hidden: hideAmounts)) }
+        if expense > 0 || income > 0 { parts.append(balanceText) }
         parts.append(collapsed ? "已折叠" : "已展开")
         return parts.joined(separator: "，")
     }

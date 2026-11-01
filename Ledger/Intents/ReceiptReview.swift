@@ -172,7 +172,8 @@ struct ReviewSnippetView: View {
     /// 识别引擎（Apple 智能 / 规则），创建时取本次识图的结果
     var engineLine: String? = OCRRunInfo.engineLine
 
-    /// 2.0 (20) 小票卡片样式：1–2 笔逐笔详细卡片，3 笔以上一张小票逐行列出 + 合计
+    /// 3.1 (22) 紧凑小票：1 笔为紧凑卡片，多笔逐行 + 合计；有高度预算，放不下时依次降级（紧凑 → 精简 → 极简），
+    /// 保证快捷指令弹窗的按钮露出来。完整明细在 App 编辑页顶部的卡片里。
     var body: some View {
         ReceiptStackView(title: title, rows: rows, footnote: footnote, engineLine: engineLine,
                          countText: countText, totals: totals, maxRows: maxRows)

@@ -105,6 +105,7 @@ enum SettingsKey {
     static let currencySymbol = "currencySymbol"
     static let appearance = "appearance"          // 0 跟随系统 1 浅色 2 深色
     static let skin = "appearance.skin"            // default / receipt（设备级，真实防窥共用）
+    static let editorCardCollapsed = "appearance.editorCardCollapsed"  // 编辑页顶部卡片折叠（设备级，真实防窥共用）
     static let defaultAccount = "defaultAccount"
     static let hideInAppSwitcher = "hideInAppSwitcher"
     static let hideAmounts = "assets.hideAmounts"

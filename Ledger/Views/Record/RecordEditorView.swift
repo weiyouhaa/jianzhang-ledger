@@ -20,6 +20,9 @@ struct RecordEditorView: View {
     @Query(sort: \LedgerAccount.sortOrder) private var allAccounts: [LedgerAccount]
     @AppStorage(SettingsKey.defaultAccount) private var defaultAccount = ""
     @Environment(\.ledgerPrefs) private var prefs
+    @Environment(\.appTheme) private var theme
+    /// 顶部卡片折叠状态（设备级，真实 / 防窥一致）
+    @AppStorage(SettingsKey.editorCardCollapsed, store: .standard) private var cardCollapsed = false
 
     @State private var kind: RecordKind = .expense
     @State private var amountText = ""
@@ -114,6 +117,13 @@ struct RecordEditorView: View {
     var body: some View {
         NavigationStack {
             Form {
+                // 3.1 (22) 顶部小票卡片：当笔记录的全部信息，随下方每一处修改实时更新
+                Section {
+                    RecordSummaryCard(info: cardInfo, style: cardStyle, collapsed: $cardCollapsed)
+                        .listRowInsets(EdgeInsets(top: 4, leading: 0, bottom: 4, trailing: 0))
+                        .listRowBackground(Color.clear)
+                }
+
                 Section {
                     if kind == .adjustment {
                         Label("余额校准（不计入收支统计）", systemImage: "slider.horizontal.3")
@@ -284,6 +294,94 @@ struct RecordEditorView: View {
             }
 
         }
+    }
+
+    // MARK: - 顶部卡片（3.1 (22)）
+
+    private var cardStyle: RecordCardStyle {
+        RecordCardStyle(receipt: theme.isReceipt, paper: theme.isReceipt ? theme.paper : theme.cardFill,
+                        ink: theme.ink, faint: theme.faint, rule: theme.rule, accent: theme.accent,
+                        income: theme.income, neutral: Color(hex: "#30B0C7"), corner: theme.cardCorner)
+    }
+
+    /// 由编辑页当前状态生成卡片内容（纯计算，任何字段变化都会重新生成）
+    private var cardInfo: RecordCardInfo {
+        let amount = parsedAmount
+        let placeholder = !amountValid
+        let category = allCategories.first(where: { $0.id == selectedCategoryID })
+        let from = allAccounts.first(where: { $0.id == accountID })
+        let to = allAccounts.first(where: { $0.id == toAccountID })
+        let trimmedNote = note.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedMerchant = merchant.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        let kindText: String
+        let tone: RecordCardInfo.Tone
+        let sign: String
+        let icon: String
+        let colorHex: String
+        let fallbackTitle: String
+        var lines: [RecordCardLine] = []
+        var useMerchant = false
+
+        if repayMode {
+            kindText = "还款"; tone = .neutral; sign = ""
+            icon = LedgerRecord.repaymentIcon; colorHex = "#30B0C7"; fallbackTitle = "信用卡还款"
+            lines.append(RecordCardLine(label: "付款账户", value: from?.name ?? "请选择", warn: from == nil))
+            lines.append(RecordCardLine(label: "还款信用卡", value: to?.name ?? "请选择", warn: to == nil))
+        } else {
+            switch kind {
+            case .expense, .income:
+                kindText = kind.title; tone = kind == .income ? .income : .expense; sign = kind.sign
+                icon = category?.icon ?? "tag.fill"; colorHex = category?.colorHex ?? "#8E8E93"
+                fallbackTitle = category?.name ?? kind.title
+                useMerchant = true
+                lines.append(RecordCardLine(label: "分类", value: category?.name ?? "未选择", icon: category?.icon,
+                                            colorHex: category?.colorHex, warn: category == nil))
+                lines.append(RecordCardLine(label: "账户", value: from?.name ?? "未选择"))
+            case .transfer:
+                kindText = kind.title; tone = .neutral; sign = ""
+                icon = "arrow.left.arrow.right"; colorHex = "#30B0C7"; fallbackTitle = "转账"
+                lines.append(RecordCardLine(label: "转出账户", value: from?.name ?? "请选择", warn: from == nil))
+                lines.append(RecordCardLine(label: "转入账户", value: to?.name ?? "请选择", warn: to == nil))
+                if let fee = Money.parse(feeText), fee > 0 {
+                    lines.append(RecordCardLine(label: "手续费", value: Money.format(fee)))
+                }
+            case .contribution:
+                kindText = kind.title; tone = .neutral; sign = "+"
+                icon = "tray.and.arrow.down.fill"; colorHex = "#E8A33D"; fallbackTitle = from?.name ?? "缴存"
+                lines.append(RecordCardLine(label: "缴存账户", value: from?.name ?? "请选择", warn: from == nil))
+            case .adjustment:
+                kindText = kind.title; tone = .neutral; sign = ""
+                icon = "slider.horizontal.3"; colorHex = "#8E8E93"; fallbackTitle = from?.name ?? "余额校准"
+                lines.append(RecordCardLine(label: "账户", value: from?.name ?? "请选择", warn: from == nil))
+            }
+        }
+
+        // 标题：商户 > 备注 > 分类 / 类型；备注不当标题时单独一行
+        let title: String
+        if useMerchant, !trimmedMerchant.isEmpty {
+            title = trimmedMerchant
+            if !trimmedNote.isEmpty { lines.append(RecordCardLine(label: "备注", value: trimmedNote)) }
+        } else if !trimmedNote.isEmpty {
+            title = trimmedNote
+        } else {
+            title = fallbackTitle
+        }
+        if let ocrTimeHint, ocrTimeHintDate == date {
+            lines.append(RecordCardLine(label: "时间来源", value: ocrTimeHint, warn: true))
+        }
+
+        let amountText: String
+        if let amount, !placeholder {
+            amountText = kind == .adjustment && !repayMode ? (amount > 0 ? "+" : "") + Money.format(amount)
+                                                           : sign + Money.format(amount)
+        } else {
+            amountText = Money.format(0)
+        }
+        let badge: String? = source == "ocr" ? "识图" : (source == "recurring" ? "周期账单" : nil)
+        return RecordCardInfo(kindText: kindText, amountText: amountText, tone: tone, amountPlaceholder: placeholder,
+                              title: title, dateText: ReviewFormatter.fullDate.string(from: date),
+                              icon: icon, colorHex: colorHex, lines: lines, badge: badge)
     }
 
     // MARK: - Sections
