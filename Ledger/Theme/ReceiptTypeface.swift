@@ -94,7 +94,16 @@ enum ReceiptTypeface {
         }
     }
 
-    /// UIKit（导航栏 / 标签栏 / 分段控件）用
+    /// UIKit 栏（导航栏 / 标签栏 / 分段控件）用：普通 UIFont，不带 CoreText 级联。
+    /// 3.3 (24)：桥接的 CTFont（级联到 iOS 上并不存在的宋体）放进导航栏标题属性后，中文标题整段不绘制，
+    /// 「简账 / 统计 / 资产 / 设置」位置只剩空白。普通 UIFont 由系统自动回落到系统中文字体，能正常显示。
+    static func barFont(_ name: String, size: CGFloat) -> UIFont {
+        let resolved = isAvailable(name) ? name : systemFallback(for: name)
+        return UIFont(name: resolved, size: size)
+            ?? .systemFont(ofSize: size, weight: name == mono ? .regular : .bold)
+    }
+
+    /// 桥接的 CTFont（带宋体级联），只给需要 UIFont 的非栏位置用
     static func uiFont(_ name: String, size: CGFloat) -> UIFont {
         // CTFont 与 UIFont 免费桥接
         unsafeBitCast(ctFont(name, size: size), to: UIFont.self)

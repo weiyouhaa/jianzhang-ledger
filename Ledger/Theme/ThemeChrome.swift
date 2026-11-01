@@ -202,8 +202,9 @@ enum ThemeChrome {
             return
         }
         let ink = ui(.ink), faint = ui(.faint), accent = ui(.accent), rule = ui(.rule)
-        let mono = { (size: CGFloat) in ReceiptTypeface.uiFont(ReceiptTypeface.mono, size: size) }
-        let bold = { (size: CGFloat) in ReceiptTypeface.uiFont(ReceiptTypeface.monoBold, size: size) }
+        // 栏上的字体必须是普通 UIFont（见 ReceiptTypeface.barFont）
+        let mono = { (size: CGFloat) in ReceiptTypeface.barFont(ReceiptTypeface.mono, size: size) }
+        let bold = { (size: CGFloat) in ReceiptTypeface.barFont(ReceiptTypeface.monoBold, size: size) }
 
         let bar = UINavigationBarAppearance()
         bar.configureWithOpaqueBackground()
