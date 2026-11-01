@@ -74,10 +74,12 @@ jobs:
         run: |
           mkdir -p screenshots
           shoot() {
-            local screen=$1 appearance=$2 name=$3
+            local screen=$1 appearance=$2 name=$3 skin=${4:-default}
             xcrun simctl ui "$UDID" appearance "$appearance"
             xcrun simctl terminate "$UDID" "$BUNDLE_ID" 2>/dev/null || true
+            # 皮肤用 UserDefaults 参数域传入（-appearance.skin receipt），不改 App 里的存储
             xcrun simctl launch "$UDID" "$BUNDLE_ID" -UIScreenshotDemo "$screen" \
+              -appearance.skin "$skin" \
               -AppleLanguages "(zh-Hans)" -AppleLocale zh_CN
             sleep 6
             xcrun simctl io "$UDID" screenshot "screenshots/$name.png"
@@ -110,6 +112,15 @@ jobs:
           shoot cardrepayment light 27-card-repayment
           shoot home     dark  07-home-dark
           shoot stats    dark  08-stats-dark
+          # 小票皮肤（3.3 起）：各标签页根页面 + 识图片段 + 编辑页 + 锁屏
+          shoot home     light 30-receipt-home receipt
+          shoot home     dark  31-receipt-home-dark receipt
+          shoot stats    light 32-receipt-stats receipt
+          shoot assets   light 33-receipt-assets receipt
+          shoot settings dark  34-receipt-settings-dark receipt
+          shoot add      light 35-receipt-add receipt
+          shoot reviewsnippet light 36-receipt-review-snippet receipt
+          shoot lock     dark  37-receipt-lock-dark receipt
           ls -l screenshots
 
       - name: Upload screenshots
