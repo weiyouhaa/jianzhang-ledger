@@ -123,7 +123,7 @@ struct AssetsView: View {
                 }
             }
           }
-            .navigationTitle("资产")
+            .themedRootTitle("资产")
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
                     Button {

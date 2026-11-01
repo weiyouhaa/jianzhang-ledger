@@ -34,7 +34,7 @@ struct HomeView: View {
                            editorTarget: $editorTarget,
                            pendingDelete: $pendingDelete,
                            showDemoSearch: $showDemoSearch)
-            .navigationTitle("简账")
+            .themedRootTitle("简账")
             .overlay(alignment: .bottomTrailing) {
                 Button {
                     editorTarget = .new

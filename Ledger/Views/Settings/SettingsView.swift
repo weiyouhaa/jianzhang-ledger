@@ -61,7 +61,7 @@ struct SettingsView: View {
                 aboutSection
             }
             .themedScreenBackground()
-            .navigationTitle("设置")
+            .themedRootTitle("设置")
             .navigationDestination(isPresented: $showDemoBackup) { BackupSettingsView() }
             .navigationDestination(item: $demoDestination) { screen in
                 switch screen {

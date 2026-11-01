@@ -15,6 +15,18 @@ extension AppSkin {
     }
 }
 
+// MARK: - 标签页根页面标题
+
+extension View {
+    /// 标签页根页面（明细 / 统计 / 资产 / 设置）的标题。
+    /// 小票皮肤下 UIKit 大标题不绘制（3.2 实测：大标题位置只剩一块空白，换字体也一样），
+    /// 所以小票皮肤用行内标题（与「记一笔」等页面同一条路径，已验证能显示）；默认皮肤保持系统大标题不变。
+    func themedRootTitle(_ title: String) -> some View {
+        navigationTitle(title)
+            .navigationBarTitleDisplayMode(AppSkin.current == .receipt ? .inline : .automatic)
+    }
+}
+
 // MARK: - 字体
 
 extension Font {
@@ -198,8 +210,7 @@ enum ThemeChrome {
         bar.backgroundColor = ui(.backdrop)
         bar.shadowColor = rule
         bar.titleTextAttributes = [.font: bold(17), .foregroundColor: ink]
-        // 大标题用粗体等宽（与行内标题同一条字体路径）。3.2 用 Special Elite 时 UIKit 大标题里中文整段不绘制，
-        // 「简账 / 统计 / 资产 / 设置」位置只剩一块空白（3.3 修复）。
+        // 小票皮肤的标签页根页面改用行内标题（见 themedRootTitle），这里的大标题字体只作兜底
         bar.largeTitleTextAttributes = [.font: bold(30), .foregroundColor: ink]
         let button = UIBarButtonItemAppearance()
         button.normal.titleTextAttributes = [.font: mono(17), .foregroundColor: accent]

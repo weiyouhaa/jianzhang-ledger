@@ -120,10 +120,11 @@ jobs:
 
       - name: Receipt skin large-title guard
         run: |
-          # 3.2 小票皮肤大标题用 Special Elite 时中文不绘制，顶部空出一块；大标题必须用能显示中文的字体
-          if grep -nE "largeTitleTextAttributes.*ReceiptTypeface\.display" Ledger/Theme/ThemeChrome.swift; then
-            echo "大标题不能用 Special Elite（中文不显示）"; exit 1
-          fi
+          # 3.2 小票皮肤下 UIKit 大标题不绘制，顶部空出一块；四个标签页根页面必须用 themedRootTitle（小票皮肤 = 行内标题）
+          for f in Ledger/Views/Home/HomeView.swift Ledger/Views/Stats/StatsView.swift Ledger/Views/Assets/AssetsView.swift Ledger/Views/Settings/SettingsView.swift; do
+            grep -q "themedRootTitle(" "$f" || { echo "$f 没有用 themedRootTitle"; exit 1; }
+          done
+          grep -q "AppSkin.current == .receipt ? .inline" Ledger/Theme/ThemeChrome.swift
 
       - name: Render receipt card preview (synthetic data only)
         continue-on-error: true

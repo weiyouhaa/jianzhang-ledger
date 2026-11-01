@@ -124,7 +124,7 @@ struct StatsView: View {
             }
             .background(Color.themeBackdrop)
             .themedScreenBackground()
-            .navigationTitle("统计")
+            .themedRootTitle("统计")
             .onChange(of: period) { _, _ in clearChartSelection() }
             .onChange(of: kind) { _, _ in clearChartSelection() }
             .onChange(of: anchor) { _, _ in clearChartSelection() }
