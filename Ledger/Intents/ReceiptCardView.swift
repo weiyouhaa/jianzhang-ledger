@@ -902,11 +902,6 @@ struct RecordSummaryCard: View {
                     .fixedSize(horizontal: false, vertical: !folded)
                 HStack(spacing: 6) {
                     Text(info.kindText)
-                    if folded {
-                        // 折叠时时间放在这一行；展开时在下面单独一行完整显示
-                        Text("·")
-                        Text(info.dateText).lineLimit(1)
-                    }
                     if let badge = info.badge {
                         Text(badge)
                             .font(style.receipt ? ReceiptFont.mono(.caption, .semibold) : .caption.weight(.semibold))
@@ -921,6 +916,14 @@ struct RecordSummaryCard: View {
                 .foregroundStyle(style.faint)
                 .lineLimit(1)
                 .minimumScaleFactor(0.6)
+                if folded {
+                    // 折叠时时间单独一行（展开时在下面「时间」行完整显示）
+                    Text(info.dateText)
+                        .font(style.receipt ? ReceiptFont.mono(.footnote, .semibold) : .subheadline.weight(.medium))
+                        .foregroundStyle(style.ink.opacity(0.8))
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.7)
+                }
             }
             Spacer(minLength: 6)
             Text(info.amountText)
