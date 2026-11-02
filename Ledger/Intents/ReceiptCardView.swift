@@ -897,14 +897,15 @@ struct RecordSummaryCard: View {
                 Text(info.title)
                     .font(style.receipt ? .system(.headline, design: .serif).weight(.bold) : .headline)
                     .foregroundStyle(style.ink)
-                    .lineLimit(folded ? 1 : 3)
+                    .lineLimit(folded ? 2 : 3)
+                    .minimumScaleFactor(0.8)
                     .fixedSize(horizontal: false, vertical: !folded)
                 HStack(spacing: 6) {
                     Text(info.kindText)
                     if folded {
                         // 折叠时时间放在这一行；展开时在下面单独一行完整显示
                         Text("·")
-                        Text(info.dateText).lineLimit(1).truncationMode(.middle)
+                        Text(info.dateText).lineLimit(1)
                     }
                     if let badge = info.badge {
                         Text(badge)
@@ -919,6 +920,7 @@ struct RecordSummaryCard: View {
                 .font(style.receipt ? ReceiptFont.mono(.footnote) : .subheadline)
                 .foregroundStyle(style.faint)
                 .lineLimit(1)
+                .minimumScaleFactor(0.6)
             }
             Spacer(minLength: 6)
             Text(info.amountText)
@@ -1272,8 +1274,11 @@ struct StickyEditorDemo: View {
                     .zIndex(1)
                 // 表单（被滚动 scroll pt，超出部分裁掉）
                 ZStack(alignment: .top) {
-                    form(style: style, row: row)
-                        .offset(y: -scroll)
+                    Color.clear.overlay(alignment: .top) {
+                        form(style: style, row: row)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .offset(y: -scroll)
+                    }
                     if keyboard {
                         VStack { Spacer(); keyboardMock(scheme) }
                     }

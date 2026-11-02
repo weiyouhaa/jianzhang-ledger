@@ -77,7 +77,7 @@ struct RenderPreview {
                     .font(.caption.bold()).foregroundStyle(p.faint)
                 box("1 笔 · 长商户名", snippet([long], page: 0), p)
                 box("1 笔 · 带重复提醒", snippet([s[1]], page: 0), p)
-                box("2 笔", snippet([long, s[0]], page: 0), p)
+                box("2 笔", snippet([long, s[3]], page: 0), p)
                 box("转账 / 还款", snippet([s[4]], page: 0), p)
             }
             .padding(16)
