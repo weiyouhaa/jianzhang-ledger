@@ -68,10 +68,29 @@ struct RenderPreview {
         }
         write(HStack(alignment: .top, spacing: 0) { panel(.light); panel(.dark); fullPanel(.light) },
               to: "\(out)/preview-snippet", ext: imageExt)
+        // 3.4 (25) 放大加粗后的片段：长商户名、完整时间、信用卡账户都不截断
+        func panel34(_ scheme: ColorScheme) -> some View {
+            let p = ReceiptPalette.paper(scheme)
+            let long = ReviewRow.longSample
+            return VStack(alignment: .leading, spacing: 14) {
+                Text(scheme == .dark ? "3.4 · 深色 · 高度预算 320pt（红线）" : "3.4 · 浅色 · 高度预算 320pt（红线）")
+                    .font(.caption.bold()).foregroundStyle(p.faint)
+                box("1 笔 · 长商户名", snippet([long], page: 0), p)
+                box("1 笔 · 带重复提醒", snippet([s[1]], page: 0), p)
+                box("2 笔", snippet([long, s[0]], page: 0), p)
+                box("转账 / 还款", snippet([s[4]], page: 0), p)
+            }
+            .padding(16)
+            .background(scheme == .dark ? Color(white: 0.11) : Color(white: 0.95))
+            .environment(\.colorScheme, scheme)
+        }
+        write(HStack(alignment: .top, spacing: 0) { panel34(.light); panel34(.dark) },
+              to: "\(out)/preview-snippet-3.4", ext: imageExt)
         write(ScreensDemo(), to: "\(out)/preview-receipt-screens", ext: imageExt)
         write(FontDemo(), to: "\(out)/preview-fonts", ext: imageExt)
         write(SkinChromeDemo(), to: "\(out)/preview-skins", ext: imageExt)
         write(EditorCardDemo(), to: "\(out)/preview-editor-card", ext: imageExt)
+        write(StickyEditorDemo(), to: "\(out)/preview-editor-sticky", ext: imageExt)
         write(DayCardDemo(), to: "\(out)/preview-day-card", ext: imageExt)
     }
 

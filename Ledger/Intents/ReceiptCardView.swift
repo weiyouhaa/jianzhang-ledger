@@ -435,7 +435,7 @@ struct ReceiptStackView: View {
     /// 一页最多几笔
     static let pageSize = 2
     /// 放不下时依次尝试的字号缩放（每一级都是完整信息）
-    static let scales: [CGFloat] = [1.0, 0.9, 0.8, 0.72, 0.64, 0.56]
+    static let scales: [CGFloat] = [1.0, 0.9, 0.8, 0.72, 0.64, 0.56, 0.5]
 
     @Environment(\.colorScheme) var scheme
 
@@ -449,6 +449,7 @@ struct ReceiptStackView: View {
                 content(Self.scales[3], palette)
                 content(Self.scales[4], palette)
                 content(Self.scales[5], palette)
+                content(Self.scales[6], palette)
             }
             .frame(maxHeight: heightBudget, alignment: .top)
         } else {
@@ -464,13 +465,13 @@ struct ReceiptStackView: View {
         VStack(alignment: .leading, spacing: 5 * s) {
             if showsTitle {
                 Text(title)
-                    .font(ReceiptTypeface.fixed(ReceiptTypeface.display, 13 * s))
+                    .font(ReceiptTypeface.fixed(ReceiptTypeface.display, 15 * s))
                     .foregroundStyle(palette.ink)
                     .fixedSize(horizontal: false, vertical: true)
             }
             if rows.isEmpty && footnote == nil {
                 Text("没有待保存的记录。可以「添加一笔」，或取消。")
-                    .font(ReceiptTypeface.fixed(ReceiptTypeface.mono, 11 * s))
+                    .font(ReceiptTypeface.fixed(ReceiptTypeface.mono, 13 * s))
                     .foregroundStyle(palette.faint)
                     .fixedSize(horizontal: false, vertical: true)
             }
@@ -484,7 +485,7 @@ struct ReceiptStackView: View {
             }
             if let footnote {
                 Text(footnote)
-                    .font(ReceiptTypeface.fixed(ReceiptTypeface.mono, 10.5 * s))
+                    .font(ReceiptTypeface.fixed(ReceiptTypeface.mono, 12 * s))
                     .foregroundStyle(palette.accent)
                     .fixedSize(horizontal: false, vertical: true)
             }
@@ -508,12 +509,12 @@ struct ReceiptStackView: View {
         VStack(alignment: .leading, spacing: 2 * s) {
             if !totals.isEmpty {
                 totalsText(palette)
-                    .font(ReceiptTypeface.fixed(ReceiptTypeface.monoBold, 11 * s))
+                    .font(ReceiptTypeface.fixed(ReceiptTypeface.monoBold, 13 * s))
                     .fixedSize(horizontal: false, vertical: true)
             }
             if !footerMeta.isEmpty {
                 Text(footerMeta)
-                    .font(ReceiptTypeface.fixed(ReceiptTypeface.mono, 9.5 * s))
+                    .font(ReceiptTypeface.fixed(ReceiptTypeface.mono, 10.5 * s))
                     .foregroundStyle(palette.faint)
                     .fixedSize(horizontal: false, vertical: true)
             }
@@ -592,6 +593,14 @@ extension ReviewRow {
         return dateText
     }
 
+    /// 3.4 (25) 片段里的时间：完整「2026年10月19日 12:18」；年份是今年时省掉年份
+    var snippetDateText: String {
+        guard !dateText.isEmpty else { return timeText }
+        let year = Calendar(identifier: .gregorian).component(.year, from: Date())
+        if dateText.hasPrefix("\(year)年") { return shortDateText }
+        return dateText
+    }
+
     /// 3.3 (24) 可能重复的红色提示（单独一行，比其它提示醒目）；没有重复为 nil
     var duplicateBanner: String? {
         switch duplicate {
@@ -628,6 +637,9 @@ extension ReviewRow {
 }
 
 /// 片段里的一笔：所有字段都显示，长文字换行
+/// 3.4 (25) 字号整体放大（标题 15 / 金额 19 / 值 13.5pt）；金额、时间、账户加粗；
+/// 商户名单独一整行、最多两行；时间单独一整行显示完整日期时间（原来和「分类」挤在半宽格子里会变成「07:…」）；
+/// 关键字段一律「换行 → 等比缩小」，不再出现省略号。
 struct SnippetRecord: View {
     let row: ReviewRow
     let scale: CGFloat
@@ -636,30 +648,43 @@ struct SnippetRecord: View {
     private var s: CGFloat { scale }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 2.5 * s) {
-            HStack(alignment: .firstTextBaseline, spacing: 5 * s) {
+        VStack(alignment: .leading, spacing: 4 * s) {
+            // 第一行：序号 · 图标 · 类型 ……… 金额（加粗、最大）
+            HStack(alignment: .firstTextBaseline, spacing: 6 * s) {
                 Text("\(row.index)")
-                    .font(ReceiptTypeface.fixed(ReceiptTypeface.monoBold, 10 * s))
+                    .font(ReceiptTypeface.fixed(ReceiptTypeface.monoBold, 12 * s))
                     .foregroundStyle(palette.faint)
                 Image(systemName: row.icon)
-                    .font(.system(size: 10 * s, weight: .bold))
+                    .font(.system(size: 13 * s, weight: .bold))
                     .foregroundStyle(Color.cardHex(row.colorHex))
                     .accessibilityHidden(true)
-                Text(row.title)
-                    .font(ReceiptTypeface.fixed(ReceiptTypeface.monoBold, 12 * s))
-                    .foregroundStyle(palette.ink)
-                    .fixedSize(horizontal: false, vertical: true)
-                Spacer(minLength: 4 * s)
+                Text(row.resolvedKind)
+                    .font(ReceiptTypeface.fixed(ReceiptTypeface.monoBold, 12.5 * s))
+                    .foregroundStyle(palette.faint)
+                    .fixedSize()
+                Spacer(minLength: 6 * s)
                 Text(row.trimmedAmount)
-                    .font(ReceiptTypeface.fixed(ReceiptTypeface.monoBold, 14 * s))
+                    .font(ReceiptTypeface.fixed(ReceiptTypeface.monoBold, 19 * s))
                     .foregroundStyle(row.isIncome ? palette.income : palette.ink)
                     .strikethrough(row.duplicate == .skip, color: palette.faint)
                     .opacity(row.duplicate == .skip ? 0.55 : 1)
-                    .fixedSize()
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.6)
+                    .layoutPriority(2)
+                    .accessibilityIdentifier("snippet-amount")
             }
+            // 标题（商户 / 备注）：独占一整行，最多两行，再长就缩小字号，不加省略号
+            Text(row.title)
+                .font(ReceiptTypeface.fixed(ReceiptTypeface.monoBold, 15 * s))
+                .foregroundStyle(palette.ink)
+                .lineLimit(2)
+                .minimumScaleFactor(0.6)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .accessibilityIdentifier("snippet-title")
             if let banner = row.duplicateBanner {
                 Text(banner)
-                    .font(ReceiptTypeface.fixed(ReceiptTypeface.monoBold, 11 * s))
+                    .font(ReceiptTypeface.fixed(ReceiptTypeface.monoBold, 12 * s))
                     .foregroundStyle(palette.warn)
                     .fixedSize(horizontal: false, vertical: true)
                     .padding(.horizontal, 5 * s)
@@ -669,14 +694,21 @@ struct SnippetRecord: View {
                     .overlay(RoundedRectangle(cornerRadius: 3).stroke(palette.warn.opacity(0.85), lineWidth: 1))
                     .accessibilityIdentifier("snippet-duplicate")
             }
-            pair(("类型", row.resolvedKind, false), ("分类", row.categoryName, false))
-            pair(("时间", row.shortDateText, false), ("来源", row.sourceText, false))
+            // 时间：整行、完整日期时间、加粗，一行放不下就缩小（不截断）
+            kv("时间", row.snippetDateText, bold: true, oneLine: true)
+                .accessibilityIdentifier("snippet-time")
             if row.isTransfer {
-                kv("付款", row.fromAccount ?? "—", warn: (row.fromAccount ?? "未").hasPrefix("未"))
-                kv(row.categoryName == "信用卡还款" ? "还入" : "收款", row.toAccount ?? "—",
+                kv("付款", row.fromAccount ?? "—", bold: true, warn: (row.fromAccount ?? "未").hasPrefix("未"))
+                kv(row.categoryName == "信用卡还款" ? "还入" : "收款", row.toAccount ?? "—", bold: true,
                    warn: (row.toAccount ?? "未").hasPrefix("未"))
             } else {
-                kv("账户", row.accountName, warn: row.accountName.hasPrefix("未"))
+                kv("账户", row.accountName, bold: true, warn: row.accountName.hasPrefix("未"))
+                    .accessibilityIdentifier("snippet-account")
+            }
+            // 分类 / 来源：值都很短，放同一行两格
+            HStack(alignment: .firstTextBaseline, spacing: 10 * s) {
+                kv(row.isTransfer ? "类型" : "分类", row.categoryName, oneLine: true)
+                kv("来源", row.sourceText, oneLine: true)
             }
             if !row.merchant.isEmpty, row.title != row.merchant {
                 kv("商户", row.merchant)
@@ -689,7 +721,7 @@ struct SnippetRecord: View {
             }
             if !row.snippetFlags.isEmpty {
                 Text("⚠︎ " + row.snippetFlags.joined(separator: " · "))
-                    .font(ReceiptTypeface.fixed(ReceiptTypeface.mono, 10 * s))
+                    .font(ReceiptTypeface.fixed(ReceiptTypeface.mono, 11.5 * s))
                     .foregroundStyle(palette.accent)
                     .fixedSize(horizontal: false, vertical: true)
             }
@@ -697,23 +729,19 @@ struct SnippetRecord: View {
         .accessibilityElement(children: .combine)
     }
 
-    /// 两列：左右各一个「标签 值」，等宽
-    private func pair(_ a: (String, String, Bool), _ b: (String, String, Bool)) -> some View {
-        HStack(alignment: .firstTextBaseline, spacing: 8 * s) {
-            kv(a.0, a.1, warn: a.2)
-            kv(b.0, b.1, warn: b.2)
-        }
-    }
-
-    private func kv(_ label: String, _ value: String, warn: Bool = false) -> some View {
-        HStack(alignment: .firstTextBaseline, spacing: 4 * s) {
+    /// 「标签 值」：默认换行（最多 3 行，再长缩小字号）；oneLine 时只占一行、放不下等比缩小
+    private func kv(_ label: String, _ value: String, bold: Bool = false, warn: Bool = false,
+                    oneLine: Bool = false) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 5 * s) {
             Text(label)
-                .font(ReceiptTypeface.fixed(ReceiptTypeface.mono, 9.5 * s))
+                .font(ReceiptTypeface.fixed(ReceiptTypeface.mono, 11.5 * s))
                 .foregroundStyle(palette.faint)
                 .fixedSize()
             Text(value.isEmpty ? "—" : value)
-                .font(ReceiptTypeface.fixed(ReceiptTypeface.mono, 11 * s))
+                .font(ReceiptTypeface.fixed(bold ? ReceiptTypeface.monoBold : ReceiptTypeface.mono, 13.5 * s))
                 .foregroundStyle(warn ? palette.accent : palette.ink)
+                .lineLimit(oneLine ? 1 : 3)
+                .minimumScaleFactor(oneLine ? 0.55 : 0.7)
                 .fixedSize(horizontal: false, vertical: true)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -789,10 +817,21 @@ struct RecordSummaryCard: View {
     let info: RecordCardInfo
     let style: RecordCardStyle
     @Binding var collapsed: Bool
+    /// 3.4 (25) 键盘弹出时临时收起明细行（不改用户的折叠偏好），给下方表单留空间
+    var compact: Bool = false
     @Environment(\.dynamicTypeSize) private var typeSize
 
+    /// 实际是否只显示头部
+    private var folded: Bool { collapsed || compact }
+
+    /// 3.4 (25) 展开时第一行固定显示完整时间，其余是编辑页给的各项（分类、账户、备注、时间来源…）
+    private var shownLines: [RecordCardLine] {
+        guard !folded else { return [] }
+        return [RecordCardLine(label: "时间", value: info.dateText)] + info.lines
+    }
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 9) {
+        VStack(alignment: .leading, spacing: 12) {
             Button {
                 withAnimation(.snappy(duration: 0.25)) { collapsed.toggle() }
             } label: {
@@ -800,31 +839,32 @@ struct RecordSummaryCard: View {
             }
             .buttonStyle(.plain)
             .accessibilityHint(collapsed ? "展开卡片" : "折叠卡片")
+            .accessibilityIdentifier("record-card-toggle")
             if let duplicate = info.duplicate {
                 Text(duplicate)
-                    .font(style.receipt ? ReceiptFont.mono(.caption, .bold) : .caption.weight(.semibold))
+                    .font(style.receipt ? ReceiptFont.mono(.footnote, .bold) : .footnote.weight(.semibold))
                     .foregroundStyle(warnColor)
                     .fixedSize(horizontal: false, vertical: true)
-                    .padding(.horizontal, 8).padding(.vertical, 5)
+                    .padding(.horizontal, 10).padding(.vertical, 7)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(RoundedRectangle(cornerRadius: style.receipt ? 3 : 8, style: .continuous)
+                    .background(RoundedRectangle(cornerRadius: style.receipt ? 3 : 10, style: .continuous)
                         .fill(warnColor.opacity(0.12)))
-                    .overlay(RoundedRectangle(cornerRadius: style.receipt ? 3 : 8, style: .continuous)
+                    .overlay(RoundedRectangle(cornerRadius: style.receipt ? 3 : 10, style: .continuous)
                         .stroke(warnColor.opacity(0.8), lineWidth: 1))
                     .accessibilityIdentifier("record-card-duplicate")
             }
-            if !collapsed && !info.lines.isEmpty {
+            if !shownLines.isEmpty {
                 divider
-                VStack(alignment: .leading, spacing: 6) {
-                    ForEach(info.lines, id: \.self) { line in
+                VStack(alignment: .leading, spacing: 9) {
+                    ForEach(shownLines, id: \.self) { line in
                         lineView(line)
                     }
                 }
                 .transition(.opacity)
             }
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, style.receipt ? 14 : 12)
+        .padding(.horizontal, 18)
+        .padding(.vertical, style.receipt ? 18 : 16)
         .background(background)
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("record-summary-card")
@@ -843,51 +883,57 @@ struct RecordSummaryCard: View {
     }
 
     private var header: some View {
-        HStack(alignment: .center, spacing: 10) {
+        HStack(alignment: .center, spacing: 12) {
             Image(systemName: info.icon)
-                .font(.subheadline.weight(.bold))
+                .font(.title3.weight(.bold))
                 .foregroundStyle(Color.cardHex(info.colorHex))
-                .frame(width: 34, height: 34)
+                .frame(width: 46, height: 46)
                 .background(
-                    RoundedRectangle(cornerRadius: style.receipt ? 4 : 10, style: .continuous)
+                    RoundedRectangle(cornerRadius: style.receipt ? 5 : 12, style: .continuous)
                         .fill(Color.cardHex(info.colorHex).opacity(0.16))
                 )
                 .accessibilityHidden(true)
-            VStack(alignment: .leading, spacing: 2) {
+            VStack(alignment: .leading, spacing: 4) {
                 Text(info.title)
-                    .font(style.receipt ? .system(.subheadline, design: .serif).weight(.bold) : .subheadline.weight(.semibold))
+                    .font(style.receipt ? .system(.headline, design: .serif).weight(.bold) : .headline)
                     .foregroundStyle(style.ink)
-                    .lineLimit(collapsed ? 1 : 2)
-                HStack(spacing: 5) {
+                    .lineLimit(folded ? 1 : 3)
+                    .fixedSize(horizontal: false, vertical: !folded)
+                HStack(spacing: 6) {
                     Text(info.kindText)
-                    Text("·")
-                    Text(info.dateText).lineLimit(1)
+                    if folded {
+                        // 折叠时时间放在这一行；展开时在下面单独一行完整显示
+                        Text("·")
+                        Text(info.dateText).lineLimit(1).truncationMode(.middle)
+                    }
                     if let badge = info.badge {
                         Text(badge)
-                            .font(style.receipt ? ReceiptFont.mono(.caption2, .semibold) : .caption2.weight(.semibold))
+                            .font(style.receipt ? ReceiptFont.mono(.caption, .semibold) : .caption.weight(.semibold))
                             .foregroundStyle(style.accent)
-                            .padding(.horizontal, 4).padding(.vertical, 0.5)
+                            .padding(.horizontal, 5).padding(.vertical, 1)
                             .overlay(RoundedRectangle(cornerRadius: 3)
                                 .stroke(style.accent.opacity(0.8), style: StrokeStyle(lineWidth: 1, dash: style.receipt ? [3, 2] : [])))
+                            .fixedSize()
                     }
                 }
-                .font(style.receipt ? ReceiptFont.mono(.caption2) : .caption)
+                .font(style.receipt ? ReceiptFont.mono(.footnote) : .subheadline)
                 .foregroundStyle(style.faint)
                 .lineLimit(1)
             }
             Spacer(minLength: 6)
             Text(info.amountText)
-                .font(style.receipt ? .system(.title3, design: .monospaced).weight(.bold)
-                                    : .system(.title3, design: .rounded).weight(.bold))
+                .font(style.receipt ? .system(.title2, design: .monospaced).weight(.bold)
+                                    : .system(.title2, design: .rounded).weight(.bold))
                 .monospacedDigit()
                 .foregroundStyle(amountColor)
                 .lineLimit(1)
-                .minimumScaleFactor(0.6)
+                .minimumScaleFactor(0.55)
                 .layoutPriority(1)
             Image(systemName: "chevron.down")
-                .font(.caption2.weight(.bold))
+                .font(.footnote.weight(.bold))
                 .foregroundStyle(style.faint)
-                .rotationEffect(.degrees(collapsed ? -90 : 0))
+                .rotationEffect(.degrees(folded ? -90 : 0))
+                .frame(width: 22, height: 44)
                 .accessibilityHidden(true)
         }
         .contentShape(Rectangle())
@@ -905,19 +951,19 @@ struct RecordSummaryCard: View {
     @ViewBuilder
     private func lineView(_ line: RecordCardLine) -> some View {
         let label = Text(line.label)
-            .font(style.receipt ? ReceiptFont.mono(.caption) : .caption)
+            .font(style.receipt ? ReceiptFont.mono(.subheadline) : .subheadline)
             .foregroundStyle(style.faint)
         let value = HStack(alignment: .firstTextBaseline, spacing: 5) {
             if let icon = line.icon {
                 Image(systemName: icon)
-                    .font(.caption2.weight(.bold))
+                    .font(.subheadline.weight(.bold))
                     .foregroundStyle(line.colorHex.map { Color.cardHex($0) } ?? style.ink)
                     .accessibilityHidden(true)
             }
             Text(line.value)
-                .font(style.receipt ? ReceiptFont.mono(.footnote, .medium) : .footnote.weight(.medium))
+                .font(style.receipt ? ReceiptFont.mono(.body, .medium) : .body.weight(.medium))
                 .foregroundStyle(line.warn ? style.accent : style.ink)
-                .lineLimit(3)
+                .lineLimit(4)
                 .multilineTextAlignment(typeSize.isAccessibilitySize ? .leading : .trailing)
         }
         if typeSize.isAccessibilitySize {
@@ -991,6 +1037,13 @@ extension ReviewRow {
                   duplicate: .none, isManual: false, kindText: "还款", dateText: "2026年10月18日 09:12",
                   fromAccount: "储蓄卡-示例银行", toAccount: "未选信用卡", channel: "银行", amount: 1000.00),
     ]
+
+    /// 3.4 (25) 长商户名 + 信用卡账户 + 时间取自截图（片段预览用，合成数据）
+    static let longSample = ReviewRow(
+        index: 1, isIncome: false, amountText: "-¥258.60", categoryName: "购物", icon: "bag.fill", colorHex: "#AF52DE",
+        merchant: "示例数码旗舰店（示例城市示例广场超长名称分店）", note: "", accountName: "信用卡-示例银行-示例卡",
+        timeText: "10月26日 21:46", duplicate: .none, isManual: false, kindText: "支出",
+        dateText: "2026年10月26日 21:46", timeHint: "时间取自截图状态栏", amount: 258.60)
 }
 
 
@@ -1177,6 +1230,124 @@ struct EditorCardDemo: View {
         .frame(width: 380)
         .background(scheme == .dark ? Color(white: 0.11) : Color(white: 0.93))
         .environment(\.colorScheme, scheme)
+    }
+}
+
+/// 3.4 (25) 编辑页「悬浮卡片」示意（合成数据）：卡片固定在导航栏下，表单在下面滚动。
+/// ImageRenderer 画不出系统 Form，这里用近似的行模拟表单；scroll > 0 表示表单已经往上滚了一段（从卡片下面滚过）。
+struct StickyEditorDemo: View {
+    var body: some View {
+        HStack(alignment: .top, spacing: 16) {
+            phone("默认 · 浅色 · 未滚动", receipt: false, scheme: .light, scroll: 0, collapsed: false, keyboard: false)
+            phone("默认 · 深色 · 已滚动", receipt: false, scheme: .dark, scroll: 260, collapsed: false, keyboard: false)
+            phone("小票 · 浅色 · 已滚动", receipt: true, scheme: .light, scroll: 320, collapsed: false, keyboard: false)
+            phone("小票 · 深色 · 已折叠", receipt: true, scheme: .dark, scroll: 120, collapsed: true, keyboard: false)
+            phone("小票 · 浅色 · 键盘弹出", receipt: true, scheme: .light, scroll: 0, collapsed: false, keyboard: true)
+        }
+        .padding(16)
+        .background(Color(white: 0.5))
+    }
+
+    private func phone(_ caption: String, receipt: Bool, scheme: ColorScheme, scroll: CGFloat,
+                       collapsed: Bool, keyboard: Bool) -> some View {
+        let style: RecordCardStyle = receipt ? .receipt(scheme) : .plain(scheme)
+        let p = ReceiptPalette.paper(scheme)
+        let backdrop: Color = receipt ? p.backdrop : .cardHex(scheme == .dark ? "#000000" : "#F2F2F7")
+        let row: Color = receipt ? p.paper : .cardHex(scheme == .dark ? "#1C1C1E" : "#FFFFFF")
+        return VStack(spacing: 6) {
+            Text(caption).font(.caption.bold()).foregroundStyle(.white)
+            VStack(spacing: 0) {
+                // 导航栏
+                HStack {
+                    Text("取消"); Spacer(); Text("编辑记录").bold(); Spacer(); Text("保存").bold()
+                }
+                .font(.body).foregroundStyle(style.ink)
+                .padding(.horizontal, 18).frame(height: 52)
+                // 悬浮卡片
+                RecordSummaryCard(info: .sample, style: style, collapsed: .constant(collapsed), compact: keyboard)
+                    .padding(.horizontal, 16).padding(.top, 8).padding(.bottom, 10)
+                    .background(alignment: .bottom) {
+                        ZStack(alignment: .bottom) { backdrop; Rectangle().fill(style.rule.opacity(0.6)).frame(height: 0.5) }
+                    }
+                    .zIndex(1)
+                // 表单（被滚动 scroll pt，超出部分裁掉）
+                ZStack(alignment: .top) {
+                    form(style: style, row: row)
+                        .offset(y: -scroll)
+                    if keyboard {
+                        VStack { Spacer(); keyboardMock(scheme) }
+                    }
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                .clipped()
+            }
+            .frame(width: 360, height: 760)
+            .background(backdrop)
+            .clipShape(RoundedRectangle(cornerRadius: 28, style: .continuous))
+            .environment(\.colorScheme, scheme)
+        }
+    }
+
+    private func form(style: RecordCardStyle, row: Color) -> some View {
+        VStack(spacing: 18) {
+            section(row) {
+                HStack {
+                    ForEach(["支出", "收入", "转账"], id: \.self) { t in
+                        Text(t).font(.subheadline.bold()).frame(maxWidth: .infinity).padding(.vertical, 6)
+                            .background(t == "支出" ? style.paper.opacity(0.9) : Color.clear)
+                    }
+                }
+                .foregroundStyle(style.ink)
+                .background(RoundedRectangle(cornerRadius: 8).fill(style.rule.opacity(0.5)))
+                HStack(alignment: .firstTextBaseline) {
+                    Text("¥").font(.title.bold()).foregroundStyle(style.faint)
+                    Text("39.80").font(.system(size: 40, weight: .bold, design: .rounded)).foregroundStyle(style.ink)
+                    Spacer()
+                }
+            }
+            section(row) {
+                LazyVGrid(columns: Array(repeating: GridItem(.flexible()), count: 5), spacing: 14) {
+                    ForEach(Array(["fork.knife", "car.fill", "bag.fill", "gamecontroller.fill", "bolt.fill",
+                                   "house.fill", "phone.fill", "cross.case.fill", "book.fill", "airplane"].enumerated()), id: \.offset) { i, icon in
+                        Image(systemName: icon).font(.headline)
+                            .foregroundStyle(i == 0 ? Color.white : style.faint)
+                            .frame(width: 44, height: 44)
+                            .background(Circle().fill(i == 0 ? Color.cardHex("#FF9500") : style.rule.opacity(0.5)))
+                    }
+                }
+            }
+            section(row) {
+                ForEach([("时间", "2026年10月19日 12:18"), ("商户", "示例烧腊饭店（示例大厦店）"),
+                         ("备注", "示例立减 2.00"), ("账户", "储蓄卡-示例银行")], id: \.0) { item in
+                    HStack { Text(item.0).foregroundStyle(style.ink); Spacer(); Text(item.1).foregroundStyle(style.faint).lineLimit(1) }
+                        .font(.subheadline)
+                    Rectangle().fill(style.rule).frame(height: 0.5)
+                }
+            }
+            section(row) {
+                Text("删除记录").font(.body).foregroundStyle(Color.red).frame(maxWidth: .infinity)
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.top, 14)
+    }
+
+    private func section<C: View>(_ bg: Color, @ViewBuilder _ content: () -> C) -> some View {
+        VStack(alignment: .leading, spacing: 12) { content() }
+            .padding(14)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(bg))
+    }
+
+    private func keyboardMock(_ scheme: ColorScheme) -> some View {
+        let key = Color.cardHex(scheme == .dark ? "#6B6B6B" : "#FFFFFF")
+        return VStack(spacing: 8) {
+            ForEach(0..<4, id: \.self) { _ in
+                HStack(spacing: 8) { ForEach(0..<3, id: \.self) { _ in RoundedRectangle(cornerRadius: 6).fill(key).frame(height: 44) } }
+            }
+        }
+        .padding(8)
+        .background(Color.cardHex(scheme == .dark ? "#2C2C2E" : "#D1D3D9"))
     }
 }
 

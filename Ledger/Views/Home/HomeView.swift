@@ -298,6 +298,11 @@ private struct HomeRecordList: View {
             // 截图模式：直接打开记一笔 / 搜索
             if ScreenshotDemo.screen == "add" && editorTarget == nil { editorTarget = .new }
             if ScreenshotDemo.screen == "search" && !showDemoSearch { showDemoSearch = true }
+            if ScreenshotDemo.screen == "editrec" && editorTarget == nil {
+                // 3.4 (25) 截图：打开一条演示记录的编辑页（悬浮卡片）
+                try? await Task.sleep(nanoseconds: 800_000_000)
+                if let r = dayGroups(rangeRecords).first?.records.first { editorTarget = .edit(r) }
+            }
             if ScreenshotDemo.screen == "delete" && pendingDelete == nil {
                 try? await Task.sleep(nanoseconds: 800_000_000)
                 pendingDelete = dayGroups(rangeRecords).first?.records.first

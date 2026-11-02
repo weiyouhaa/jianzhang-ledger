@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 import SwiftData
 import PhotosUI
 import Photos
@@ -61,6 +62,8 @@ struct RecordEditorView: View {
     @State private var ocrTimeHint: String?
     @State private var ocrTimeHintDate: Date?
     @FocusState private var amountFocused: Bool
+    /// 3.4 (25) 键盘弹出时顶部卡片临时只显示头部（和重复提醒），保证下方表单还有足够空间
+    @State private var keyboardShown = false
 
     private var categories: [LedgerCategory] {
         allCategories.filter { $0.kind == kind }
@@ -117,13 +120,6 @@ struct RecordEditorView: View {
     var body: some View {
         NavigationStack {
             ThemedForm {
-                // 3.1 (22) 顶部小票卡片：当笔记录的全部信息，随下方每一处修改实时更新
-                Section {
-                    RecordSummaryCard(info: cardInfo, style: cardStyle, collapsed: $cardCollapsed)
-                        .listRowInsets(EdgeInsets(top: 4, leading: 0, bottom: 4, trailing: 0))
-                        .listRowBackground(Color.clear)
-                }
-
                 Section {
                     if kind == .adjustment {
                         Label("余额校准（不计入收支统计）", systemImage: "slider.horizontal.3")
@@ -253,6 +249,14 @@ struct RecordEditorView: View {
                 }
             }
             .themedScreenBackground()
+            // 3.4 (25) 顶部卡片固定在导航栏下方（不随表单滚动），表单在它下面单独滚动
+            .safeAreaInset(edge: .top, spacing: 0) { stickyCard }
+            .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillShowNotification)) { _ in
+                withAnimation(.snappy(duration: 0.2)) { keyboardShown = true }
+            }
+            .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { _ in
+                withAnimation(.snappy(duration: 0.2)) { keyboardShown = false }
+            }
             .navigationTitle(navTitle)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -297,6 +301,23 @@ struct RecordEditorView: View {
     }
 
     // MARK: - 顶部卡片（3.1 (22)）
+
+    /// 3.4 (25) 悬浮在顶部的当笔卡片：页面底色垫底 + 底部一条分隔，表单内容从它下面滚过不会透出来
+    private var stickyCard: some View {
+        RecordSummaryCard(info: cardInfo, style: cardStyle, collapsed: $cardCollapsed, compact: keyboardShown)
+            .padding(.horizontal, 16)
+            .padding(.top, 8)
+            .padding(.bottom, 10)
+            .frame(maxWidth: .infinity)
+            .background(alignment: .bottom) {
+                ZStack(alignment: .bottom) {
+                    Color.themeBackdrop
+                    Rectangle().fill(theme.rule.opacity(0.6)).frame(height: 0.5)
+                }
+                .ignoresSafeArea(edges: .horizontal)
+            }
+            .accessibilityIdentifier("editor-sticky-card")
+    }
 
     private var cardStyle: RecordCardStyle {
         RecordCardStyle(receipt: theme.isReceipt, paper: theme.isReceipt ? theme.paper : theme.cardFill,

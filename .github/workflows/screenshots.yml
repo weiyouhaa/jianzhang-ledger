@@ -115,6 +115,9 @@ jobs:
           # 小票皮肤（3.3 起）：各标签页根页面 + 识图片段 + 编辑页 + 锁屏
           shoot home     light 30-receipt-home receipt
           shoot home     dark  31-receipt-home-dark receipt
+          shoot editrec  light 38-editor-sticky
+          shoot editrec  dark  39-receipt-editor-sticky-dark receipt
+          shoot editrec  light 40-receipt-editor-sticky receipt
           shoot stats    light 32-receipt-stats receipt
           shoot assets   light 33-receipt-assets receipt
           shoot settings dark  34-receipt-settings-dark receipt
