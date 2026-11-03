@@ -45,20 +45,20 @@ struct AccountEditorView: View {
             ThemedForm {
                 Section {
                     HStack(spacing: 12) {
-                        CategoryIcon(icon: icon, color: Color(hex: colorHex), size: 44)
+                        CategoryIcon(icon: icon, color: Color.skinTint(colorHex), size: 44)
                         TextField("账户名称，如 招商银行储蓄卡", text: $name)
                     }
                     Picker("类型", selection: $type) {
-                        Section("资产") {
+                        Section {
                             ForEach(AccountType.assetTypes) { t in
                                 Label(t.title, systemImage: t.defaultIcon).tag(t)
                             }
-                        }
-                        Section("负债") {
+                        } header: { ThemedSectionHeader { Text("资产") } }
+                        Section {
                             ForEach(AccountType.liabilityTypes) { t in
                                 Label(t.title, systemImage: t.defaultIcon).tag(t)
                             }
-                        }
+                        } header: { ThemedSectionHeader { Text("负债") } }
                     }
                     .onChange(of: type) { oldValue, newValue in
                         // 图标 / 颜色仍是旧类型默认值时，跟随新类型
@@ -96,11 +96,11 @@ struct AccountEditorView: View {
                             ForEach(1...28, id: \.self) { Text("每月 \($0) 日").tag($0) }
                         }
                     }
-                } footer: {
+                } footer: { ThemedSectionFooter {
                     Text(type.isLiability
                          ? "记账之前已有的欠款。之后用这张卡消费会增加欠款，转账还款会减少欠款。"
                          : "记账之前账户里已有的金额。余额 = 初始余额 + 收入 − 支出 ± 转账。与实际不符时可在账户详情中「余额校准」。")
-                }
+                } }
 
                 if type.isSocialSecurity {
                     Section {
@@ -116,31 +116,31 @@ struct AccountEditorView: View {
                                 ForEach(1...28, id: \.self) { Text("每月 \($0) 日").tag($0) }
                             }
                         }
-                    } header: {
+                    } header: { ThemedSectionHeader {
                         Text("缴存")
-                    } footer: {
+                    } } footer: { ThemedSectionFooter {
                         Text("到期自动记一笔「缴存」，只增加这个账户的余额，不计入收入和预算；可在「周期账单」中修改或暂停。公积金提取请在账户详情中点「提取」转到银行卡。")
-                    }
+                    } }
                 }
 
-                Section("图标") {
+                Section {
                     LazyVGrid(columns: Array(repeating: GridItem(.flexible()), count: 6), spacing: 12) {
                         ForEach(Self.iconOptions, id: \.self) { option in
                             Button { icon = option } label: {
-                                CategoryIcon(icon: option, color: Color(hex: colorHex), size: 40, selected: icon == option)
+                                CategoryIcon(icon: option, color: Color.skinTint(colorHex), size: 40, selected: icon == option)
                             }
                             .buttonStyle(.plain)
                         }
                     }
                     .padding(.vertical, 4)
-                }
+                } header: { ThemedSectionHeader { Text("图标") } }
 
-                Section("颜色") {
+                Section {
                     LazyVGrid(columns: Array(repeating: GridItem(.flexible()), count: 8), spacing: 12) {
                         ForEach(colorChoices, id: \.self) { hex in
                             Button { colorHex = hex } label: {
                                 Circle()
-                                    .fill(Color(hex: hex))
+                                    .fill(Color.skinTint(hex))
                                     .frame(width: 30, height: 30)
                                     .overlay(Circle().strokeBorder(Color.primary, lineWidth: colorHex == hex ? 2.5 : 0))
                             }
@@ -148,7 +148,7 @@ struct AccountEditorView: View {
                         }
                     }
                     .padding(.vertical, 4)
-                }
+                } header: { ThemedSectionHeader { Text("颜色") } }
 
                 if type == .debit || type == .credit {
                     Section {
@@ -159,9 +159,9 @@ struct AccountEditorView: View {
                                 let digits = String(v.filter(\.isNumber).prefix(4))
                                 if digits != v { cardTail = digits }
                             }
-                    } footer: {
+                    } footer: { ThemedSectionFooter {
                         Text("识图记账时按截图上的卡号尾号匹配这个账户。也会在你保存识图记录时自动记住。")
-                    }
+                    } }
                 }
                 Section {
                     TextField("备注（卡号尾号、用途等）", text: $note, axis: .vertical)
@@ -170,11 +170,11 @@ struct AccountEditorView: View {
                     if account != nil {
                         Toggle("归档（隐藏，不再出现在选择列表）", isOn: $isArchived)
                     }
-                } footer: {
+                } footer: { ThemedSectionFooter {
                     if type.isSocialSecurity {
                         Text("养老保险个人账户、个人养老金、企业年金要到退休才能领取，默认不计入净资产。资产页另外显示不含公积金与社保的「可支配资产」。")
                     }
-                }
+                } }
 
                 if account != nil {
                     Section {
@@ -185,9 +185,9 @@ struct AccountEditorView: View {
                             } message: {
                                 Text("相关的 \(account?.allEntries.count ?? 0) 笔记录会保留，但不再关联此账户。此操作不可撤销。")
                             }
-                    } footer: {
+                    } footer: { ThemedSectionFooter {
                         Text("删除后，相关记录会保留，但不再关联此账户。只是不想再用时建议「归档」。")
-                    }
+                    } }
                 }
             }
             .navigationTitle(account == nil ? "新建账户" : "编辑账户")
@@ -346,18 +346,18 @@ struct AccountManagerView: View {
                     for (i, a) in list.enumerated() { a.sortOrder = i }
                     try? context.save()
                 }
-            } header: {
+            } header: { ThemedSectionHeader {
                 Text("使用中")
-            } footer: {
+            } } footer: { ThemedSectionFooter {
                 Text("点右上角「编辑」拖动排序；左滑可归档。")
-            }
+            } }
 
             if !archived.isEmpty {
-                Section("已归档") {
+                Section {
                     ForEach(archived) { a in
                         row(a)
                     }
-                }
+                } header: { ThemedSectionHeader { Text("已归档") } }
             }
         }
         .navigationTitle("排序与归档")

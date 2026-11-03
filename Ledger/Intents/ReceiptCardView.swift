@@ -66,13 +66,13 @@ struct ReceiptPalette {
     var warn: Color = .cardHex("#C62828")
 
     static func paper(_ scheme: ColorScheme) -> ReceiptPalette {
-        scheme == .dark
-            ? ReceiptPalette(paper: .cardHex("#2B2722"), ink: .cardHex("#EFE7DA"), faint: .cardHex("#A79E90"),
-                             rule: .cardHex("#5A5248"), accent: .cardHex("#E58A7C"), income: .cardHex("#8CC9A0"),
-                             backdrop: .cardHex("#1C1A17"), warn: .cardHex("#FF6B60"))
-            : ReceiptPalette(paper: .cardHex("#FBF7EE"), ink: .cardHex("#26221E"), faint: .cardHex("#857C70"),
-                             rule: .cardHex("#CFC6B6"), accent: .cardHex("#9E2B25"), income: .cardHex("#2F7D4F"),
-                             backdrop: .cardHex("#EDE7DB"), warn: .cardHex("#C62828"))
+        // 3.5 (26) 与 App 内小票皮肤共用 ReceiptStyle 色板；重复提示的警告红保持不变
+        let d = scheme == .dark
+        let c = { (p: ReceiptStyle.Pair) in ReceiptStyle.color(p, dark: d) }
+        return ReceiptPalette(paper: c(ReceiptStyle.paper), ink: c(ReceiptStyle.ink), faint: c(ReceiptStyle.faint),
+                              rule: c(ReceiptStyle.rule), accent: c(ReceiptStyle.accent), income: c(ReceiptStyle.income),
+                              backdrop: c(ReceiptStyle.backdrop),
+                              warn: d ? .cardHex("#FF6B60") : .cardHex("#C62828"))
     }
 }
 

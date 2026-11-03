@@ -70,43 +70,51 @@ struct AppTheme: Equatable {
                 usesTypewriter: false
             )
         case .receipt:
-            if scheme == .dark {
-                return AppTheme(
-                    skin: .receipt, scheme: .dark,
-                    accent: Color(hex: "#E58A7C"),
-                    income: Color(hex: "#8CC9A0"),
-                    ink: Color(hex: "#EFE7DA"),
-                    faint: Color(hex: "#A79E90"),
-                    rule: Color(hex: "#5A5248"),
-                    paper: Color(hex: "#2B2722"),
-                    backdrop: Color(hex: "#1C1A17"),
-                    heroFill: [Color(hex: "#2B2722")],
-                    heroInk: Color(hex: "#EFE7DA"),
-                    heroFaint: Color(hex: "#A79E90"),
-                    cardFill: Color(hex: "#2B2722"),
-                    cardCorner: 4,
-                    usesDashedRules: true,
-                    usesTypewriter: true
-                )
-            }
+            // 3.5 (26) 色板统一由 ReceiptStyle 提供（App、快捷指令片段、预览共用）
+            let dark = scheme == .dark
+            let c = { (p: ReceiptStyle.Pair) in ReceiptStyle.color(p, dark: dark) }
             return AppTheme(
-                skin: .receipt, scheme: .light,
-                accent: Color(hex: "#9E2B25"),
-                income: Color(hex: "#2F7D4F"),
-                ink: Color(hex: "#26221E"),
-                faint: Color(hex: "#857C70"),
-                rule: Color(hex: "#CFC6B6"),
-                paper: Color(hex: "#FBF7EE"),
-                backdrop: Color(hex: "#EDE7DB"),
-                heroFill: [Color(hex: "#FBF7EE")],
-                heroInk: Color(hex: "#26221E"),
-                heroFaint: Color(hex: "#857C70"),
-                cardFill: Color(hex: "#FBF7EE"),
-                cardCorner: 4,
+                skin: .receipt, scheme: dark ? .dark : .light,
+                accent: c(ReceiptStyle.accent),
+                income: c(ReceiptStyle.income),
+                ink: c(ReceiptStyle.ink),
+                faint: c(ReceiptStyle.faint),
+                rule: c(ReceiptStyle.rule),
+                paper: c(ReceiptStyle.paper),
+                backdrop: c(ReceiptStyle.backdrop),
+                heroFill: [c(ReceiptStyle.paper)],
+                heroInk: c(ReceiptStyle.ink),
+                heroFaint: c(ReceiptStyle.faint),
+                cardFill: c(ReceiptStyle.paper),
+                cardCorner: ReceiptStyle.corner,
                 usesDashedRules: true,
                 usesTypewriter: true
             )
         }
+    }
+
+    /// 预算接近上限的提示色：默认皮肤 = 系统橙；小票皮肤 = 赭石
+    var caution: Color {
+        isReceipt ? ReceiptStyle.color(ReceiptStyle.caution, dark: scheme == .dark) : .orange
+    }
+
+    /// 预算超支 / 进度条颜色（默认皮肤保持原来的红 / 橙 / 绿）
+    func budgetColor(_ ratio: Double, threshold: Double = 0.8) -> Color {
+        if ratio > 1 { return isReceipt ? accent : .red }
+        if ratio >= threshold { return caution }
+        return isReceipt ? ink.opacity(0.72) : income
+    }
+
+    /// 3.5 (26) 小票皮肤字号档位（hero 34 / title 20 / body 16 / meta 13 / label 11）
+    var heroAmountFont: Font { ReceiptTypeface.scaled(ReceiptTypeface.monoBold, ReceiptStyle.Size.hero, relativeTo: .largeTitle) }
+    var sectionTitleFont: Font { ReceiptTypeface.scaled(ReceiptTypeface.display, ReceiptStyle.Size.title, relativeTo: .title3) }
+    var rowTitleFont: Font { ReceiptTypeface.scaled(ReceiptTypeface.mono, ReceiptStyle.Size.body, relativeTo: .body) }
+    var rowAmountFont: Font { ReceiptTypeface.scaled(ReceiptTypeface.monoBold, ReceiptStyle.Size.body, relativeTo: .body) }
+    var metaFont: Font { ReceiptTypeface.scaled(ReceiptTypeface.mono, ReceiptStyle.Size.meta, relativeTo: .footnote) }
+
+    /// 小票皮肤的小号字距标签字体
+    var labelFont: Font {
+        ReceiptTypeface.scaled(ReceiptTypeface.mono, ReceiptStyle.Size.label, relativeTo: .caption2)
     }
 
     // MARK: 字体（3.2 (23)：小票皮肤用打包的 Special Elite / Courier Prime，中文回落宋体）
@@ -186,19 +194,42 @@ struct ThemedCardBackground: ViewModifier {
     @Environment(\.appTheme) private var theme
     var padding: CGFloat = 16
     func body(content: Content) -> some View {
-        content
-            .padding(padding)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(
-                RoundedRectangle(cornerRadius: theme.cardCorner, style: theme.isReceipt ? .circular : .continuous)
-                    .fill(theme.cardFill)
+        if theme.isReceipt {
+            // 3.5 (26)：小票皮肤只有一种卡片——纸面 + 与分组列表一致的大圆角，无描边、无虚线框
+            content
+                .padding(padding)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .receiptSurface(theme)
+        } else {
+            content
+                .padding(padding)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(
+                    RoundedRectangle(cornerRadius: theme.cardCorner, style: .continuous)
+                        .fill(theme.cardFill)
+                )
+        }
+    }
+}
+
+extension View {
+    /// 3.5 (26) 小票皮肤卡片底：普通卡片 = 纸面圆角；hero = 上圆角 + 下沿齿孔 + 极淡投影
+    @ViewBuilder
+    func receiptSurface(_ theme: AppTheme, hero: Bool = false) -> some View {
+        if hero {
+            self
+                .padding(.bottom, 4)
+                .background(
+                    PerforatedCardShape()
+                        .fill(theme.paper)
+                        .shadow(color: Color.black.opacity(theme.scheme == .dark ? 0.25 : 0.05), radius: 1.5, y: 1)
+                )
+        } else {
+            self.background(
+                RoundedRectangle(cornerRadius: ReceiptStyle.corner, style: .continuous)
+                    .fill(theme.paper)
             )
-            .overlay {
-                if theme.usesDashedRules {
-                    RoundedRectangle(cornerRadius: theme.cardCorner, style: .circular)
-                        .strokeBorder(theme.rule, style: StrokeStyle(lineWidth: 1, dash: [4, 3]))
-                }
-            }
+        }
     }
 }
 
@@ -206,7 +237,7 @@ struct ThemedDashedRule: View {
     @Environment(\.appTheme) private var theme
     var body: some View {
         if theme.usesDashedRules {
-            DashedRule(color: theme.rule)
+            ReceiptRule(color: theme.rule)
         } else {
             Divider()
         }
@@ -248,6 +279,7 @@ struct SkinLivePreview: View {
                 Spacer()
                 Text("-¥28.00")
                     .font(theme.amountSize(26))
+                    .receiptDigits(theme.isReceipt)
                     .foregroundStyle(theme.ink)
             }
             ThemedDashedRule().environment(\.appTheme, theme)
@@ -272,15 +304,9 @@ struct SkinLivePreview: View {
         }
         .padding(14)
         .background(
-            RoundedRectangle(cornerRadius: theme.cardCorner, style: theme.isReceipt ? .circular : .continuous)
+            RoundedRectangle(cornerRadius: theme.cardCorner, style: .continuous)
                 .fill(theme.paper)
         )
-        .overlay {
-            if theme.usesDashedRules {
-                RoundedRectangle(cornerRadius: theme.cardCorner)
-                    .strokeBorder(theme.rule, style: StrokeStyle(lineWidth: 1, dash: [4, 3]))
-            }
-        }
         .environment(\.appTheme, theme)
         .tint(theme.accent)
     }
@@ -299,3 +325,42 @@ struct SkinLivePreview_Previews: PreviewProvider {
     }
 }
 #endif
+
+// MARK: - 3.5 (26) 表单分组标题 / 脚注
+
+/// Form / List 分组标题。小票皮肤：小号打字机字距标签 + 柔灰（与首页卡片标签同级）；
+/// 默认皮肤原样输出，不改变任何外观。
+struct ThemedSectionHeader<Content: View>: View {
+    @Environment(\.appTheme) private var theme
+    @ViewBuilder var content: Content
+
+    var body: some View {
+        if theme.isReceipt {
+            content
+                .font(theme.labelFont)
+                .tracking(ReceiptStyle.labelTracking)
+                .foregroundStyle(theme.faint)
+                .textCase(nil)
+        } else {
+            content
+        }
+    }
+}
+
+/// Form / List 分组脚注。小票皮肤：说明文字回到 13pt 柔灰（之前继承全局正文字号，过大过黑）；
+/// 默认皮肤原样输出。
+struct ThemedSectionFooter<Content: View>: View {
+    @Environment(\.appTheme) private var theme
+    @ViewBuilder var content: Content
+
+    var body: some View {
+        if theme.isReceipt {
+            content
+                .font(theme.metaFont)
+                .foregroundStyle(theme.faint)
+                .lineSpacing(2)
+        } else {
+            content
+        }
+    }
+}

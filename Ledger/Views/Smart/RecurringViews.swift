@@ -26,16 +26,16 @@ struct RecurringListView: View {
                     StatBlock(title: "本月预计收入", value: Money.format(monthIncome), alignment: .trailing)
                 }
                 .padding(.vertical, 4)
-            } footer: {
+            } footer: { ThemedSectionFooter {
                 Text("「自动记账」到期后打开 App 时自动补记（不会重复）；「仅提醒」到期时发通知，可在通知上点「已付」或「记一笔」。")
-            }
+            } }
 
             if rules.isEmpty {
                 ThemedEmptyState("还没有周期账单", systemImage: "arrow.triangle.2.circlepath",
                                        description: Text("房租、会员、还款、工资……点右上角 ＋ 添加，或在记录详情里「设为周期账单」"))
                     .listRowBackground(Color.clear)
             } else {
-                Section("全部 \(rules.count) 项") {
+                Section {
                     ForEach(sorted) { rule in
                         NavigationLink {
                             RecurringEditorView(rule: rule)
@@ -46,7 +46,7 @@ struct RecurringListView: View {
                             Button(role: .destructive) { pendingDelete = rule } label: { Label("删除", systemImage: "trash") }
                         }
                     }
-                }
+                } header: { ThemedSectionHeader { Text("全部 \(rules.count) 项") } }
             }
         }
         .navigationTitle("周期账单")
@@ -244,11 +244,11 @@ struct RecurringEditorView: View {
                 } else if endMode == 2 {
                     Stepper("共 \(maxCount) 次", value: $maxCount, in: 1...600)
                 }
-            } header: {
+            } header: { ThemedSectionHeader {
                 Text("重复")
-            } footer: {
+            } } footer: { ThemedSectionFooter {
                 Text(previewText)
-            }
+            } }
 
             Section {
                 Picker("到期时", selection: $autoCreate) {
@@ -261,9 +261,9 @@ struct RecurringEditorView: View {
                     DatePicker("提醒时间", selection: $remindTime, displayedComponents: .hourAndMinute)
                 }
                 if rule != nil { Toggle("暂停", isOn: $isPaused) }
-            } footer: {
+            } footer: { ThemedSectionFooter {
                 Text(autoCreate ? "开始日期早于今天时，会补记之前的各期。" : "仅提醒的账单不会自动记账，在通知上点「已付」即可记一笔。")
-            }
+            } }
 
             if let rule {
                 Section {

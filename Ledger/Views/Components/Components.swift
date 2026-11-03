@@ -6,19 +6,35 @@ struct CategoryIcon: View {
     let color: Color
     var size: CGFloat = 38
     var selected: Bool = false
+    @Environment(\.appTheme) private var theme
 
     var body: some View {
-        ZStack {
-            Circle()
-                .fill(selected ? color : color.opacity(0.16))
-            Image(systemName: icon)
-                .font(.system(size: size * 0.44, weight: .semibold))
-                .foregroundStyle(selected ? Color.white : color)
+        if theme.isReceipt {
+            // 3.5 (26) 小票皮肤：极淡的墨水色圆底 + 细线条图标（颜色已在 Color.skinTint 里降饱和）
+            ZStack {
+                Circle()
+                    .fill(selected ? color : color.opacity(theme.scheme == .dark ? 0.20 : 0.11))
+                Image(systemName: icon)
+                    .font(.system(size: size * 0.42, weight: .medium))
+                    .foregroundStyle(selected ? theme.paper : color)
+            }
+            .frame(width: size, height: size)
+            .overlay(
+                Circle().strokeBorder(theme.ink.opacity(selected ? 0.55 : 0), lineWidth: 1).padding(-4)
+            )
+        } else {
+            ZStack {
+                Circle()
+                    .fill(selected ? color : color.opacity(0.16))
+                Image(systemName: icon)
+                    .font(.system(size: size * 0.44, weight: .semibold))
+                    .foregroundStyle(selected ? Color.white : color)
+            }
+            .frame(width: size, height: size)
+            .overlay(
+                Circle().strokeBorder(color.opacity(selected ? 0.35 : 0), lineWidth: 3).padding(-4)
+            )
         }
-        .frame(width: size, height: size)
-        .overlay(
-            Circle().strokeBorder(color.opacity(selected ? 0.35 : 0), lineWidth: 3).padding(-4)
-        )
     }
 }
 
@@ -31,11 +47,11 @@ struct RecordRow: View {
     @Environment(\.appTheme) private var theme
 
     var body: some View {
-        HStack(spacing: 12) {
-            CategoryIcon(icon: record.categoryIcon, color: record.categoryColor)
-            VStack(alignment: .leading, spacing: 3) {
+        HStack(spacing: theme.isReceipt ? ReceiptStyle.Space.s : 12) {
+            CategoryIcon(icon: record.categoryIcon, color: record.categoryColor, size: theme.isReceipt ? 32 : 38)
+            VStack(alignment: .leading, spacing: theme.isReceipt ? ReceiptStyle.Space.xxs : 3) {
                 Text(record.displayTitle)
-                    .font(theme.body(.body))
+                    .font(theme.isReceipt ? theme.rowTitleFont : theme.body(.body))
                     .foregroundStyle(theme.ink)
                     .lineLimit(1)
                 HStack(spacing: 4) {
@@ -65,14 +81,15 @@ struct RecordRow: View {
                         Image(systemName: "square.2.layers.3d")
                     }
                 }
-                .font(theme.body(.caption))
+                .font(theme.isReceipt ? theme.metaFont : theme.body(.caption))
                 .foregroundStyle(theme.faint)
                 .lineLimit(1)
             }
             Spacer(minLength: 8)
-            VStack(alignment: .trailing, spacing: 3) {
+            VStack(alignment: .trailing, spacing: theme.isReceipt ? ReceiptStyle.Space.xxs : 3) {
                 Text(record.amountText)
-                    .font(theme.amount(.body, weight: .semibold))
+                    .font(theme.isReceipt ? theme.rowAmountFont : theme.amount(.body, weight: .semibold))
+                    .receiptDigits(theme.isReceipt)
                     .foregroundStyle(amountColor)
                 Text(showDate ? DateText.monthDayTime.string(from: record.date) : DateText.time.string(from: record.date))
                     .font(theme.mono(.caption2))
@@ -86,14 +103,14 @@ struct RecordRow: View {
                 }
             }
         }
-        .padding(.vertical, 2)
+        .padding(.vertical, theme.isReceipt ? ReceiptStyle.Space.xxs : 2)
         .contentShape(Rectangle())
     }
 
     private var amountColor: Color {
         switch record.kind {
         case .income: return theme.income
-        case .contribution: return Color(hex: "#E8A33D")
+        case .contribution: return theme.isReceipt ? theme.caution : Color(hex: "#E8A33D")
         case .expense: return theme.ink
         case .transfer, .adjustment: return theme.faint
         }
@@ -106,28 +123,48 @@ struct BudgetProgressView: View {
     let budget: Double
     var light: Bool = false
     var title: String = "本月预算"
+    @Environment(\.appTheme) private var theme
 
     var body: some View {
         let ratio = budget > 0 ? spent / budget : 0
         let over = ratio > 1
-        VStack(alignment: .leading, spacing: 6) {
-            HStack {
-                Text("\(title) \(Money.format(budget))")
-                Spacer()
-                Text(over ? "超支 \(Money.format(spent - budget))" : "剩余 \(Money.format(budget - spent))")
-            }
-            .font(.ui(.caption))
-            .foregroundStyle(light ? Color.white.opacity(0.9) : Color.secondary)
-
-            GeometryReader { geo in
-                ZStack(alignment: .leading) {
-                    Capsule().fill(light ? Color.white.opacity(0.25) : Color.secondary.opacity(0.15))
-                    Capsule()
-                        .fill(barColor(ratio))
-                        .frame(width: geo.size.width * min(max(ratio, 0), 1))
+        if theme.isReceipt {
+            // 3.5 (26) 小票皮肤：标签 ···· 数值 的点引线行 + 3pt 细条；超支用暗红、接近上限用赭石，不用系统红橙
+            VStack(alignment: .leading, spacing: ReceiptStyle.Space.xs) {
+                HStack(alignment: .firstTextBaseline, spacing: ReceiptStyle.Space.xs) {
+                    ReceiptLabelText(text: title, color: theme.faint)
+                    Text(Money.format(budget))
+                        .font(theme.metaFont).monospacedDigit()
+                        .foregroundStyle(theme.faint)
+                    DotLeader(color: theme.rule)
+                    Text(over ? "超支 \(Money.format(spent - budget))" : "剩余 \(Money.format(budget - spent))")
+                        .font(theme.metaFont).monospacedDigit()
+                        .foregroundStyle(over ? theme.accent : theme.ink)
                 }
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
+                ReceiptBar(ratio: ratio, fill: theme.budgetColor(ratio, threshold: 0.8), track: theme.rule.opacity(0.6))
             }
-            .frame(height: 8)
+        } else {
+            VStack(alignment: .leading, spacing: 6) {
+                HStack {
+                    Text("\(title) \(Money.format(budget))")
+                    Spacer()
+                    Text(over ? "超支 \(Money.format(spent - budget))" : "剩余 \(Money.format(budget - spent))")
+                }
+                .font(.ui(.caption))
+                .foregroundStyle(light ? Color.white.opacity(0.9) : Color.secondary)
+
+                GeometryReader { geo in
+                    ZStack(alignment: .leading) {
+                        Capsule().fill(light ? Color.white.opacity(0.25) : Color.secondary.opacity(0.15))
+                        Capsule()
+                            .fill(barColor(ratio))
+                            .frame(width: geo.size.width * min(max(ratio, 0), 1))
+                    }
+                }
+                .frame(height: 8)
+            }
         }
     }
 
@@ -147,12 +184,17 @@ struct StatBlock: View {
     @Environment(\.appTheme) private var theme
 
     var body: some View {
-        VStack(alignment: alignment, spacing: 4) {
-            Text(title)
-                .font(theme.mono(.caption))
-                .foregroundStyle(light ? theme.heroFaint : theme.faint)
+        VStack(alignment: alignment, spacing: theme.isReceipt ? ReceiptStyle.Space.xxs : 4) {
+            if theme.isReceipt {
+                ReceiptLabelText(text: title, color: theme.faint)
+            } else {
+                Text(title)
+                    .font(theme.mono(.caption))
+                    .foregroundStyle(light ? theme.heroFaint : theme.faint)
+            }
             Text(value)
-                .font(theme.amount(.headline))
+                .font(theme.isReceipt ? theme.rowAmountFont : theme.amount(.headline))
+                .receiptDigits(theme.isReceipt)
                 .foregroundStyle(light ? theme.heroInk : theme.ink)
                 .lineLimit(1)
                 .minimumScaleFactor(0.6)

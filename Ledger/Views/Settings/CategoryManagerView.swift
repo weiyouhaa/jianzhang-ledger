@@ -50,9 +50,9 @@ struct CategoryManagerView: View {
                     }
                 }
                 .onMove(perform: move)
-            } footer: {
+            } footer: { ThemedSectionFooter {
                 Text("轻点编辑，右上角「编辑」可拖动排序。删除分类后，相关记录会变为「未分类」。")
-            }
+            } }
         }
         .navigationTitle("分类管理")
         .toolbar {
@@ -147,7 +147,7 @@ struct CategoryEditorView: View {
                     HStack {
                         Spacer()
                         VStack(spacing: 8) {
-                            CategoryIcon(icon: icon, color: Color(hex: colorHex), size: 64, selected: true)
+                            CategoryIcon(icon: icon, color: Color.skinTint(colorHex), size: 64, selected: true)
                             Text(name.isEmpty ? "分类名称" : name).font(.ui(.headline))
                         }
                         Spacer()
@@ -156,11 +156,11 @@ struct CategoryEditorView: View {
                     TextField("名称", text: $name)
                 }
 
-                Section("颜色") {
+                Section {
                     LazyVGrid(columns: Array(repeating: GridItem(.flexible()), count: 8), spacing: 12) {
                         ForEach(Self.colorOptions, id: \.self) { hex in
                             Circle()
-                                .fill(Color(hex: hex))
+                                .fill(Color.skinTint(hex))
                                 .frame(width: 30, height: 30)
                                 .overlay(Circle().strokeBorder(Color.primary, lineWidth: colorHex == hex ? 2.5 : 0).padding(-4))
                                 .onTapGesture { colorHex = hex; color = Color(hex: hex) }
@@ -168,17 +168,17 @@ struct CategoryEditorView: View {
                     }
                     .padding(.vertical, 6)
                     ColorPicker("自定义颜色", selection: $color, supportsOpacity: false)
-                }
+                } header: { ThemedSectionHeader { Text("颜色") } }
 
-                Section("图标") {
+                Section {
                     LazyVGrid(columns: Array(repeating: GridItem(.flexible()), count: 6), spacing: 14) {
                         ForEach(Self.iconOptions, id: \.self) { symbol in
-                            CategoryIcon(icon: symbol, color: Color(hex: colorHex), size: 40, selected: symbol == icon)
+                            CategoryIcon(icon: symbol, color: Color.skinTint(colorHex), size: 40, selected: symbol == icon)
                                 .onTapGesture { icon = symbol }
                         }
                     }
                     .padding(.vertical, 6)
-                }
+                } header: { ThemedSectionHeader { Text("图标") } }
             }
             .navigationTitle(category == nil ? "新建\(kind.title)分类" : "编辑分类")
             .navigationBarTitleDisplayMode(.inline)

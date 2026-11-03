@@ -52,11 +52,11 @@ struct ImportPreviewView: View {
                     Toggle("退款记为收入", isOn: $options.refundsAsIncome)
                     Toggle("不计收支导入为转账", isOn: $options.neutralAsTransfer)
                     Toggle("导入疑似重复的交易", isOn: $options.includeLikelyDuplicates)
-                } header: {
+                } header: { ThemedSectionHeader {
                     Text("选项")
-                } footer: {
+                } } footer: { ThemedSectionFooter {
                     Text("已全额退款、交易关闭的交易会跳过；部分退款按净额记账。不计收支（还款、转账、理财）匹配到两个账户时记为转账；转入信用卡 / 花呗即为信用卡还款。")
-                }
+                } }
 
                 if !newItems.isEmpty { itemSection("新交易", newItems) }
                 if !dupItems.isEmpty { itemSection("重复", dupItems) }
@@ -141,9 +141,9 @@ struct ImportPreviewView: View {
     }
 
     private func itemSection(_ title: String, _ list: [ImportItem]) -> some View {
-        Section("\(title)（\(list.count)）") {
+        Section {
             ForEach(list) { item in row(item) }
-        }
+        } header: { ThemedSectionHeader { Text("\(title)（\(list.count)）") } }
     }
 
     private func row(_ item: ImportItem) -> some View {
@@ -330,17 +330,17 @@ struct ImportItemEditor: View {
                 if item.kind.countsInStats && !e.merchant.isEmpty {
                     Section {
                         Toggle("同商户全部应用并记住", isOn: $applyAll)
-                    } footer: {
+                    } footer: { ThemedSectionFooter {
                         Text("本次导入中「\(e.merchant)」的其他交易使用同样的分类，并加入记账规则。")
-                    }
+                    } }
                 }
                 if item.status.isSkipped || item.status != .new {
                     Section {
                         Toggle("导入这一笔", isOn: $item.include)
                             .disabled(!item.canImport)
-                    } footer: {
+                    } footer: { ThemedSectionFooter {
                         Text(item.status == .imported ? "订单号相同的交易已经导入过，不能重复导入。" : "")
-                    }
+                    } }
                 }
             }
             .navigationTitle("修改交易")

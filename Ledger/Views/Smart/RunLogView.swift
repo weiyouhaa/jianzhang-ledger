@@ -43,9 +43,9 @@ struct RunLogView: View {
                     Label("清空", systemImage: "trash")
                 }
                 .accessibilityIdentifier("runlog-clear")
-            } footer: {
+            } footer: { ThemedSectionFooter {
                 Text("记录识图记账每一步的耗时、内存、前后台状态和崩溃信息，便于排查「简账意外退出」。不含截图文字、金额、商户和密码，只保存在本机（约 2 MB 上限）。导出的文件附带 App 版本、系统版本和机型。")
-            }
+            } }
 
             Section {
                 if entries.isEmpty {
@@ -70,9 +70,9 @@ struct RunLogView: View {
                     }
                     .padding(.vertical, 1)
                 }
-            } header: {
+            } header: { ThemedSectionHeader {
                 Text("最近 \(entries.count) 条（新的在上）")
-            }
+            } }
         }
         .accessibilityIdentifier("runlog-list")
         .navigationTitle("运行日志")

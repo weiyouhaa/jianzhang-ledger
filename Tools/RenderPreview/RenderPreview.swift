@@ -92,6 +92,8 @@ struct RenderPreview {
         write(EditorCardDemo(), to: "\(out)/preview-editor-card", ext: imageExt)
         write(StickyEditorDemo(), to: "\(out)/preview-editor-sticky", ext: imageExt)
         write(DayCardDemo(), to: "\(out)/preview-day-card", ext: imageExt)
+        write(HStack(spacing: 0) { DesignSystemDemo(dark: false); DesignSystemDemo(dark: true) },
+              to: "\(out)/preview-design-system-3.5", ext: imageExt)
     }
 
     static let imageExt = "png"
@@ -454,5 +456,126 @@ struct ScreensDemo: View {
         .background(p.backdrop)
         .clipShape(RoundedRectangle(cornerRadius: 26))
         .environment(\.colorScheme, scheme)
+    }
+}
+
+
+// MARK: - 3.5 (26) 小票皮肤设计规范（全部为合成示例数据）
+
+struct DesignSystemDemo: View {
+    let dark: Bool
+    private func c(_ p: ReceiptStyle.Pair) -> Color { ReceiptStyle.color(p, dark: dark) }
+    private func mono(_ size: CGFloat, bold: Bool = false) -> Font {
+        ReceiptTypeface.fixed(bold ? ReceiptTypeface.monoBold : ReceiptTypeface.mono, size)
+    }
+    private let tints = ["#FF9500", "#007AFF", "#FF2D55", "#AF52DE", "#34C759", "#30B0C7"]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: ReceiptStyle.Space.l) {
+            Text("RECEIPT ATLAS · 3.5")
+                .font(ReceiptTypeface.fixed(ReceiptTypeface.display, 28))
+                .foregroundStyle(c(ReceiptStyle.ink))
+            ReceiptLabelText(text: dark ? "深色 · 设计规范" : "浅色 · 设计规范", color: c(ReceiptStyle.faint))
+
+            // 色板
+            VStack(alignment: .leading, spacing: ReceiptStyle.Space.xs) {
+                ReceiptLabelText(text: "色板", color: c(ReceiptStyle.faint))
+                HStack(spacing: ReceiptStyle.Space.xs) {
+                    ForEach(Array([("纸", ReceiptStyle.paper), ("墨", ReceiptStyle.ink), ("灰", ReceiptStyle.faint),
+                                   ("线", ReceiptStyle.rule), ("红", ReceiptStyle.accent), ("绿", ReceiptStyle.income),
+                                   ("黄", ReceiptStyle.caution)].enumerated()), id: \.offset) { _, item in
+                        VStack(spacing: 4) {
+                            RoundedRectangle(cornerRadius: 6).fill(c(item.1)).frame(width: 40, height: 40)
+                                .overlay(RoundedRectangle(cornerRadius: 6).stroke(c(ReceiptStyle.rule), lineWidth: 0.5))
+                            Text(item.0).font(mono(11)).foregroundStyle(c(ReceiptStyle.faint))
+                        }
+                    }
+                }
+                HStack(spacing: ReceiptStyle.Space.s) {
+                    ForEach(tints, id: \.self) { hex in
+                        VStack(spacing: 4) {
+                            Circle().fill(Color(red: ReceiptStyle.rgb(hex).0, green: ReceiptStyle.rgb(hex).1, blue: ReceiptStyle.rgb(hex).2))
+                                .frame(width: 14, height: 14)
+                            Circle().fill(ReceiptStyle.muted(hex, dark: dark)).frame(width: 14, height: 14)
+                        }
+                    }
+                    Text("分类色：上 系统原色 → 下 小票柔和色").font(mono(11)).foregroundStyle(c(ReceiptStyle.faint))
+                }
+            }
+
+            // 字号
+            VStack(alignment: .leading, spacing: ReceiptStyle.Space.xs) {
+                ReceiptLabelText(text: "字号 34 / 20 / 16 / 13 / 11", color: c(ReceiptStyle.faint))
+                Text("¥12,345.00").font(mono(34, bold: true)).monospacedDigit()
+                Text("示例月份").font(ReceiptTypeface.fixed(ReceiptTypeface.display, 20))
+                Text("示例餐饮  ¥36.00").font(mono(16))
+                Text("示例说明文字 · 13pt 柔灰").font(mono(13)).foregroundStyle(c(ReceiptStyle.faint))
+            }
+            .foregroundStyle(c(ReceiptStyle.ink))
+
+            // hero 卡（齿孔下沿）
+            VStack(alignment: .leading, spacing: ReceiptStyle.Space.m) {
+                HStack {
+                    Text("示例月份").font(ReceiptTypeface.fixed(ReceiptTypeface.display, 20))
+                        .padding(.bottom, 3)
+                        .overlay(alignment: .bottom) { Rectangle().fill(c(ReceiptStyle.accent)).frame(height: 1.5) }
+                    Spacer()
+                    ReceiptLabelText(text: "12 笔", color: c(ReceiptStyle.faint))
+                }
+                ReceiptRule(color: c(ReceiptStyle.rule))
+                ReceiptLabelText(text: "本月结余", color: c(ReceiptStyle.faint))
+                Text("¥1,200.00").font(mono(34, bold: true)).monospacedDigit()
+                HStack {
+                    VStack(alignment: .leading, spacing: 4) {
+                        ReceiptLabelText(text: "支出", color: c(ReceiptStyle.faint))
+                        Text("¥800.00").font(mono(16, bold: true)).monospacedDigit()
+                    }
+                    Spacer()
+                    VStack(alignment: .trailing, spacing: 4) {
+                        ReceiptLabelText(text: "收入", color: c(ReceiptStyle.faint))
+                        Text("¥2,000.00").font(mono(16, bold: true)).monospacedDigit()
+                    }
+                }
+                ReceiptRule(color: c(ReceiptStyle.rule))
+                HStack(alignment: .firstTextBaseline, spacing: ReceiptStyle.Space.xs) {
+                    ReceiptLabelText(text: "预算", color: c(ReceiptStyle.faint))
+                    Text("¥1,000.00").font(mono(13)).monospacedDigit()
+                    DotLeader(color: c(ReceiptStyle.rule))
+                    Text("剩余 ¥200.00").font(mono(13)).monospacedDigit()
+                }
+                ReceiptBar(ratio: 0.8, fill: c(ReceiptStyle.caution), track: c(ReceiptStyle.rule).opacity(0.6))
+            }
+            .foregroundStyle(c(ReceiptStyle.ink))
+            .padding(.horizontal, 20).padding(.vertical, 16).padding(.bottom, 4)
+            .background(PerforatedCardShape().fill(c(ReceiptStyle.paper)))
+
+            // 普通卡 + 行
+            VStack(spacing: 0) {
+                ForEach(Array([("#FF9500", "示例餐饮", "-¥36.00"), ("#007AFF", "示例交通", "-¥12.00"),
+                               ("#34C759", "示例工资", "+¥2,000.00")].enumerated()), id: \.offset) { i, r in
+                    if i > 0 { ReceiptRule(color: c(ReceiptStyle.rule)).padding(.leading, 44) }
+                    HStack(spacing: ReceiptStyle.Space.s) {
+                        Circle().fill(ReceiptStyle.muted(r.0, dark: dark).opacity(dark ? 0.2 : 0.11))
+                            .overlay(Circle().fill(ReceiptStyle.muted(r.0, dark: dark)).frame(width: 10, height: 10))
+                            .frame(width: 32, height: 32)
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(r.1).font(mono(16))
+                            Text("示例账户 · 12:00").font(mono(13)).foregroundStyle(c(ReceiptStyle.faint))
+                        }
+                        Spacer()
+                        Text(r.2).font(mono(16, bold: true)).monospacedDigit()
+                            .foregroundStyle(r.2.hasPrefix("+") ? c(ReceiptStyle.income) : c(ReceiptStyle.ink))
+                    }
+                    .padding(.vertical, ReceiptStyle.Space.s)
+                }
+            }
+            .foregroundStyle(c(ReceiptStyle.ink))
+            .padding(.horizontal, ReceiptStyle.Space.m)
+            .background(RoundedRectangle(cornerRadius: ReceiptStyle.corner, style: .continuous).fill(c(ReceiptStyle.paper)))
+        }
+        .padding(ReceiptStyle.Space.l)
+        .frame(width: 420, alignment: .leading)
+        .background(c(ReceiptStyle.backdrop))
+        .environment(\.colorScheme, dark ? .dark : .light)
     }
 }

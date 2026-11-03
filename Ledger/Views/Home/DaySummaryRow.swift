@@ -40,15 +40,15 @@ struct DaySummaryRow: View {
                         // 3.1 (22) 笔数挪到第一行（小字），第二行只放日期，打字机字体下也不再折行
                         HStack(alignment: .firstTextBaseline, spacing: 6) {
                             Text(relative)
-                                .font(theme.title(.headline, weight: .semibold))
-                                .foregroundStyle(isToday ? theme.accent : theme.ink)
+                                .font(theme.isReceipt ? theme.rowAmountFont : theme.title(.headline, weight: .semibold))
+                                .foregroundStyle(theme.isReceipt ? theme.ink : (isToday ? theme.accent : theme.ink))
                             Text("\(count) 笔")
-                                .font(theme.body(.caption))
+                                .font(theme.isReceipt ? theme.metaFont : theme.body(.caption))
                                 .foregroundStyle(theme.faint)
                         }
                         .lineLimit(large ? nil : 1)
                         Text(dateLabel)
-                            .font(theme.body(.subheadline))
+                            .font(theme.isReceipt ? theme.metaFont : theme.body(.subheadline))
                             .foregroundStyle(theme.faint)
                             .lineLimit(large ? nil : 1)
                             .minimumScaleFactor(0.8)
@@ -80,7 +80,25 @@ struct DaySummaryRow: View {
         .accessibilityIdentifier("home-day-card")
     }
 
+    @ViewBuilder
     private var dayBadge: some View {
+        if theme.isReceipt {
+            // 3.5 (26) 小票皮肤：不再用实心色块，改成打字机大号日期数字；今天用暗红 + 下划线（同参考图当前月份）
+            Text(DaySummary.dayNumber(day, calendar: calendar))
+                .font(ReceiptTypeface.scaled(ReceiptTypeface.monoBold, 24, relativeTo: .title2))
+                .monospacedDigit()
+                .foregroundStyle(isToday ? theme.accent : theme.ink)
+                .padding(.bottom, 2)
+                .overlay(alignment: .bottom) {
+                    if isToday { Rectangle().fill(theme.accent).frame(height: 1.5) }
+                }
+                .frame(minWidth: 36, minHeight: 40)
+        } else {
+            defaultDayBadge
+        }
+    }
+
+    private var defaultDayBadge: some View {
         Text(DaySummary.dayNumber(day, calendar: calendar))
             .font(theme.amount(.title2))
             .monospacedDigit()
@@ -99,12 +117,14 @@ struct DaySummaryRow: View {
         VStack(alignment: alignment, spacing: 2) {
             if expense > 0 {
                 Text("-" + Money.masked(expense, hidden: hideAmounts))
-                    .font(theme.amount(.headline))
+                    .font(theme.isReceipt ? theme.rowAmountFont : theme.amount(.headline))
+                    .receiptDigits(theme.isReceipt)
                     .foregroundStyle(theme.ink)
             }
             if income > 0 {
                 Text("+" + Money.masked(income, hidden: hideAmounts))
-                    .font(theme.amount(expense > 0 ? .subheadline : .headline))
+                    .font(theme.isReceipt ? theme.rowAmountFont : theme.amount(expense > 0 ? .subheadline : .headline))
+                    .receiptDigits(theme.isReceipt)
                     .foregroundStyle(theme.income)
             }
             if expense <= 0 && income <= 0 {
@@ -114,7 +134,7 @@ struct DaySummaryRow: View {
             } else {
                 // 3.1 (22) 每日结余 = 收入 − 支出（转账等不计），小字淡色
                 Text(balanceText)
-                    .font(theme.body(.caption))
+                    .font(theme.isReceipt ? theme.labelFont : theme.body(.caption))
                     .monospacedDigit()
                     .foregroundStyle(balance > 0.004 && !hideAmounts ? theme.income.opacity(0.8) : theme.faint)
                     .accessibilityIdentifier("home-day-balance")
@@ -130,7 +150,22 @@ struct DaySummaryRow: View {
         DaySummary.balanceText(balance, formatted: Money.masked(abs(balance), hidden: hideAmounts), hidden: hideAmounts)
     }
 
+    @ViewBuilder
     private var chipStrip: some View {
+        if theme.isReceipt {
+            // 3.5 (26) 小票皮肤：分类用一排小圆点（参考图的柔和色点），不再叠放彩色图标
+            HStack(spacing: 4) {
+                ForEach(chips) { chip in
+                    Circle().fill(chip.color).frame(width: 7, height: 7)
+                }
+            }
+            .accessibilityHidden(true)
+        } else {
+            defaultChipStrip
+        }
+    }
+
+    private var defaultChipStrip: some View {
         HStack(spacing: -6) {
             ForEach(chips) { chip in
                 CategoryIcon(icon: chip.icon, color: chip.color, size: 24)
@@ -149,7 +184,16 @@ struct DaySummaryRow: View {
             .accessibilityHidden(true)
     }
 
+    @ViewBuilder
     private var bar: some View {
+        if theme.isReceipt {
+            ReceiptBar(ratio: max(barRatio, 0.01), fill: theme.accent.opacity(0.55), track: theme.rule.opacity(0.45))
+        } else {
+            defaultBar
+        }
+    }
+
+    private var defaultBar: some View {
         GeometryReader { g in
             ZStack(alignment: .leading) {
                 Capsule().fill(theme.rule.opacity(theme.isReceipt ? 1 : 0.5))

@@ -60,9 +60,9 @@ struct ChangeLogView: View {
             }
             Section {
                 EmptyView()
-            } footer: {
+            } footer: { ThemedSectionFooter {
                 Text("只记录真实账本的变动，不记录密码，也不记录防窥账本的任何内容。保留期限：\(ChangeLogger.retentionTitle(retentionDays))。")
-            }
+            } }
         }
         .navigationTitle("变动日志")
         .searchable(text: $search, prompt: "搜索摘要、字段或金额")
@@ -216,11 +216,11 @@ struct ChangeLogDetailView: View {
             }
             let diffs = entry.diffs
             if !diffs.isEmpty {
-                Section("字段变动") {
+                Section {
                     ForEach(Array(diffs.enumerated()), id: \.offset) { _, d in
                         DiffRow(diff: d)
                     }
-                }
+                } header: { ThemedSectionHeader { Text("字段变动") } }
             }
             let children = entry.children
             if !children.isEmpty {
@@ -240,9 +240,9 @@ struct ChangeLogDetailView: View {
                             }
                         }
                     }
-                } header: {
+                } header: { ThemedSectionHeader {
                     Text(entry.childCount > children.count ? "明细（共 \(entry.childCount) 项，显示前 \(children.count) 项）" : "明细（\(children.count) 项）")
-                }
+                } }
             }
         }
         .navigationTitle("变动详情")

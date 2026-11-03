@@ -5,12 +5,56 @@ import SwiftData
 struct BudgetLineRow: View {
     let line: BudgetLine
     var compact = false
+    @Environment(\.appTheme) private var theme
 
     var body: some View {
         let ratio = line.budget > 0 ? line.spent / line.budget : 0
+        if theme.isReceipt {
+            receiptBody(ratio)
+        } else {
+            defaultBody(ratio)
+        }
+    }
+
+    /// 3.5 (26) 小票皮肤：名称 / 已用 ··· 百分比 两列对齐，细条，状态色降饱和
+    private func receiptBody(_ ratio: Double) -> some View {
+        VStack(alignment: .leading, spacing: ReceiptStyle.Space.xs) {
+            HStack(spacing: ReceiptStyle.Space.s) {
+                CategoryIcon(icon: line.icon, color: Color.skinTint(line.colorHex), size: compact ? 26 : 30)
+                VStack(alignment: .leading, spacing: ReceiptStyle.Space.xxs) {
+                    HStack(alignment: .firstTextBaseline, spacing: ReceiptStyle.Space.xs) {
+                        Text(line.name).font(theme.rowTitleFont).foregroundStyle(theme.ink)
+                        DotLeader(color: theme.rule)
+                        Text("\(Money.percent(ratio))%")
+                            .font(theme.rowAmountFont).monospacedDigit()
+                            .foregroundStyle(ratio >= 0.8 ? theme.budgetColor(ratio) : theme.ink)
+                    }
+                    HStack(alignment: .firstTextBaseline) {
+                        Text(line.isOver ? "超支 \(Money.format(line.spent - line.budget))" : "剩余 \(Money.format(line.remaining))")
+                            .foregroundStyle(line.isOver ? theme.accent : theme.faint)
+                        Spacer(minLength: ReceiptStyle.Space.xs)
+                        Text("\(Money.format(line.spent)) / \(Money.format(line.budget))")
+                            .foregroundStyle(theme.faint)
+                    }
+                    .font(theme.metaFont).monospacedDigit()
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+                }
+            }
+            ReceiptBar(ratio: ratio, fill: theme.budgetColor(ratio), track: theme.rule.opacity(0.6))
+            if line.carry != 0 {
+                Text("含上月结转 \(line.carry > 0 ? "+" : "")\(Money.format(line.carry))")
+                    .font(theme.metaFont)
+                    .foregroundStyle(theme.faint)
+            }
+        }
+        .padding(.vertical, ReceiptStyle.Space.xxs)
+    }
+
+    private func defaultBody(_ ratio: Double) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 10) {
-                CategoryIcon(icon: line.icon, color: Color(hex: line.colorHex), size: compact ? 28 : 34)
+                CategoryIcon(icon: line.icon, color: Color.skinTint(line.colorHex), size: compact ? 28 : 34)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(line.name).font(.ui(.subheadline).weight(.medium))
                     Text(line.isOver ? "超支 \(Money.format(line.spent - line.budget))" : "剩余 \(Money.format(line.remaining))")
@@ -82,10 +126,10 @@ struct BudgetView: View {
 
         ThemedForm {
             if status.total != nil || status.yearly != nil {
-                Section("本期进度") {
+                Section {
                     if let t = status.total { BudgetLineRow(line: t).padding(.vertical, 4) }
                     if let y = status.yearly { BudgetLineRow(line: y).padding(.vertical, 4) }
-                }
+                } header: { ThemedSectionHeader { Text("本期进度") } }
             }
 
             Section {
@@ -94,12 +138,12 @@ struct BudgetView: View {
                     Label("结余结转到下月", systemImage: "arrow.uturn.forward")
                 }
                 amountField("年度总预算", text: $yearlyText) { yearly = $0 }
-            } header: {
+            } header: { ThemedSectionHeader {
                 Text("总预算")
-            } footer: {
+            } } footer: { ThemedSectionFooter {
                 Text("开启结转后，上月剩余（或超支）会加到（或扣减）本月预算，只结转一个月（仅总预算）。"
                      + (categorySum > 0 ? "\n分类预算合计 \(Money.format(categorySum))。" : ""))
-            }
+            } }
 
             Section {
                 ForEach(expenseCategories) { c in
@@ -122,11 +166,11 @@ struct BudgetView: View {
                     }
                     .tint(.primary)
                 }
-            } header: {
+            } header: { ThemedSectionHeader {
                 Text("分类月预算")
-            } footer: {
+            } } footer: { ThemedSectionFooter {
                 Text("点分类设置预算。统计页会显示各分类的使用进度。")
-            }
+            } }
 
             Section {
                 Toggle(isOn: $alertsEnabled) {
@@ -138,9 +182,9 @@ struct BudgetView: View {
                     }
                     Toggle("超支时提醒", isOn: $alertOver)
                 }
-            } footer: {
+            } footer: { ThemedSectionFooter {
                 Text("记账、导入账单、快捷指令记账后检查；每个预算每月每档只提醒一次。")
-            }
+            } }
         }
         .navigationTitle("预算")
         .navigationBarTitleDisplayMode(.inline)

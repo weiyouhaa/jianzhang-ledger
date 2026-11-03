@@ -231,15 +231,15 @@ struct SettingsView: View {
                     }
                 }
             }
-        } header: {
+        } header: { ThemedSectionHeader {
             Text("安全与隐私")
-        } footer: {
+        } } footer: { ThemedSectionFooter {
             if session.isDecoy {
                 Text("密码以加盐哈希保存在本机钥匙串。")
             } else {
                 Text("密码以加盐哈希保存在本机钥匙串。解锁方式默认「密码」：锁屏不会自动识别面容；选「自动面容 ID」才会在打开时自动识别。面容 ID / 触控 ID 始终进入真实账本；只有输入防窥密码才会进入防窥账本。防窥账本使用独立数据库与独立偏好（预算、默认账户、分类记忆等），不会同步到 iCloud，也不会写入真实备份。进入防窥时会撤掉真实账本的本地通知。快捷指令记账始终写入真实账本。")
             }
-        }
+        } }
     }
 
     private var bookkeepingSection: some View {
@@ -286,11 +286,11 @@ struct SettingsView: View {
                 Label("信用卡还款计入支出", systemImage: LedgerRecord.repaymentIcon)
             }
             .accessibilityIdentifier("toggle-repayment-expense")
-        } header: {
+        } header: { ThemedSectionHeader {
             Text("记账")
-        } footer: {
+        } } footer: { ThemedSectionFooter {
             Text("默认关闭：刷卡消费已记为支出，还款只是把钱从银行卡转到信用卡，再计入会重复。开启后首页、统计和总预算都会把还款算作支出。")
-        }
+        } }
     }
 
     private var smartSection: some View {
@@ -354,11 +354,11 @@ struct SettingsView: View {
             } label: {
                 settingRow("周期账单", icon: "arrow.triangle.2.circlepath", detail: recurringRules.isEmpty ? "" : "\(recurringRules.count) 项")
             }
-        } header: {
+        } header: { ThemedSectionHeader {
             Text("智能记账")
-        } footer: {
+        } } footer: { ThemedSectionFooter {
             Text("识图记账：文字识别始终在本机用 Vision；「自动」时，在支持 Apple 智能的设备（iOS 26+）上再用端侧模型理解交易，结果会与原文核对（金额必须出现在截图中），不可用或出错时自动改用规则。全程不联网。\n\n支付宝：我的 › 账单 › 右上角 ··· › 开具交易流水证明 › 用于个人对账；微信：我 › 服务 › 钱包 › 账单 › 常见问题 › 下载账单 › 用于个人对账。收到的 CSV / XLSX 文件（解压后）用「存储到文件」保存，再在这里导入。")
-        }
+        } }
     }
 
     private func settingRow(_ title: String, icon: String, detail: String) -> some View {
@@ -378,11 +378,11 @@ struct SettingsView: View {
             Text("当前不会使用 iCloud 同步或自动备份。")
                 .font(.ui(.subheadline))
                 .foregroundStyle(.secondary)
-        } header: {
+        } header: { ThemedSectionHeader {
             Text("数据")
-        } footer: {
+        } } footer: { ThemedSectionFooter {
             Text("所有记账仅保存在这台设备上。")
-        }
+        } }
     }
 
     private var backupSection: some View {
@@ -410,11 +410,11 @@ struct SettingsView: View {
                     .font(.ui(.subheadline))
                     .foregroundStyle(.secondary)
             }
-        } header: {
+        } header: { ThemedSectionHeader {
             Text("iCloud 与备份")
-        } footer: {
+        } } footer: { ThemedSectionFooter {
             Text("可导出备份到 iCloud 云盘并随时恢复；iCloud 自动同步需要付费开发者账号签名。")
-        }
+        } }
     }
 
     private var shortcutSection: some View {
@@ -426,11 +426,11 @@ struct SettingsView: View {
             }
             ShortcutsLink()
                 .frame(maxWidth: .infinity)
-        } header: {
+        } header: { ThemedSectionHeader {
             Text("快捷指令")
-        } footer: {
+        } } footer: { ThemedSectionFooter {
             Text("在「快捷指令」App 中搜索「简账」即可找到「识图记账」「记一笔」「本月收支」。")
-        }
+        } }
     }
 
     private var appearanceSection: some View {
@@ -454,11 +454,11 @@ struct SettingsView: View {
                 .listRowInsets(EdgeInsets(top: 10, leading: 16, bottom: 10, trailing: 16))
                 .listRowBackground(Color.clear)
                 .animation(.easeInOut(duration: 0.2), value: skinRaw)
-        } header: {
+        } header: { ThemedSectionHeader {
             Text("外观")
-        } footer: {
+        } } footer: { ThemedSectionFooter {
             Text(AppSkin.stored(skinRaw).detail + "。皮肤为设备级设置，真实账本与防窥账本外观一致。")
-        }
+        } }
     }
 
     private var dataSection: some View {
@@ -506,15 +506,15 @@ struct SettingsView: View {
             } message: {
                 Text("此操作不可恢复，建议先导出 CSV 或 JSON 备份。分类和账户会保留。")
             }
-        } header: {
+        } header: { ThemedSectionHeader {
             Text("数据")
-        } footer: {
+        } } footer: { ThemedSectionFooter {
             Text("共 \(records.count) 笔记录。所有数据仅保存在本机，不会上传到任何服务器。")
-        }
+        } }
     }
 
     private var aboutSection: some View {
-        Section("关于") {
+        Section {
             HStack {
                 Text("版本")
                 Spacer()
@@ -525,7 +525,7 @@ struct SettingsView: View {
             Label("数据本地存储 · 识别在本机完成 · 无网络请求", systemImage: "checkmark.shield.fill")
                 .font(.ui(.footnote))
                 .foregroundStyle(.secondary)
-        }
+        } header: { ThemedSectionHeader { Text("关于") } }
     }
 
     // MARK: - Helpers

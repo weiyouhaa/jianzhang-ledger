@@ -124,14 +124,14 @@ struct BackupExportSheet: View {
                     Toggle(isOn: $encrypt.animation()) {
                         Label("加密备份", systemImage: encrypt ? "lock.fill" : "lock.open.fill")
                     }
-                } footer: {
+                } footer: { ThemedSectionFooter {
                     if encrypt {
                         Text("使用 AES-256-GCM 加密，密钥由备份密码经 PBKDF2-HMAC-SHA256 派生（\(BackupCrypto.minIterations / 10_000) 万次以上迭代）。文件扩展名为 .jzbackup。")
                     } else {
                         Label("将导出**明文** JSON：任何拿到文件的人都能直接看到全部账目、账户和备注。只在你确定文件不会外泄时使用。", systemImage: "exclamationmark.triangle.fill")
                             .foregroundStyle(.orange)
                     }
-                }
+                } }
 
                 if encrypt {
                     if hasSaved {
@@ -139,19 +139,19 @@ struct BackupExportSheet: View {
                             Toggle(isOn: $useSaved.animation()) {
                                 Label("使用已保存的备份密码", systemImage: "key.fill")
                             }
-                        } footer: {
+                        } footer: { ThemedSectionFooter {
                             Text("备份密码已保存在本机钥匙串，自动备份也使用这个密码。")
-                        }
+                        } }
                     }
                     if !useSaved {
                         Section {
                             BackupPasswordFields(password: $password, confirm: $confirm, focusFirst: !ScreenshotDemo.isActive)
-                        } header: {
+                        } header: { ThemedSectionHeader {
                             Text("设置备份密码")
-                        } footer: {
+                        } } footer: { ThemedSectionFooter {
                             Label("请务必牢记备份密码：简账不会上传或找回密码，忘记密码将**无法恢复**这份备份。", systemImage: "exclamationmark.lock.fill")
                                 .foregroundStyle(.red)
-                        }
+                        } }
                         Section {
                             Toggle(isOn: $remember) {
                                 VStack(alignment: .leading, spacing: 2) {
@@ -161,9 +161,9 @@ struct BackupExportSheet: View {
                                         .foregroundStyle(.secondary)
                                 }
                             }
-                        } footer: {
+                        } footer: { ThemedSectionFooter {
                             Text(lock.passcodeEnabled ? "查看或修改已保存的密码需要验证 App 密码或\(lock.biometryName)。" : "查看或修改已保存的密码需要验证设备密码或\(lock.biometryName)。")
-                        }
+                        } }
                     }
                 }
 
@@ -265,13 +265,13 @@ struct BackupPasswordSetupSheet: View {
                 }
                 Section {
                     BackupPasswordFields(password: $password, confirm: $confirm)
-                } footer: {
+                } footer: { ThemedSectionFooter {
                     VStack(alignment: .leading, spacing: 6) {
                         Text("密码只保存在本机钥匙串（仅此设备，不随 iCloud 钥匙串同步），自动备份和导出都可以使用。之前用其他密码加密的备份仍需原来的密码解密。")
                         Label("忘记密码将无法恢复加密备份，请另外妥善记录。", systemImage: "exclamationmark.lock.fill")
                             .foregroundStyle(.red)
                     }
-                }
+                } }
                 if failed {
                     Text("保存到钥匙串失败，请稍后重试。").foregroundStyle(.red)
                 }
@@ -330,11 +330,11 @@ struct BackupUnlockSheet: View {
                         .focused($focused)
                         .submitLabel(.go)
                         .onSubmit { decrypt(password) }
-                } header: {
+                } header: { ThemedSectionHeader {
                     Text("这是加密备份")
-                } footer: {
+                } } footer: { ThemedSectionFooter {
                     Text("输入导出时设置的备份密码。密码错误或文件被修改都会无法解密，不会影响现有数据。")
-                }
+                } }
                 if hasSaved {
                     Section {
                         Button {

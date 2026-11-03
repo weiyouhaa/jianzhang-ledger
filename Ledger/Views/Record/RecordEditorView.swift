@@ -157,15 +157,15 @@ struct RecordEditorView: View {
                 } else if kind == .contribution {
                     Section {
                         accountPicker(title: "缴存账户", selection: $accountID, allowNone: false)
-                    } footer: {
+                    } footer: { ThemedSectionFooter {
                         Text("公积金、医保、养老保险等每月缴存。单位和个人缴纳部分都可以记在这里；提取请用「转账」转到银行卡。")
-                    }
+                    } }
                 } else if kind == .adjustment {
                     Section {
                         accountPicker(title: "账户", selection: $accountID, allowNone: false)
-                    } footer: {
+                    } footer: { ThemedSectionFooter {
                         Text("正数表示调增余额，负数表示调减。")
-                    }
+                    } }
                 } else {
                     categorySection
                     if repayMode { repaymentSection }
@@ -184,11 +184,11 @@ struct RecordEditorView: View {
                         TextField("商户（可选）", text: $merchant)
                         accountPicker(title: "账户", selection: userAccountBinding, allowNone: true)
                     }
-                } footer: {
+                } footer: { ThemedSectionFooter {
                     if let ruleHint, kind.countsInStats, !repayMode {
                         Label(ruleHint, systemImage: "wand.and.stars")
                     }
-                }
+                } }
 
                 if kind.countsInStats {
                     Section {
@@ -209,7 +209,7 @@ struct RecordEditorView: View {
                         } message: {
                             Text("其余几笔可再次识别后选择，或用快捷指令「识图记账」一次全部记入。" + (ocrEngineLine.map { "\n" + $0 } ?? ""))
                         }
-                    } footer: {
+                    } footer: { ThemedSectionFooter {
                         VStack(alignment: .leading, spacing: 4) {
                             Text("在本机识别金额、商户、时间与付款账户，图片不会上传。")
                             if let ocrEngineLine {
@@ -218,7 +218,7 @@ struct RecordEditorView: View {
                                     .accessibilityIdentifier("ocr-engine-line")
                             }
                         }
-                    }
+                    } }
                 }
 
                 if let record, record.kind != .adjustment {
@@ -229,9 +229,9 @@ struct RecordEditorView: View {
                             Label(record.recurringKey.isEmpty ? "设为周期账单" : "由周期账单生成 · 再建一个周期",
                                   systemImage: "arrow.triangle.2.circlepath")
                         }
-                    } footer: {
+                    } footer: { ThemedSectionFooter {
                         Text("按这条记录的金额、分类和账户，每月 / 每周等自动记账或提醒。")
-                    }
+                    } }
                 }
 
                 if record != nil {
@@ -484,7 +484,7 @@ struct RecordEditorView: View {
                 }
             }
             .padding(.vertical, 6)
-        } header: {
+        } header: { ThemedSectionHeader {
             HStack {
                 Text("分类")
                 Spacer()
@@ -492,7 +492,7 @@ struct RecordEditorView: View {
                     .font(.ui(.caption))
                     .textCase(nil)
             }
-        }
+        } }
     }
 
     private var transferSection: some View {
@@ -507,9 +507,9 @@ struct RecordEditorView: View {
                     .multilineTextAlignment(.trailing)
                     .frame(maxWidth: 140)
             }
-        } header: {
+        } header: { ThemedSectionHeader {
             Text("转账 / 还款")
-        } footer: {
+        } } footer: { ThemedSectionFooter {
             if accountID != nil && accountID == toAccountID {
                 Text("转出和转入账户不能相同。").foregroundStyle(.red)
             } else if allAccounts.isEmpty {
@@ -517,7 +517,7 @@ struct RecordEditorView: View {
             } else {
                 Text("转入信用卡 / 花呗即为还款。转账不计入收支统计和预算，手续费从转出账户扣除。")
             }
-        }
+        } }
     }
 
     private var repaymentSection: some View {
@@ -536,9 +536,9 @@ struct RecordEditorView: View {
                 }
                 .accessibilityIdentifier("repay-full")
             }
-        } header: {
+        } header: { ThemedSectionHeader {
             Text("信用卡还款")
-        } footer: {
+        } } footer: { ThemedSectionFooter {
             if accountID != nil && accountID == toAccountID {
                 Text("付款账户和信用卡不能相同。").foregroundStyle(.red)
             } else if cardAccounts.isEmpty {
@@ -548,7 +548,7 @@ struct RecordEditorView: View {
                      ? "付款账户余额减少，信用卡欠款同步减少。已设置「信用卡还款计入支出」，会计入支出统计。"
                      : "付款账户余额减少，信用卡欠款同步减少。刷卡消费已记为支出，还款默认不再计入支出（可在设置中开启）。")
             }
-        }
+        } }
     }
 
     /// 切到信用卡还款：付款账户默认用默认账户（非负债），信用卡默认选有欠款的第一张

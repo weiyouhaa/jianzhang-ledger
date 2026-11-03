@@ -66,6 +66,15 @@ extension Color {
     static var themeBackdrop: Color {
         AppSkin.current == .receipt ? Color(uiColor: ThemeChrome.ui(.backdrop)) : Color(.systemGroupedBackground)
     }
+    /// 3.5 (26) 分类 / 账户颜色：默认皮肤原色；小票皮肤降饱和成墨水色（随浅色 / 深色切换）
+    static func skinTint(_ hex: String) -> Color {
+        guard AppSkin.current == .receipt else { return Color(hex: hex) }
+        let light = ReceiptStyle.mutedRGB(hex, dark: false), dark = ReceiptStyle.mutedRGB(hex, dark: true)
+        return Color(uiColor: UIColor { trait in
+            let c = trait.userInterfaceStyle == .dark ? dark : light
+            return UIColor(red: c.0, green: c.1, blue: c.2, alpha: 1)
+        })
+    }
     /// 浅填充（胶囊 / 输入框底）：默认皮肤 = 原来的系统填充色
     static func themeFill(_ system: UIColor) -> Color {
         AppSkin.current == .receipt ? Color(uiColor: ThemeChrome.ui(.rule)).opacity(0.45) : Color(system)
@@ -158,17 +167,17 @@ enum ThemeChrome {
 
     /// 随浅色 / 深色自动切换的小票色
     nonisolated static func ui(_ token: Token) -> UIColor {
-        let pair: (String, String)
+        let pair: ReceiptStyle.Pair
         switch token {
-        case .accent: pair = ("#9E2B25", "#E58A7C")
-        case .income: pair = ("#2F7D4F", "#8CC9A0")
-        case .ink: pair = ("#26221E", "#EFE7DA")
-        case .faint: pair = ("#857C70", "#A79E90")
-        case .rule: pair = ("#CFC6B6", "#5A5248")
-        case .paper: pair = ("#FBF7EE", "#2B2722")
-        case .backdrop: pair = ("#EDE7DB", "#1C1A17")
+        case .accent: pair = ReceiptStyle.accent
+        case .income: pair = ReceiptStyle.income
+        case .ink: pair = ReceiptStyle.ink
+        case .faint: pair = ReceiptStyle.faint
+        case .rule: pair = ReceiptStyle.rule
+        case .paper: pair = ReceiptStyle.paper
+        case .backdrop: pair = ReceiptStyle.backdrop
         }
-        let light = rgb(pair.0), dark = rgb(pair.1)
+        let light = rgb(pair.light), dark = rgb(pair.dark)
         return UIColor { $0.userInterfaceStyle == .dark ? dark : light }
     }
 
@@ -209,7 +218,7 @@ enum ThemeChrome {
         let bar = UINavigationBarAppearance()
         bar.configureWithOpaqueBackground()
         bar.backgroundColor = ui(.backdrop)
-        bar.shadowColor = rule
+        bar.shadowColor = .clear  // 3.5 (26)：导航栏下不再画分隔线，标题和纸面连成一体
         bar.titleTextAttributes = [.font: bold(17), .foregroundColor: ink]
         // 小票皮肤的标签页根页面改用行内标题（见 themedRootTitle），这里的大标题字体只作兜底
         bar.largeTitleTextAttributes = [.font: bold(30), .foregroundColor: ink]
@@ -228,7 +237,7 @@ enum ThemeChrome {
         let tabs = UITabBarAppearance()
         tabs.configureWithOpaqueBackground()
         tabs.backgroundColor = ui(.paper)
-        tabs.shadowColor = rule
+        tabs.shadowColor = .clear
         for item in [tabs.stackedLayoutAppearance, tabs.inlineLayoutAppearance, tabs.compactInlineLayoutAppearance] {
             item.normal.iconColor = faint
             item.normal.titleTextAttributes = [.font: mono(10), .foregroundColor: faint]

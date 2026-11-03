@@ -38,9 +38,9 @@ struct RulesView: View {
                 Toggle(isOn: $learnEnabled) {
                     Label("自动记住商户分类", systemImage: "brain.head.profile")
                 }
-            } footer: {
+            } footer: { ThemedSectionFooter {
                 Text("记账或修改记录时，记住「商户 → 分类 / 账户」。之后识图记账、快捷指令和账单导入会优先按规则分类，比关键词猜测更准。")
-            }
+            } }
 
             Section {
                 ForEach(manual) { rule in row(rule) }
@@ -49,11 +49,11 @@ struct RulesView: View {
                 } label: {
                     Label("添加关键词规则", systemImage: "plus.circle.fill")
                 }
-            } header: {
+            } header: { ThemedSectionHeader {
                 Text("关键词规则")
-            } footer: {
+            } } footer: { ThemedSectionFooter {
                 Text("商户名或备注包含关键词即套用，关键词越长越优先。")
-            }
+            } }
 
             Section {
                 if learned.isEmpty {
@@ -62,9 +62,9 @@ struct RulesView: View {
                         .foregroundStyle(.secondary)
                 }
                 ForEach(learned) { rule in row(rule) }
-            } header: {
+            } header: { ThemedSectionHeader {
                 Text("已记住的商户（\(rules.filter(\.isLearned).count)）")
-            }
+            } }
         }
         .searchable(text: $searchText, prompt: "搜索商户或关键词")
         .navigationTitle("记账规则")
@@ -173,10 +173,10 @@ struct RuleEditorView: View {
                         Text("收入").tag(RecordKind.income)
                     }
                     .pickerStyle(.segmented)
-                } footer: {
+                } footer: { ThemedSectionFooter {
                     Text(isLearned ? "按商户名模糊匹配（去掉分店、公司后缀后比较）。" : "商户名或备注包含这个关键词时套用。")
-                }
-                Section("套用") {
+                } }
+                Section {
                     Picker("分类", selection: $categoryID) {
                         ForEach(categories.filter { $0.kind == kind }) { c in
                             Label(c.name, systemImage: c.icon).tag(UUID?.some(c.id))
@@ -189,7 +189,7 @@ struct RuleEditorView: View {
                         }
                     }
                     Toggle("启用", isOn: $isEnabled)
-                }
+                } header: { ThemedSectionHeader { Text("套用") } }
                 if let rule {
                     Section {
                         if rule.hitCount > 0 {

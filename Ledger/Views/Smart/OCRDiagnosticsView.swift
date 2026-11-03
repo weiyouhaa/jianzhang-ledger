@@ -12,9 +12,9 @@ struct OCRDiagnosticsView: View {
                 LabeledContent("识别引擎", value: OCREngineSetting.preferAppleIntelligence ? "自动（优先 Apple 智能）" : "仅规则")
                 LabeledContent("快捷指令中使用", value: OCREngineSetting.useInShortcuts ? "开启" : "关闭")
                 LabeledContent("超时（最多）", value: "App 内 \(Int(OCREngineSetting.inAppTimeout)) 秒 · 快捷指令 \(Int(OCREngineSetting.shortcutTimeout)) 秒")
-            } header: {
+            } header: { ThemedSectionHeader {
                 Text("当前状态")
-            }
+            } }
 
             if items.isEmpty {
                 Section {
@@ -42,11 +42,11 @@ struct OCRDiagnosticsView: View {
                         }
                         .padding(.vertical, 2)
                     }
-                } header: {
+                } header: { ThemedSectionHeader {
                     Text("最近 \(items.count) 次")
-                } footer: {
+                } } footer: { ThemedSectionFooter {
                     Text("只保存在本机，不含截图文字和金额，不会上传或备份。")
-                }
+                } }
                 Section {
                     Button("清除诊断记录", role: .destructive) {
                         OCRDiagnostic.clear()

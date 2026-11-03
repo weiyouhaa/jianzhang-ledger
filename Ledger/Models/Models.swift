@@ -34,7 +34,7 @@ final class LedgerCategory {
         set { kindRaw = newValue.rawValue }
     }
 
-    var color: Color { Color(hex: colorHex) }
+    var color: Color { Color.skinTint(colorHex) }
 }
 
 @Model
@@ -88,7 +88,7 @@ final class LedgerRecord {
     var isCreditRepayment: Bool { kind == .transfer && (toAccount?.type.isLiability ?? false) }
 
     static let repaymentIcon = "creditcard.and.123"
-    static let repaymentColor = Color(hex: "#30B0C7")
+    static var repaymentColor: Color { Color.skinTint("#30B0C7") }
 
     var categoryName: String {
         switch kind {
@@ -108,9 +108,9 @@ final class LedgerRecord {
     }
     var categoryColor: Color {
         switch kind {
-        case .transfer: return Color(hex: "#30B0C7")
+        case .transfer: return Color.skinTint("#30B0C7")
         case .adjustment: return .gray
-        case .contribution: return accountRef?.color ?? Color(hex: "#E8A33D")
+        case .contribution: return accountRef?.color ?? Color.skinTint("#E8A33D")
         default: return category?.color ?? .gray
         }
     }
@@ -333,7 +333,7 @@ final class LedgerAccount {
         set { typeRaw = newValue.rawValue }
     }
 
-    var color: Color { Color(hex: colorHex) }
+    var color: Color { Color.skinTint(colorHex) }
     var iconName: String { icon.isEmpty ? type.defaultIcon : icon }
 
     /// 与该账户相关的全部记录（含转入）

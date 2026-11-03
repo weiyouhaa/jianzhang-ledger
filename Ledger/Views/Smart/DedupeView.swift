@@ -45,9 +45,9 @@ struct DedupeView: View {
                 Picker("时间窗口", selection: $windowRaw) {
                     ForEach(DedupeWindow.allCases) { Text($0.title).tag($0.rawValue) }
                 }
-            } footer: {
+            } footer: { ThemedSectionFooter {
                 Text("金额、类型相同，且在这个时间范围内的记录才会被比对；账户、商户一致会提高可信度，订单号相同即确定重复。")
-            }
+            } }
 
             if isReal, let snap = undoSnapshot {
                 Section {
@@ -57,9 +57,9 @@ struct DedupeView: View {
                         Label("撤销上次去重（恢复 \(snap.deleted.count) 笔）", systemImage: "arrow.uturn.backward")
                     }
                     .accessibilityIdentifier("dedupe-undo")
-                } footer: {
+                } footer: { ThemedSectionFooter {
                     Text("\(snap.title) · \(DateText.full.string(from: snap.date))")
-                }
+                } }
             }
 
             if !loaded {
@@ -162,14 +162,14 @@ struct DedupeView: View {
             } label: {
                 Label("不是重复", systemImage: "hand.raised")
             }
-        } header: {
+        } header: { ThemedSectionHeader {
             HStack {
                 Text(group.confidence.title)
                     .foregroundStyle(color(group.confidence))
                 Spacer()
                 Text(group.reasons.joined(separator: " · ")).lineLimit(1)
             }
-        }
+        } }
     }
 
     private func recordRow(_ r: DedupeRecord, group: DedupeGroup) -> some View {
@@ -248,9 +248,9 @@ struct DedupeView: View {
                     if !item.patch.isEmpty {
                         Text("补全：" + patchText(item.patch)).font(.ui(.caption)).foregroundStyle(.secondary)
                     }
-                } footer: {
+                } footer: { ThemedSectionFooter {
                     Text("保留 \(DedupeEngine.sourceTitle(item.keep.source))的一笔")
-                }
+                } }
             }
         }
         .navigationTitle("自动处理预览")

@@ -166,9 +166,9 @@ struct BackupSettingsView: View {
                     .font(.ui(.footnote))
                     .foregroundStyle(.orange)
             }
-        } header: {
+        } header: { ThemedSectionHeader {
             Text("iCloud 同步")
-        } footer: {
+        } } footer: { ThemedSectionFooter {
             VStack(alignment: .leading, spacing: 6) {
                 Text(DataStore.syncStatus.detail)
                 Text("iCloud 同步需要用**付费 Apple 开发者账号**并开启 iCloud（CloudKit）能力重新签名；免费 Apple ID、爱思助手、Sideloadly 等签名通常不含该权限，此时请使用下方的「备份到 iCloud 云盘」。开启前建议先导出一次备份。")
@@ -176,7 +176,7 @@ struct BackupSettingsView: View {
                     Text(iCloudAvailable ? "检测结果：当前签名可以访问 iCloud 容器。" : "检测结果：当前签名或设备无法访问 iCloud 容器。")
                 }
             }
-        }
+        } }
     }
 
     private var pendingRestartNeeded: Bool {
@@ -238,16 +238,16 @@ struct BackupSettingsView: View {
                     }
                 }
             }
-        } header: {
+        } header: { ThemedSectionHeader {
             Text("备份加密")
-        } footer: {
+        } } footer: { ThemedSectionFooter {
             if encryptionEnabled {
                 Text("导出和自动备份使用 AES-256-GCM 加密（.jzbackup），只有输入备份密码才能恢复。**忘记密码将无法恢复备份，简账无法帮你找回**。备份密码可保存在本机钥匙串（仅此设备），查看或修改需要验证\(lock.passcodeEnabled ? "App 密码" : "设备密码")或\(lock.biometryName)。")
             } else {
                 Text("关闭后备份为**明文 JSON**，任何拿到文件的人都能查看你的全部账目。")
                     .foregroundStyle(.orange)
             }
-        }
+        } }
     }
 
     private var isRolling: Bool { autoBackupMode != AutoBackupMode.periodic.rawValue }
@@ -317,11 +317,11 @@ struct BackupSettingsView: View {
             } label: {
                 Label("从备份恢复…", systemImage: "arrow.down.doc")
             }
-        } header: {
+        } header: { ThemedSectionHeader {
             Text("手动备份")
-        } footer: {
+        } } footer: { ThemedSectionFooter {
             Text("备份包含全部记录、分类、账户和预算等设置（不含 App 密码）。导出时选择「iCloud 云盘」即可存到云端；恢复时自动识别加密备份（.jzbackup）和旧版明文 JSON，可选择合并（按 ID 去重）或替换全部数据\(lock.passcodeEnabled ? "，需要输入 App 密码" : "")。")
-        }
+        } }
     }
 
     private var autoSection: some View {
@@ -397,11 +397,11 @@ struct BackupSettingsView: View {
                 }
                 .font(.ui(.subheadline))
             }
-        } header: {
+        } header: { ThemedSectionHeader {
             Text("自动备份")
-        } footer: {
+        } } footer: { ThemedSectionFooter {
             Text(autoFooter)
-        }
+        } }
     }
 
     // MARK: - Actions
@@ -499,13 +499,13 @@ struct BackupPreviewView: View {
         let b = item.backup
         NavigationStack {
             ThemedForm {
-                Section("备份信息") {
+                Section {
                     row("文件", item.fileName)
                     row("备份时间", DateText.full.string(from: b.createdAt))
                     row("来自设备", b.device)
                     row("App 版本", b.appVersion)
-                }
-                Section("内容") {
+                } header: { ThemedSectionHeader { Text("备份信息") } }
+                Section {
                     row("记录", "\(b.records.count) 笔")
                     row("分类", "\(b.categories.count) 个")
                     if let range = b.recordDateRange {
@@ -513,7 +513,7 @@ struct BackupPreviewView: View {
                     }
                     row("支出合计", Money.format(b.records.filter { $0.kind == RecordKind.expense.rawValue }.reduce(0) { $0 + $1.amount }))
                     row("收入合计", Money.format(b.records.filter { $0.kind == RecordKind.income.rawValue }.reduce(0) { $0 + $1.amount }))
-                }
+                } header: { ThemedSectionHeader { Text("内容") } }
                 Section {
                     Button {
                         start(.merge)
@@ -531,9 +531,9 @@ struct BackupPreviewView: View {
                     } message: {
                         Text("当前所有记录、分类和账户将被删除，且无法撤销。")
                     }
-                } footer: {
+                } footer: { ThemedSectionFooter {
                     Text("合并：按记录 ID 去重，已存在的记录跳过，同名分类自动对应。替换：删除当前所有记录和分类后导入，并恢复预算等设置。")
-                }
+                } }
             }
             .navigationTitle("从备份恢复")
             .navigationBarTitleDisplayMode(.inline)

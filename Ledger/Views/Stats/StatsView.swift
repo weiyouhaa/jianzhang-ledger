@@ -94,7 +94,7 @@ struct StatsView: View {
                     } else if yearlyBudget > 0 {
                         card {
                             VStack(alignment: .leading, spacing: 10) {
-                                Label("年度预算", systemImage: "target").font(.ui(.headline))
+                                Label("年度预算", systemImage: "target").font(cardTitleFont)
                                 BudgetProgressView(spent: expense, budget: yearlyBudget, title: "\(periodTitle)预算")
                             }
                         }
@@ -133,7 +133,46 @@ struct StatsView: View {
 
     // MARK: - 子视图
 
+    /// 3.5 (26) 小票皮肤：支出用暗红强调色，不用系统橙；卡片标题用打字机粗体
+    private var expenseTint: Color { theme.isReceipt ? theme.accent : .orange }
+    private var cardTitleFont: Font { theme.isReceipt ? theme.rowAmountFont : .ui(.headline) }
+
+    @ViewBuilder
     private var periodNavigator: some View {
+        if theme.isReceipt {
+            HStack {
+                Button { shift(-1) } label: {
+                    Image(systemName: "chevron.left")
+                        .font(.system(size: 14, weight: .semibold))
+                        .frame(width: 36, height: 36)
+                        .contentShape(Rectangle())
+                }
+                .accessibilityLabel("上一段")
+                Spacer()
+                Text(periodTitle)
+                    .font(theme.sectionTitleFont)
+                    .foregroundStyle(theme.ink)
+                    .padding(.bottom, 3)
+                    .overlay(alignment: .bottom) { Rectangle().fill(theme.accent).frame(height: 1.5) }
+                Spacer()
+                Button { shift(1) } label: {
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 14, weight: .semibold))
+                        .frame(width: 36, height: 36)
+                        .contentShape(Rectangle())
+                }
+                .disabled(!canGoNext)
+                .opacity(canGoNext ? 1 : 0.35)
+                .accessibilityLabel("下一段")
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(theme.faint)
+        } else {
+            defaultPeriodNavigator
+        }
+    }
+
+    private var defaultPeriodNavigator: some View {
         HStack {
             Button { shift(-1) } label: { Image(systemName: "chevron.left.circle.fill").font(.ui(.title2)) }
             Spacer()
@@ -170,7 +209,7 @@ struct StatsView: View {
         let selected = totals.first { $0.id == selectedPieID }
         return card {
             VStack(alignment: .leading, spacing: 12) {
-                Text("\(kind.title)构成").font(.ui(.headline))
+                Text("\(kind.title)构成").font(cardTitleFont)
                 Chart(totals) { item in
                     SectorMark(
                         angle: .value("金额", item.total),
@@ -260,18 +299,18 @@ struct StatsView: View {
 
     private func trendCard(trend: [TrendPoint]) -> some View {
         let unit: Calendar.Component = period == .month ? .day : .month
-        let barColor: Color = kind == .expense ? .orange : Color.themeIncome
+        let barColor: Color = kind == .expense ? expenseTint : Color.themeIncome
         let selected = nearestTrendPoint(to: selectedTrendDate, in: trend)
         return card {
             VStack(alignment: .leading, spacing: 12) {
-                Text(period == .month ? "每日趋势" : "每月趋势").font(.ui(.headline))
+                Text(period == .month ? "每日趋势" : "每月趋势").font(cardTitleFont)
                 Chart {
                     ForEach(trend) { p in
                         BarMark(
                             x: .value("日期", p.date, unit: unit),
                             y: .value("金额", p.total)
                         )
-                        .foregroundStyle(barColor.gradient)
+                        .foregroundStyle(theme.isReceipt ? AnyShapeStyle(barColor.opacity(0.8)) : AnyShapeStyle(barColor.gradient))
                         .cornerRadius(3)
                         .opacity(selected == nil || selected?.id == p.id ? 1 : 0.35)
                     }
@@ -331,7 +370,7 @@ struct StatsView: View {
     private func rankingCard(totals: [CategoryTotal], total: Double, records: [LedgerRecord]) -> some View {
         card {
             VStack(alignment: .leading, spacing: 14) {
-                Text("分类排行").font(.ui(.headline))
+                Text("分类排行").font(cardTitleFont)
                 ForEach(totals) { item in
                     NavigationLink {
                         CategoryRecordsView(
@@ -377,7 +416,7 @@ struct StatsView: View {
         let balanceAmt = incomeAmt - expenseAmt
         return card {
             VStack(alignment: .leading, spacing: 12) {
-                Text("收支对比").font(.ui(.headline))
+                Text("收支对比").font(cardTitleFont)
                 Chart {
                     ForEach(points) { p in
                         BarMark(
@@ -395,7 +434,7 @@ struct StatsView: View {
                             .lineStyle(StrokeStyle(lineWidth: 1.5, dash: [4, 3]))
                     }
                 }
-                .chartForegroundStyleScale(["支出": Color.orange, "收入": Color.themeIncome])
+                .chartForegroundStyleScale(["支出": expenseTint, "收入": Color.themeIncome])
                 .chartYAxis {
                     AxisMarks(position: .leading) { value in
                         AxisGridLine()
@@ -433,13 +472,13 @@ struct StatsView: View {
                         Text(DateText.month.string(from: selectedKey))
                             .font(.ui(.subheadline).weight(.semibold))
                         HStack(spacing: 16) {
-                            compareAmountRow(title: "支出", amount: expenseAmt, color: .orange)
+                            compareAmountRow(title: "支出", amount: expenseAmt, color: expenseTint)
                             compareAmountRow(title: "收入", amount: incomeAmt, color: Color.themeIncome)
                             Spacer(minLength: 0)
                             compareAmountRow(
                                 title: "结余",
                                 amount: balanceAmt,
-                                color: balanceAmt >= 0 ? Color.themeIncome : .orange
+                                color: balanceAmt >= 0 ? Color.themeIncome : expenseTint
                             )
                         }
                     }
@@ -447,7 +486,7 @@ struct StatsView: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .background(
                         RoundedRectangle(cornerRadius: 12, style: .continuous)
-                            .fill(Color(.secondarySystemFill))
+                            .fill(theme.isReceipt ? theme.rule.opacity(0.28) : Color(.secondarySystemFill))
                     )
                     .overlay(
                         RoundedRectangle(cornerRadius: 12, style: .continuous)
@@ -460,21 +499,23 @@ struct StatsView: View {
         }
     }
 
+    @ViewBuilder
     private func card<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
-        content()
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(16)
-            .background(
-                RoundedRectangle(cornerRadius: theme.cardCorner,
-                                 style: theme.isReceipt ? .circular : .continuous)
-                    .fill(theme.cardFill)
-            )
-            .overlay {
-                if theme.usesDashedRules {
-                    RoundedRectangle(cornerRadius: theme.cardCorner)
-                        .strokeBorder(theme.rule, style: StrokeStyle(lineWidth: 1, dash: [4, 3]))
-                }
-            }
+        if theme.isReceipt {
+            // 3.5 (26) 小票皮肤：统一纸卡（无虚线外框），与首页 / 资产卡片同一样式
+            content()
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(ReceiptStyle.Space.m)
+                .receiptSurface(theme)
+        } else {
+            content()
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(16)
+                .background(
+                    RoundedRectangle(cornerRadius: theme.cardCorner, style: .continuous)
+                        .fill(theme.cardFill)
+                )
+        }
     }
 
     // MARK: - 计算
@@ -742,10 +783,10 @@ struct CategoryRecordsView: View {
                     RecordRow(record: r, showDate: true)
                         .onTapGesture { editing = r }
                 }
-            } header: {
+            } header: { ThemedSectionHeader {
                 Text("共 \(records.count) 笔 · \(Money.format(records.reduce(0) { $0 + $1.amount }))")
                     .textCase(nil)
-            }
+            } }
         }
         .navigationTitle(title)
         .navigationBarTitleDisplayMode(.inline)

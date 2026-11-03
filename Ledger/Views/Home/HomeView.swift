@@ -4,6 +4,7 @@ import SwiftData
 struct HomeView: View {
     @Environment(\.modelContext) private var context
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.appTheme) private var theme
     @ObservedObject private var session = SessionManager.shared
     /// 明细的日期范围（2.0 (16)）：默认本月，只在本次会话记住，冷启动回到本月
     @State private var range = HomeDateRange.make(.thisMonth, calendar: DateText.calendar)
@@ -39,12 +40,22 @@ struct HomeView: View {
                 Button {
                     editorTarget = .new
                 } label: {
-                    Image(systemName: "plus")
-                        .font(.ui(.title2).weight(.bold))
-                        .foregroundStyle(.white)
-                        .frame(width: 60, height: 60)
-                        .background(Circle().fill(Color.themeAccent.gradient))
-                        .shadow(color: Color.themeAccent.opacity(0.4), radius: 10, y: 5)
+                    if theme.isReceipt {
+                        // 3.5 (26) 小票皮肤：实色暗红圆章，细投影，不用渐变和彩色光晕
+                        Image(systemName: "plus")
+                            .font(.system(size: 22, weight: .semibold))
+                            .foregroundStyle(theme.paper)
+                            .frame(width: 56, height: 56)
+                            .background(Circle().fill(theme.accent))
+                            .shadow(color: Color.black.opacity(0.16), radius: 4, y: 2)
+                    } else {
+                        Image(systemName: "plus")
+                            .font(.ui(.title2).weight(.bold))
+                            .foregroundStyle(.white)
+                            .frame(width: 60, height: 60)
+                            .background(Circle().fill(Color.themeAccent.gradient))
+                            .shadow(color: Color.themeAccent.opacity(0.4), radius: 10, y: 5)
+                    }
                 }
                 .accessibilityLabel("记一笔")
                 .accessibilityIdentifier("home-add")
@@ -377,9 +388,9 @@ struct HomeRangeSheet: View {
                             }
                         }
                     }
-                } footer: {
+                } footer: { ThemedSectionFooter {
                     Text("选「本月」即可回到本月。范围只在本次使用中记住，下次打开回到本月。搜索不受此范围影响。")
-                }
+                } }
 
                 Section {
                     Toggle("自定义", isOn: $showCustom.animation())
@@ -426,6 +437,91 @@ struct SummaryCard: View {
     @Environment(\.appTheme) private var theme
 
     var body: some View {
+        if theme.isReceipt { receiptBody } else { defaultBody }
+    }
+
+    /// 3.5 (26) 小票皮肤汇总卡：打字机标题 + 暗红下划线（同参考图当前月份）、小号字距标签、
+    /// 一个大号结余数字、两列对齐的支出 / 收入，预算用点引线行；只有这张 hero 卡用齿孔下沿
+    private var receiptBody: some View {
+        VStack(alignment: .leading, spacing: ReceiptStyle.Space.m) {
+            HStack(alignment: .center, spacing: ReceiptStyle.Space.xxs) {
+                if canStep {
+                    Button(action: onPrevious) {
+                        Image(systemName: "chevron.left")
+                            .font(.system(size: 13, weight: .semibold))
+                            .frame(width: 32, height: 32)
+                    }
+                    .foregroundStyle(theme.faint)
+                    .accessibilityLabel("上一段")
+                }
+                Button(action: onPickRange) {
+                    HStack(alignment: .firstTextBaseline, spacing: 6) {
+                        Text(title)
+                            .font(theme.sectionTitleFont)
+                            .foregroundStyle(theme.ink)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.7)
+                        Image(systemName: "chevron.down")
+                            .font(.system(size: 10, weight: .bold))
+                            .foregroundStyle(theme.faint)
+                    }
+                    .padding(.bottom, 3)
+                    .overlay(alignment: .bottom) {
+                        Rectangle().fill(theme.accent).frame(height: 1.5)
+                    }
+                    .contentShape(Rectangle())
+                }
+                .accessibilityLabel("日期范围：\(title)")
+                .accessibilityHint("选择本月、上月、最近 7 天等")
+                .accessibilityIdentifier("home-range")
+                if canStep {
+                    Button(action: onNext) {
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 13, weight: .semibold))
+                            .frame(width: 32, height: 32)
+                    }
+                    .foregroundStyle(theme.faint)
+                    .disabled(!canGoNext)
+                    .opacity(canGoNext ? 1 : 0.35)
+                    .accessibilityLabel("下一段")
+                }
+                Spacer(minLength: ReceiptStyle.Space.xs)
+                ReceiptLabelText(text: "\(count) 笔", color: theme.faint)
+            }
+            .buttonStyle(.plain)
+
+            ThemedDashedRule()
+
+            VStack(alignment: .leading, spacing: ReceiptStyle.Space.xs) {
+                ReceiptLabelText(text: balanceTitle, color: theme.faint)
+                Text(Money.masked(income - expense, hidden: hideAmounts))
+                    .font(theme.heroAmountFont)
+                    .monospacedDigit()
+                    .foregroundStyle(theme.ink)
+                    .contentTransition(.numericText())
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.5)
+            }
+
+            HStack(alignment: .top) {
+                StatBlock(title: "支出", value: Money.masked(expense, hidden: hideAmounts))
+                Spacer()
+                StatBlock(title: "收入", value: Money.masked(income, hidden: hideAmounts), alignment: .trailing)
+            }
+
+            if budget > 0 && !hideAmounts {
+                ThemedDashedRule()
+                BudgetProgressView(spent: expense, budget: budget)
+            }
+        }
+        .padding(.horizontal, ReceiptStyle.Space.l - 4)
+        .padding(.top, ReceiptStyle.Space.m)
+        .padding(.bottom, ReceiptStyle.Space.m)
+        .receiptSurface(theme, hero: true)
+        .padding(.vertical, 4)
+    }
+
+    private var defaultBody: some View {
         VStack(alignment: .leading, spacing: 16) {
             HStack(spacing: 4) {
                 if canStep {

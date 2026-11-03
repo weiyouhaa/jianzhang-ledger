@@ -82,12 +82,12 @@ struct AccountDetailView: View {
                         .buttonStyle(.plain)
                     }
                 }
-            } header: {
+            } header: { ThemedSectionHeader {
                 Text(account.type.isSocialSecurity ? "缴存与提取（\(entries.count)）" : "收支与转账（\(entries.count)）")
-            }
+            } }
 
             if !account.note.isEmpty {
-                Section("备注") { Text(account.note) }
+                Section { Text(account.note) } header: { ThemedSectionHeader { Text("备注") } }
             }
         }
         .listStyle(.insetGrouped)
@@ -307,13 +307,13 @@ struct BalanceAdjustView: View {
                             .focused($focused)
                     }
                     TextField("备注（可选）", text: $note)
-                } footer: {
+                } footer: { ThemedSectionFooter {
                     if let delta, abs(delta) >= 0.005 {
                         Text("将生成一笔 \(delta > 0 ? "+" : "")\(Money.format(delta)) 的「余额校准」记录，不计入收支统计和预算。")
                     } else {
                         Text("输入银行 App / 支付宝等显示的真实\(liability ? "欠款" : "余额")，差额会记为一笔校准，不影响收支统计。")
                     }
-                }
+                } }
             }
             .navigationTitle("余额校准")
             .navigationBarTitleDisplayMode(.inline)

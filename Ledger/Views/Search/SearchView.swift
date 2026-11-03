@@ -96,12 +96,12 @@ struct SearchView: View {
                         .keyboardType(.decimalPad)
                         .multilineTextAlignment(.center)
                 }
-            } header: {
+            } header: { ThemedSectionHeader {
                 Text("筛选")
-            } footer: {
+            } } footer: { ThemedSectionFooter {
                 // 2.0 (16)：明细页默认只显示本月，搜索不受影响
                 Text(useDateRange ? "只搜索所选日期内的记录。" : "搜索全部日期的记录，不受明细页日期范围的影响。")
-            }
+            } }
 
             Section {
                 if results.isEmpty {
@@ -112,10 +112,10 @@ struct SearchView: View {
                             .onTapGesture { editing = r }
                     }
                 }
-            } header: {
+            } header: { ThemedSectionHeader {
                 Text("共 \(results.count) 笔 · 支出 \(Money.format(expense)) · 收入 \(Money.format(income))")
                     .textCase(nil)
-            }
+            } }
         }
         .navigationTitle("搜索")
         .navigationBarTitleDisplayMode(.inline)

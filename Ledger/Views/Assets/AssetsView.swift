@@ -93,11 +93,11 @@ struct AssetsView: View {
 
                     let trend = netWorthTrend(included)
                     if trend.count > 1 {
-                        Section("净资产趋势") {
+                        Section {
                             NetWorthChart(points: trend, hidden: hideAmounts)
                                 .frame(height: 170)
                                 .padding(.vertical, 6)
-                        }
+                        } header: { ThemedSectionHeader { Text("净资产趋势") } }
                     }
                 }
 
@@ -204,7 +204,7 @@ struct AssetsView: View {
             ForEach(group.accounts) { a in
                 accountRow(a, balances: balances)
             }
-        } header: {
+        } header: { ThemedSectionHeader {
             HStack {
                 Text(group.type.isLiability ? "负债 · \(group.type.title)" : group.type.title)
                 Spacer()
@@ -214,7 +214,7 @@ struct AssetsView: View {
             }
             .font(.ui(.caption))
             .textCase(nil)
-        }
+        } }
     }
 
     /// 公积金与社保：多种类型合在一个分组
@@ -224,7 +224,7 @@ struct AssetsView: View {
             ForEach(list) { a in
                 accountRow(a, balances: balances)
             }
-        } header: {
+        } header: { ThemedSectionHeader {
             HStack {
                 Label("公积金与社保", systemImage: "building.columns")
                 Spacer()
@@ -232,11 +232,11 @@ struct AssetsView: View {
             }
             .font(.ui(.caption))
             .textCase(nil)
-        } footer: {
+        } } footer: { ThemedSectionFooter {
             if list.contains(where: { !$0.includeInNetWorth }) {
                 Text("标 ⊖ 的账户（如养老保险个人账户）退休前不能领取，不计入净资产。")
             }
-        }
+        } }
     }
 
     /// 账户行：点按进入详情，左滑编辑，长按快捷菜单
@@ -349,6 +349,76 @@ struct NetWorthCard: View {
     }
 
     var body: some View {
+        if theme.isReceipt { receiptBody } else { defaultBody }
+    }
+
+    /// 3.5 (26) 小票皮肤净资产卡：与首页汇总卡同一套 hero 版式（标签 / 大数字 / 两列 / 点引线 / 细条）
+    private var receiptBody: some View {
+        VStack(alignment: .leading, spacing: ReceiptStyle.Space.m) {
+            HStack(alignment: .center, spacing: ReceiptStyle.Space.xs) {
+                ReceiptLabelText(text: "净资产", color: theme.faint)
+                Button {
+                    withAnimation { hidden.toggle() }
+                } label: {
+                    Image(systemName: hidden ? "eye.slash" : "eye")
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundStyle(theme.faint)
+                        .frame(width: 28, height: 28)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(hidden ? "显示金额" : "隐藏金额")
+                Spacer()
+                Image(systemName: "wallet.pass")
+                    .font(.system(size: 14, weight: .regular))
+                    .foregroundStyle(theme.faint)
+            }
+            Text(Money.masked(netWorth, hidden: hidden))
+                .font(theme.heroAmountFont)
+                .monospacedDigit()
+                .foregroundStyle(theme.ink)
+                .lineLimit(1)
+                .minimumScaleFactor(0.5)
+                .contentTransition(.numericText())
+            ThemedDashedRule()
+            HStack(alignment: .top) {
+                StatBlock(title: "总资产", value: Money.masked(assets, hidden: hidden))
+                Spacer()
+                StatBlock(title: "总负债", value: Money.masked(liabilities, hidden: hidden), alignment: .trailing)
+            }
+            if let disposable {
+                HStack(alignment: .firstTextBaseline, spacing: ReceiptStyle.Space.xs) {
+                    Text("可支配资产").font(theme.metaFont).foregroundStyle(theme.faint)
+                    DotLeader(color: theme.rule)
+                    Text(Money.masked(disposable, hidden: hidden))
+                        .font(theme.metaFont).monospacedDigit()
+                        .foregroundStyle(theme.ink)
+                }
+                .lineLimit(1)
+                .accessibilityElement(children: .combine)
+                .accessibilityHint("不含公积金与社保")
+            }
+            if assets > 0 && !hidden {
+                let ratio = min(max(liabilities / assets, 0), 1)
+                VStack(alignment: .leading, spacing: ReceiptStyle.Space.xs) {
+                    HStack(alignment: .firstTextBaseline) {
+                        ReceiptLabelText(text: "负债率", color: theme.faint)
+                        Spacer()
+                        Text(String(format: "%.1f%%", liabilities / assets * 100))
+                            .font(theme.metaFont).monospacedDigit()
+                            .foregroundStyle(theme.ink)
+                    }
+                    ReceiptBar(ratio: ratio, fill: theme.accent, track: theme.rule.opacity(0.6))
+                }
+            }
+        }
+        .padding(.horizontal, ReceiptStyle.Space.l - 4)
+        .padding(.vertical, ReceiptStyle.Space.m)
+        .receiptSurface(theme, hero: true)
+        .padding(.vertical, 4)
+    }
+
+    private var defaultBody: some View {
         VStack(alignment: .leading, spacing: 16) {
             HStack {
                 Text("净资产")
@@ -428,19 +498,22 @@ struct NetWorthCard: View {
 struct NetWorthChart: View {
     let points: [AssetsView.NetWorthPoint]
     let hidden: Bool
+    @Environment(\.appTheme) private var theme
+    /// 3.5 (26) 小票皮肤：折线用墨色，不用系统紫
+    private var lineColor: Color { theme.isReceipt ? theme.ink : Color(hex: "#5E5CE6") }
 
     var body: some View {
         Chart(points) { p in
             AreaMark(x: .value("月份", p.date, unit: .month), y: .value("净资产", p.value))
-                .foregroundStyle(LinearGradient(colors: [Color(hex: "#5E5CE6").opacity(0.35), Color(hex: "#5E5CE6").opacity(0.02)],
+                .foregroundStyle(LinearGradient(colors: [lineColor.opacity(theme.isReceipt ? 0.12 : 0.35), lineColor.opacity(0.02)],
                                                 startPoint: .top, endPoint: .bottom))
                 .interpolationMethod(.catmullRom)
             LineMark(x: .value("月份", p.date, unit: .month), y: .value("净资产", p.value))
-                .foregroundStyle(Color(hex: "#5E5CE6"))
-                .lineStyle(StrokeStyle(lineWidth: 2.5))
+                .foregroundStyle(lineColor)
+                .lineStyle(StrokeStyle(lineWidth: theme.isReceipt ? 1.5 : 2.5))
                 .interpolationMethod(.catmullRom)
             PointMark(x: .value("月份", p.date, unit: .month), y: .value("净资产", p.value))
-                .foregroundStyle(Color(hex: "#5E5CE6"))
+                .foregroundStyle(lineColor)
                 .symbolSize(24)
         }
         .chartYAxis {
@@ -526,9 +599,20 @@ struct AccountRow: View {
 struct CreditUsageBar: View {
     let used: Double
     let limit: Double
+    @Environment(\.appTheme) private var theme
 
+    @ViewBuilder
     var body: some View {
         let ratio = limit > 0 ? min(max(used / limit, 0), 1) : 0
+        if theme.isReceipt {
+            // 3.5 (26) 小票皮肤：细条 + 降饱和状态色
+            ReceiptBar(ratio: ratio, fill: ratio > 0.8 ? theme.accent : theme.caution, track: theme.rule.opacity(0.6))
+        } else {
+            defaultBar(ratio)
+        }
+    }
+
+    private func defaultBar(_ ratio: Double) -> some View {
         GeometryReader { geo in
             ZStack(alignment: .leading) {
                 Capsule().fill(Color.secondary.opacity(0.15))
