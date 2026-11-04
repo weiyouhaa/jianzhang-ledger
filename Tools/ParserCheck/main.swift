@@ -763,5 +763,38 @@ do {
     expect(CaptureTime.parseMetadataDate("abc", timeZone: hk) == nil, "2.0(19) 非日期文本")
 }
 
+
+// 3.6 (27) 优惠 / 活动文字不能当标题（全部为合成数据）
+do {
+    check("3.6 微信：会员价行在金额上方", ["支付成功", "示例面包坊", "会员专享价 立享优惠", "¥28.00", "已优惠 ¥2.00", "支付方式 零钱", "完成"],
+          amount: 28, merchant: "示例面包坊")
+    check("3.6 微信：返现红包 / 去使用", ["示例书店", "返现红包 去使用", "¥45.00", "支付方式 零钱"], amount: 45, merchant: "示例书店")
+    check("3.6 微信：满减活动行", ["支付成功", "示例超市", "满30减5 微信支付活动", "¥45.00", "支付方式 零钱"], amount: 45, merchant: "示例超市")
+    check("3.6 微信：领取优惠券行", ["示例茶饮", "领取优惠券 下次可用", "¥16.00"], amount: 16, merchant: "示例茶饮")
+    check("3.6 打折行", ["示例眼镜店", "全场8折", "¥120.00"], amount: 120, merchant: "示例眼镜店")
+    check("3.6 积分行", ["示例便利店", "本单获得积分", "¥9.90"], amount: 9.9, merchant: "示例便利店")
+    check("3.6 支付宝：消费红包抵扣", ["账单详情", "示例水果铺", "消费红包抵扣", "-36.80", "交易成功", "优惠 -3.20", "支付时间 2026-10-17 12:10:00"],
+          amount: 36.8, merchant: "示例水果铺", date: "2026-10-17 12:10")
+    check("3.6 支付宝：随机立减行在商户上方", ["账单详情", "支付宝随机立减", "示例洗衣店", "-18.00", "交易成功"], amount: 18, merchant: "示例洗衣店")
+    check("3.6 标签：商户 / 商品说明优先", ["支付成功", "限时特惠 立减2元", "¥30.00", "商户 示例花店", "商品说明 示例花束"], amount: 30, merchant: "示例花店")
+    check("3.6 英文：Merchant 标签", ["Payment Successful", "Coupon applied", "$18.00", "Merchant Sample Bakery", "Discount -$2.00"],
+          amount: 18, merchant: "Sample Bakery")
+    check("3.6 英文：Save / cashback 行", ["Sample Bookshop", "Save $2 with cashback reward", "$25.00", "Payment Method Balance"],
+          amount: 25, merchant: "Sample Bookshop")
+    check("3.6 英文：10% off promo", ["Sample Diner", "Promo 10% OFF", "$40.00"], amount: 40, merchant: "Sample Diner")
+    check("3.6 实付不取优惠金额", ["示例超市", "立减", "-¥5.00", "实付 ¥45.00"], amount: 45, merchant: "示例超市")
+    // 优惠可以进备注，但不能是标题；备注金额不能是实付金额
+    let p1 = ReceiptParser.parse(lines: ["支付成功", "示例面包坊", "会员专享价 立享优惠", "¥28.00", "已优惠 ¥2.00"], now: now, calendar: cal)
+    if p1.discountNote == "优惠 2.00" { print("✅ 3.6 优惠进备注：\(p1.discountNote!)") }
+    else { failures += 1; print("❌ 3.6 优惠进备注：\(p1.discountNote ?? "nil")") }
+    let promo = ["满30减5", "已优惠¥2", "随机立减", "领取红包", "去使用", "会员价", "本单返现", "积分抵扣", "全场8折", "8.5折", "微信支付活动",
+                 "Coupon", "Cashback", "Save $2", "10% off", "Promo code", "Rewards points", "Discount"]
+    let fine = ["示例折耳根小馆", "示例书店", "Sample Coffee", "Office Depot", "示例券商营业部", "示例积木乐园", "Saveur Bistro"]
+    let badPromo = promo.filter { !ReceiptParser.isPromoText($0) }
+    let badFine = fine.filter { ReceiptParser.isPromoText($0) }
+    if badPromo.isEmpty && badFine.isEmpty { print("✅ 3.6 isPromoText：\(promo.count) 条优惠识别、\(fine.count) 个商户不误伤") }
+    else { failures += 1; print("❌ 3.6 isPromoText 漏判 \(badPromo) 误判 \(badFine)") }
+}
+
 print(failures == 0 ? "ALL PASSED" : "\(failures) FAILED")
 exit(failures == 0 ? 0 : 1)

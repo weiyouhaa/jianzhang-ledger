@@ -433,7 +433,7 @@ enum ReceiptParser {
             if platformNames.contains(above), let m = result.merchant, m != above { platform = above }
         }
         if let m = result.merchant, platformNames.contains(m) { platform = nil }
-        let notes = [platform, discountNote(lines: lines)].compactMap { $0 }
+        let notes = [platform, discountNote(lines: lines, paid: result.amount)].compactMap { $0 }
         result.discountNote = notes.isEmpty ? nil : notes.joined(separator: " · ")
         // 英文界面（Repay:CMB Credit card 等）先转成中文再找账户线索 / 还款
         let hintText = EnglishBankTerms.localize(fullText)
@@ -546,7 +546,10 @@ enum ReceiptParser {
     static let weakKeywords = ["金额", "价格", "消费", "支出", "付款", "支付", "交易", "扣款", "收款", "到账", "人民币"]
     static let negativeKeywords = ["优惠", "折扣", "立减", "减免", "抵扣", "积分", "余额", "可用", "限额", "额度",
                                    "原价", "运费", "配送费", "包装费", "手续费", "找零", "返现", "券", "满", "单价",
-                                   "数量", "已省", "节省", "共省"]
+                                   "数量", "已省", "节省", "共省",
+                                   // 3.6 (27) 英文优惠行：「Discount -$2.00」「Coupon -$1」不是实付
+                                   "Discount", "discount", "DISCOUNT", "Coupon", "coupon", "Voucher", "voucher", "Cashback", "cashback",
+                                   "Promo", "promo", "Reward", "reward", "Points", "points", "Saved", "saved", "Savings", "savings"]
     static let countSuffixes: Set<Character> = ["件", "个", "次", "份", "张", "笔", "位", "人", "天", "期", "号", "楼", "室", "%", "折", "斤", "克", "g", "G", "k", "K", "m", "M"]
 
     private static let amountPattern = try! NSRegularExpression(
@@ -635,11 +638,13 @@ enum ReceiptParser {
                     if strongKeywords.contains(where: { prev.contains($0) }) { score += 45; hasKeyword = true }
                     else if orderKeywords.contains(where: { prev.contains($0) }) { score += 22; hasKeyword = true }
                     else if weakKeywords.contains(where: { prev.contains($0) }) { score += 20; hasKeyword = true }
-                    if negativeKeywords.contains(where: { prev.contains($0) }) { score -= 55 }
+                    if negativeKeywords.contains(where: { prev.contains($0) }) { score -= isBareLabel(prev, negativeKeywords) ? 55 : 15 }
                 }
                 // 只看紧邻金额前面的一小段做负向判断，避免整行误伤
                 let nearLabel = String(label.suffix(8))
-                if negativeKeywords.contains(where: { nearLabel.contains($0) }) { score -= 55 }
+                // 英文词更长：「Discount -$2.00」看紧邻前 16 个字符（3.6）
+                let nearLabelWide = String(label.suffix(16))
+                if negativeKeywords.contains(where: { nearLabel.contains($0) || ($0.first?.isASCII == true && nearLabelWide.contains($0)) }) { score -= 55 }
 
                 if hasCurrency { score += 30 }
                 if decPart.count == 3 { score += 20 } else if decPart.count == 2 { score += 10 }
@@ -675,6 +680,15 @@ enum ReceiptParser {
         return all
     }
 
+
+    /// 上一行是不是纯标签（「立减」「优惠：」「Discount」）。「会员专享价 立享优惠」「Coupon applied」这种
+    /// 营销句子压在大字实付上方时只轻罚，不能让下面的优惠金额反超实付（3.6）
+    static func isBareLabel(_ line: String, _ keywords: [String]) -> Bool {
+        var rest = line
+        for k in keywords.sorted(by: { $0.count > $1.count }) { rest = rest.replacingOccurrences(of: k, with: "") }
+        rest = rest.trimmingCharacters(in: CharacterSet.whitespaces.union(CharacterSet(charactersIn: ":：-—")))
+        return rest.count <= 2
+    }
 
     /// 同时出现「订单金额 / 应付」与带符号整行金额（或实付）且差额≈优惠时，抬高实付候选
     private static func preferActualPaid(_ candidates: inout [AmountCandidate], lines: [String]) {
@@ -722,7 +736,8 @@ enum ReceiptParser {
     }
 
     /// 「优惠信息 / 满2随机立减 -¥0.04」→「随机立减 0.04」
-    static func discountNote(lines: [String]) -> String? {
+    /// paid：已选定的实付金额。「立享优惠 / ¥28.00 / 已优惠 ¥2.00」里优惠后面紧跟的大字实付不能当优惠金额（3.6）
+    static func discountNote(lines: [String], paid: Double? = nil) -> String? {
         let join = lines.joined(separator: " ")
         guard join.contains("优惠") || join.contains("立减") || join.contains("满减") || join.contains("折扣") else { return nil }
         let specs: [(String, String)] = [
@@ -734,11 +749,11 @@ enum ReceiptParser {
         for (pat, label) in specs {
             guard let re = try? NSRegularExpression(pattern: pat) else { continue }
             let ns = join as NSString
-            if let m = re.firstMatch(in: join, range: NSRange(location: 0, length: ns.length)), m.numberOfRanges > 1 {
+            for m in re.matches(in: join, range: NSRange(location: 0, length: ns.length)) where m.numberOfRanges > 1 {
                 let amt = ns.substring(with: m.range(at: 1))
-                if let v = Double(amt), v > 0, v < 10_000 {
-                    return "\(label) \(amt)"
-                }
+                guard let v = Double(amt), v > 0, v < 10_000 else { continue }
+                if let paid, abs(v - paid) < 0.001 { continue }
+                return "\(label) \(amt)"
             }
         }
         return nil
@@ -747,8 +762,11 @@ enum ReceiptParser {
     // MARK: - 商户
 
     static let merchantKeywords = ["商户全称", "商户名称", "交易对象", "商家名称", "收款方全称", "收款商户", "收款方", "收款人",
-                                   "交易对方", "对方账户", "对方户名", "付款方", "付款人", "商品说明", "商品名称", "付款给", "转账给",
-                                   "店铺名称", "门店名称", "商户", "商家", "店铺", "门店", "对方"]
+                                   "交易对方", "对方账户", "对方户名", "付款方", "付款人", "付款给", "转账给",
+                                   "店铺名称", "门店名称", "商户", "商家", "店铺", "门店", "对方",
+                                   // 3.6 (27)：商户 / 收款方标签优先于商品说明（同屏都有时标题取商户）
+                                   "商品说明", "商品名称", "商品",
+                                   "Merchant Name", "Merchant", "Payee", "Paid to", "Pay to", "Recipient", "Store"]
     static let merchantBlacklist = ["支付成功", "付款成功", "交易成功", "支付完成", "账单详情", "交易详情", "完成",
                                     "当前状态", "返回", "已支付", "订单详情", "转账成功", "收款成功", "收款到账",
                                     "已收款", "数量", "单价", "金额", "合计", "实付", "支付方式", "付款方式",
@@ -871,9 +889,28 @@ enum ReceiptParser {
                                                 "customer service", "contact merchant", "need help", "view all", "all", "filter", "search",
                                                 "successful", "success", "completed", "paid", "pending", "cny", "rmb"]
 
+    /// 3.6 (27) 优惠 / 活动 / 营销文字：不能当标题（商户），只可进备注。
+    /// 「满30减5」「已优惠¥2」「随机立减」「领取红包」「去使用」「会员价」「全场8折」「Save $2」「10% off」「Coupon」…
+    /// 避免误伤：「折耳根」（折前面不是数字 / 打）、「证券 / 券商」、「Saveur」「Office」（英文按整词）。
+    private static let promoPatterns: [NSRegularExpression] = [
+        #"满\s*\d+(?:\.\d+)?\s*元?\s*(?:减|可用|使用|立减|随机|享|送|返)"#,
+        #"立减|已优惠|优惠|满减|减免|抵扣|折扣|返现|返利|返券|积分|会员价|会员专享|会员日|专享价|领取|领券|去使用|立即使用|马上使用|下次可用|立享|特惠|特价|限时|福利|奖励金|已省|节省|共省|赠送|抽奖|新人专享|红包|代金券|优惠券|活动|权益"#,
+        #"(?<!证)券(?!商)"#,
+        #"\d+(?:\.\d)?\s*折|打\s*折|折后|折起"#,
+        #"(?i)\b(?:discounts?|coupons?|vouchers?|cash\s?back|promo(?:tion)?s?|promo\s+code|rewards?|points|bonus|savings?|save|off|deal|gift\s+card)\b"#,
+        #"(?i)\d+\s*%\s*off"#,
+    ].map { try! NSRegularExpression(pattern: $0) }
+
+    static func isPromoText(_ s: String) -> Bool {
+        let ns = s as NSString
+        let range = NSRange(location: 0, length: ns.length)
+        return promoPatterns.contains { $0.firstMatch(in: s, range: range) != nil }
+    }
+
     static func isPlausibleMerchant(_ s: String) -> Bool {
         guard s.count >= 2, s.count <= 30 else { return false }
         if merchantBlacklist.contains(where: { s.contains($0) }) { return false }
+        if isPromoText(s) { return false }
         if englishBlacklist.contains(s.lowercased()) { return false }
         if s.hasPrefix("收到转账") || s.hasPrefix("收到红包") || s == "红包" || s == "转账" || s == "退款" || s == "全部账单" { return false }
         if ["余额", "账户余额", "零钱", "零钱通", "余额宝", "花呗", "微信支付", "支付宝"].contains(s) { return false }

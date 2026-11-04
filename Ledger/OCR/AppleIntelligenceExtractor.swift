@@ -92,7 +92,7 @@ struct AIReceiptTransaction {
     var amount: Double
     @Guide(description: "类型", .anyOf(["expense", "income", "transfer", "repay"]))
     var kind: String
-    @Guide(description: "商户或对方")
+    @Guide(description: "商户、收款方或商品名称；不能是满减、立减、优惠券、红包、返现、积分、折扣等优惠活动文字")
     var merchant: String?
     @Guide(description: "分类名")
     var category: String?

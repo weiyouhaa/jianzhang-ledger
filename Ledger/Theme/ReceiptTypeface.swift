@@ -6,20 +6,34 @@ import UIKit
 #endif
 
 // 3.2 (23) 小票皮肤字体（只依赖 SwiftUI + CoreText，CI 在 macOS 上渲染预览时也能用）。
-// - 大标题：Special Elite（Apache 2.0，做旧打字机，接近参考图「Receipt Atlas / RECEIPT」）
-// - 正文 / 数字：Courier Prime（SIL OFL 1.1，干净的打字机等宽）
-// - 中文：两款字体都没有中文字形，用 CoreText 级联（cascade list）回落到宋体（有铅字感）；
-//   设备上没有宋体时 CoreText 继续回落到系统中文字体（苹方）。
+// - 大标题 / 粗体数字：Special Elite（Apache 2.0，做旧打字机，与参考图「Receipt Atlas / RECEIPT」同款）
+// - 正文：Courier Prime（SIL OFL 1.1，干净的打字机等宽）
+// - 中文：3.6 (27) 起打包「思源宋体」同源的 Noto Serif SC（SIL OFL 1.1）子集，改名为 JZ Noto Serif SC，
+//   常规 / 粗体两档，收录 GB2312 全部 + App 内所有中文 + 全角标点。两款拉丁字体都没有中文字形，
+//   用 CoreText 级联（cascade list）回落：打包宋体 → 系统宋体（有的话）→ 系统中文字体（苹方）。
+//   子集外的生僻字（比如商户名）自动走后两级回落，不会出现方框。
 // 字体文件和许可证在 Ledger/Resources/Fonts/，Info.plist 的 UIAppFonts 注册。
 enum ReceiptTypeface {
     static let display = "SpecialElite-Regular"
     static let mono = "CourierPrime-Regular"
     static let monoBold = "CourierPrime-Bold"
-    static let fileNames = ["SpecialElite-Regular.ttf", "CourierPrime-Regular.ttf", "CourierPrime-Bold.ttf"]
+    static let fileNames = [
+        "SpecialElite-Regular.ttf", "CourierPrime-Regular.ttf", "CourierPrime-Bold.ttf",
+        "JZNotoSerifSC-Regular.ttf", "JZNotoSerifSC-Bold.ttf",
+    ]
 
-    /// 中文回落：宋体（常规 / 粗）
-    static let cjkSerif = "STSongti-SC-Regular"
-    static let cjkSerifBold = "STSongti-SC-Bold"
+    /// 中文：打包的宋体子集（常规 / 粗）
+    static let cjkSerif = "JZNotoSerifSC-Regular"
+    static let cjkSerifBold = "JZNotoSerifSC-Bold"
+    /// 打包字体缺字时的第二级回落：系统宋体（iOS 默认不带，macOS 预览渲染有）
+    static let systemSerif = "STSongti-SC-Regular"
+    static let systemSerifBold = "STSongti-SC-Bold"
+
+    /// 中文级联列表：只放确实已注册的字体（3.3 的空白标题就是级联到不存在的字体引起的），最后由系统补苹方
+    static func cjkCascadeNames(for name: String) -> [String] {
+        let regular = (name == mono)
+        return [regular ? cjkSerif : cjkSerifBold, regular ? systemSerif : systemSerifBold].filter(isAvailable)
+    }
 
     /// 打包字体加载失败时的兜底（系统自带 Courier New）
     private static func systemFallback(for name: String) -> String {
@@ -94,13 +108,19 @@ enum ReceiptTypeface {
         }
     }
 
-    /// UIKit 栏（导航栏 / 标签栏 / 分段控件）用：普通 UIFont，不带 CoreText 级联。
+    /// UIKit 栏（导航栏 / 标签栏 / 分段控件）用：UIFont + UIFontDescriptor 级联，不用桥接的 CTFont。
     /// 3.3 (24)：桥接的 CTFont（级联到 iOS 上并不存在的宋体）放进导航栏标题属性后，中文标题整段不绘制，
-    /// 「简账 / 统计 / 资产 / 设置」位置只剩空白。普通 UIFont 由系统自动回落到系统中文字体，能正常显示。
+    /// 「简账 / 统计 / 资产 / 设置」位置只剩空白。3.6 (27)：级联里只放已注册的打包宋体（isAvailable 校验过），
+    /// 用 UIKit 自己的 cascadeList 属性；打包宋体不可用时与 3.3 起的做法一样，交给系统回落到苹方。
     static func barFont(_ name: String, size: CGFloat) -> UIFont {
         let resolved = isAvailable(name) ? name : systemFallback(for: name)
-        return UIFont(name: resolved, size: size)
-            ?? .systemFont(ofSize: size, weight: name == mono ? .regular : .bold)
+        guard let base = UIFont(name: resolved, size: size) else {
+            return .systemFont(ofSize: size, weight: name == mono ? .regular : .bold)
+        }
+        let cascade = cjkCascadeNames(for: name).prefix(1).map { UIFontDescriptor(name: $0, size: size) }
+        guard !cascade.isEmpty else { return base }
+        let desc = base.fontDescriptor.addingAttributes([.cascadeList: Array(cascade)])
+        return UIFont(descriptor: desc, size: size)
     }
 
     /// 桥接的 CTFont（带宋体级联），只给需要 UIFont 的非栏位置用
@@ -119,7 +139,7 @@ enum ReceiptTypeface {
     }
     private static let cache = Cache()
 
-    /// 拉丁字母 / 数字用打字机字体，中文按级联列表回落到宋体
+    /// 拉丁字母 / 数字用打字机字体，中文按级联列表回落到打包宋体 → 系统宋体 → 苹方
     static func ctFont(_ name: String, size: CGFloat) -> CTFont {
         let key = "\(name)|\(size)"
         cache.lock.lock()
@@ -127,8 +147,7 @@ enum ReceiptTypeface {
         cache.lock.unlock()
 
         let resolved = isAvailable(name) ? name : systemFallback(for: name)
-        let cjk = (name == mono) ? cjkSerif : cjkSerifBold
-        let cascade = [CTFontDescriptorCreateWithNameAndSize(cjk as CFString, size)]
+        let cascade = cjkCascadeNames(for: name).map { CTFontDescriptorCreateWithNameAndSize($0 as CFString, size) }
         let attrs: [CFString: Any] = [
             kCTFontNameAttribute: resolved,
             kCTFontCascadeListAttribute: cascade,

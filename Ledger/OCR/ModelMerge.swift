@@ -221,6 +221,9 @@ enum ModelMerge {
         if ReceiptParser.platformNames.contains(merchant) {
             if let rm = ruleMatch?.merchant, !rm.isEmpty { platform = merchant; merchant = "" }
         }
+        // 3.6 (27)：模型把「满30减5」「已优惠¥2」「Save $2」等优惠 / 活动文字当成商户 → 用规则的商户；
+        // 优惠只进备注，不能当标题
+        if !merchant.isEmpty, ReceiptParser.isPromoText(merchant) { merchant = "" }
         r.merchant = merchant.isEmpty ? ruleMatch?.merchant : merchant
         r.discountNote = ruleMatch?.discountNote
         if let p = platform, !(r.discountNote ?? "").contains(p) {

@@ -39,6 +39,8 @@
 		<string>SpecialElite-Regular.ttf</string>
 		<string>CourierPrime-Regular.ttf</string>
 		<string>CourierPrime-Bold.ttf</string>
+		<string>JZNotoSerifSC-Regular.ttf</string>
+		<string>JZNotoSerifSC-Bold.ttf</string>
 	</array>
 	<key>UIApplicationSceneManifest</key>
 	<dict>

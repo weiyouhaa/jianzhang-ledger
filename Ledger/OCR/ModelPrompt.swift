@@ -181,6 +181,7 @@ enum ModelPromptBuilder {
         var s = """
         你是记账助手，从支付截图的 OCR 文字提取交易。
         - amount：实际支付金额（大字 / 带 ± 的金额 / 实付 / Actual Payment / Paid），取正数，不得计算；有订单金额与实付时取实付；忽略余额、额度、优惠立减、积分、广告、单号、卡号；优惠不要记成另一笔。
+        - merchant：商户/收款方/对方名称或商品（优先「商户」「商家」「收款方」「对方」「商品说明」「Merchant」「Payee」后面的文字，或大字金额旁的店名）；绝不能是优惠/活动文字（满减、立减、已优惠、优惠券、红包、抵扣、折扣、返现、积分、会员价、领取、去使用、discount、coupon、cashback、save、off、promo、reward、points），没有就留空。
         - kind：付款/消费/支付成功/转给他人=expense；收款/到账=income；退款=income 且 refund=true；信用卡/花呗还款=repay；余额宝/零钱通转入转出、充值、提现、自己账户互转=transfer。
         - 还款/转账：from=付款账户，to=被还款卡或收款账户，fromTail/toTail=对应卡号末 4 位，banks=截图中的银行；要同银行同卡种，不确定就留空。
         - 多笔按从上到下各输出一次。★ 表示大字。没有的字段留空。

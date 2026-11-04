@@ -513,5 +513,21 @@ let t19b = mergeWith(["9:00", "支付成功", "示例小店", "-¥18.00"], [Mode
                                               categoryName: "餐饮", accountHint: "微信", dateText: "今天 23:00")])
 check(t19b.receipts.first?.date == nil, "2.0(19) 晚于截图的「今天 23:00」不当交易时间（\(fmt(t19b.receipts.first?.date))）")
 
+
+// 3.6 (27)：模型把优惠 / 活动文字当商户 → 回退规则商户（合成数据）
+let promoLines = ["支付成功", "示例面包坊", "会员专享价 立享优惠", "¥28.00", "已优惠 ¥2.00", "支付方式 零钱"]
+let promoRules = ReceiptParser.parseAll(lines: promoLines, now: now, calendar: cal)
+for bad in ["会员专享价 立享优惠", "已优惠¥2.00", "满30减5", "Save $2 with coupon"] {
+    let o = ModelMerge.merge(model: [ModelTransaction(amount: 28, kind: "expense", merchant: bad, categoryName: "餐饮", accountHint: "微信")],
+                             rules: promoRules, ctx: ctx(promoLines))
+    check(o.receipts.first?.merchant == "示例面包坊" && o.receipts.first?.amount == 28,
+          "3.6 模型标题「\(bad)」是优惠文字 → 用规则商户（\(o.receipts.first?.merchant ?? "nil")）")
+}
+let okModel = ModelMerge.merge(model: [ModelTransaction(amount: 28, kind: "expense", merchant: "示例面包坊", categoryName: "餐饮")],
+                               rules: promoRules, ctx: ctx(promoLines))
+check(okModel.receipts.first?.merchant == "示例面包坊", "3.6 正常商户保持模型结果")
+check(ModelPromptBuilder.instructions(expenseCategories: expenseCats, incomeCategories: incomeCats, accounts: accounts, level: .normal).contains("绝不能是优惠"),
+      "3.6 指令要求 merchant 不能是优惠文字")
+
 print(failures == 0 ? "ALL PASSED" : "\(failures) FAILED")
 exit(failures == 0 ? 0 : 1)
