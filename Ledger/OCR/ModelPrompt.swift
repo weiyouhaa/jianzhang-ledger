@@ -181,8 +181,8 @@ enum ModelPromptBuilder {
         var s = """
         你是记账助手，从支付截图的 OCR 文字提取交易。
         - amount：实际支付金额（大字 / 带 ± 的金额 / 实付 / Actual Payment / Paid），取正数，不得计算；有订单金额与实付时取实付；忽略余额、额度、优惠立减、积分、广告、单号、卡号；优惠不要记成另一笔。
-        - merchant：商户/收款方/对方名称或商品（优先「商户」「商家」「收款方」「对方」「商品说明」「Merchant」「Payee」后面的文字，或大字金额旁的店名）；绝不能是优惠/活动文字（满减、立减、已优惠、优惠券、红包、抵扣、折扣、返现、积分、会员价、领取、去使用、discount、coupon、cashback、save、off、promo、reward、points），没有就留空。
-        - kind：付款/消费/支付成功/转给他人=expense；收款/到账=income；退款=income 且 refund=true；信用卡/花呗还款=repay；余额宝/零钱通转入转出、充值、提现、自己账户互转=transfer。
+        - merchant：商户/收款方/对方名称或商品（优先「商户」「商家」「收款方」「对方」「商品说明」「Merchant」「Payee」后面的文字，或大字金额旁的店名）；绝不能是优惠/活动文字（满减、立减、已优惠、优惠券、红包、抵扣、折扣、返现、积分、会员价、领取、去使用、discount、coupon、cashback、save、off、promo、reward、points），没有就留空；也不能是这类行的一部分（如「碰一下立减」里的「碰一下」）或 Bonus/积分行；双栏详情页里优惠行的名字（左栏红字）只进备注。
+        - kind：付款/消费/支付成功/转给他人=expense；收款/到账=income；退款/退货/退回/撤销/冲正/返还/refund/reversal=income 且 refund=true；信用卡/花呗还款=repay；余额宝/零钱通转入转出、充值、提现、自己账户互转=transfer。
         - 还款/转账：from=付款账户，to=被还款卡或收款账户，fromTail/toTail=对应卡号末 4 位，banks=截图中的银行；要同银行同卡种，不确定就留空。
         - 多笔按从上到下各输出一次。★ 表示大字。没有的字段留空。
         """
@@ -198,7 +198,7 @@ enum ModelPromptBuilder {
     static func glossary(for screen: PaymentScreen, level: PromptLevel) -> String? {
         switch screen.layout {
         case .bankPush:
-            var s = "银行公众号推送：每张「交易提醒」卡片各一笔；amount=交易金额 人民币X元；merchant=商户名称（去掉「美团-」等平台前缀）；date=交易时间；account=标题里的银行+卡种+尾号；交易类型 消费=expense，退货/退款=income 且 refund=true，还款=repay。"
+            var s = "银行公众号推送：每张「交易提醒」「交易成功提醒」卡片各一笔（两张卡片=两笔，不要合并）；可用额度/余额不是金额；amount=交易金额 人民币X元；merchant=商户名称（去掉「美团-」等平台前缀）；date=交易时间；account=标题里的银行+卡种+尾号；交易类型 消费=expense，退货/退款=income 且 refund=true，还款=repay。"
             if level != .minimal { s += "顶部横幅、菜单（含「还款福利」）、日期分隔不是交易。" }
             return s
         case .chatTransfer:
@@ -220,7 +220,7 @@ enum ModelPromptBuilder {
         if screen.app == .wechat {
             s = "微信英文：Paid/Payment Successful/Transfer/Pending=expense；Received/Deposited/Red Packet from=income（红包）；Refund/Refunded=income 且 refund=true；Balance=零钱，Mini Fund=零钱通；Top-up/Withdraw/Mini Fund 转入转出=transfer；Payee/Merchant=商户；Payment Method=付款账户；有 Order Amount 与大字实付时取实付。"
         } else {
-            s = "支付宝英文：金额带-或 Paid=expense；带+或 Received=income；Refund=income 且 refund=true；Huabei=花呗，Balance=余额，Yu'e Bao=余额宝；Top Up/Withdraw/Yu'e Bao 转入转出=transfer；Payment Method/Pay with=付款账户；有 Order Amount 与实付时取实付。"
+            s = "支付宝英文：金额带-或 Paid=expense；带+或 Received=income；Refund=income 且 refund=true；Huabei=花呗，Balance=余额，Yu'e Bao=余额宝；Top Up/Withdraw/Yu'e Bao 转入转出=transfer；Payment Method/Pay with=付款账户；有 Order Amount/Order total 与实付时取大字实付；Transaction Details 页 merchant=大字金额上方的店名（其次 Item description / Full name of merchant），Order total 下的「xx立减 -0.20」是优惠，Bonus 行忽略。"
         }
         s += "Order No./Transaction ID 是单号，不是金额或尾号。"
         if level != .minimal {

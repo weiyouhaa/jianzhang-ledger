@@ -189,13 +189,13 @@ enum ModelMerge {
         let localizedText = EnglishBankTerms.localize(ctx.lines.map { EnglishBankTerms.splitGlued(ReceiptParser.stripNoise($0)) }.joined(separator: " "))
         let layout = ScreenLayouts.detect(ctx.lines)
         // 原文明确是信用卡还款（还款 + 信用卡 / 银行），模型却判为普通支出：按还款处理（截图证据优先于模型的分类）
-        if kind == "expense", !t.isRefund,
+        if kind == "expense", !t.isRefund, ruleMatch?.isRefund != true,
            ruleMatch?.isCardRepayment == true || RepaymentDetector.isCardRepayment(text: localizedText) {
             kind = "cardrepayment"
             trace("model-kind", "模型判为支出，原文是信用卡还款 → 改为还款")
         }
         // 自己账户间转账（充值 / 提现 / 余额宝）：规则已认出时以规则的转出 / 转入为准
-        if kind != "income", kind != "cardrepayment", !t.isRefund, let rule = ruleMatch, rule.isSelfTransfer {
+        if kind != "income", kind != "cardrepayment", !t.isRefund, ruleMatch?.isRefund != true, let rule = ruleMatch, rule.isSelfTransfer {
             if kind != "transfer" { trace("model-kind", "模型判为\(kind == "expense" ? "支出" : "其他")，原文是账户间转账 → 改为转账") }
             r.isSelfTransfer = true
             r.isIncome = false
@@ -210,8 +210,12 @@ enum ModelMerge {
                ReceiptParser.isPlausible(d, reference: ctx.now) { r.date = d }
             return r
         }
-        r.isIncome = kind == "income" || t.isRefund
-        r.isCardRepayment = kind == "cardrepayment" && !t.isRefund
+        // 3.7 (28)：原文交易类型是退货 / 退款（规则已认出）→ 一定是收入，模型不能改回支出
+        let refund = t.isRefund || ruleMatch?.isRefund == true
+        if refund, kind != "income" { trace("model-kind", "原文是退货 / 退款 → 收入") }
+        r.isIncome = kind == "income" || refund
+        r.isRefund = refund
+        r.isCardRepayment = kind == "cardrepayment" && !refund
         // 模型给的文字字段限长，避免异常长输出进入后续处理
         var merchant = ReceiptParser.cleanMerchant(String(t.merchant.trimmingCharacters(in: .whitespacesAndNewlines).prefix(60)))
         // 「美团-示例牛肉饭」：平台进备注；模型只给了平台名（美团）时用规则的商户
@@ -223,7 +227,11 @@ enum ModelMerge {
         }
         // 3.6 (27)：模型把「满30减5」「已优惠¥2」「Save $2」等优惠 / 活动文字当成商户 → 用规则的商户；
         // 优惠只进备注，不能当标题
-        if !merchant.isEmpty, ReceiptParser.isPromoText(merchant) { merchant = "" }
+        // 3.7 (28)：还有只抄了优惠 / 奖励行一部分的（「碰一下」「立即领取6积分」）
+        if !merchant.isEmpty, ReceiptParser.isPromoFragment(merchant, lines: ctx.lines) {
+            trace("model-merchant", "模型标题是优惠 / 奖励文字 → 用规则商户")
+            merchant = ""
+        }
         r.merchant = merchant.isEmpty ? ruleMatch?.merchant : merchant
         r.discountNote = ruleMatch?.discountNote
         if let p = platform, !(r.discountNote ?? "").contains(p) {
@@ -272,8 +280,10 @@ enum ModelMerge {
             r.accountName = account
             r.accountHint = ruleMatch?.accountHint
             let pool = r.isIncome ? ctx.incomeCategories : ctx.categories.filter { !ctx.incomeCategories.contains($0) }
-            if t.isRefund, pool.contains("退款") {
+            if refund, pool.contains("退款") {
                 r.categoryName = "退款"
+            } else if refund {
+                r.categoryName = pool.contains("其他收入") ? "其他收入" : align("其他收入", to: pool)
             } else if let c = align(PlatformCategory.map(t.categoryName) ?? t.categoryName, to: pool) {
                 r.categoryName = c
             } else {

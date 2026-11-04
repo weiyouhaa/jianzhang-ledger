@@ -31,6 +31,8 @@ struct ParsedReceipt: Equatable {
     var transferNote: String?
     /// 优惠信息短备注（如「随机立减 0.04」），不另记一笔
     var discountNote: String?
+    /// 3.7 (28)：交易类型为退货 / 退款（收入；Apple 智能不能改回支出）
+    var isRefund: Bool = false
 }
 
 /// 识别引擎：Apple 智能（端侧模型抽取 + 校验）或本地规则
@@ -320,6 +322,12 @@ enum ReceiptParser {
         // 订单金额 / 优惠 / 交易时间等字段行不能自成一笔
         if screen.layout == .none, !segments.isEmpty, segments.count > 1 || segments[0].range != 0..<texts.count, DetailLabels.isDetailPage(texts, heroCount: Set(segments.flatMap(\.heroes)).count) {
             segments = [TransactionSegmenter.Segment(range: 0..<texts.count, heroes: segments.flatMap(\.heroes))]
+        }
+
+        // 3.7 (28)：银行公众号一屏多张卡片（两条「交易成功提醒」）→ 按卡片标题拆分，每张一笔
+        if screen.layout == .bankPush {
+            let cards = ScreenLayouts.bankPushCards(texts)
+            if cards.count >= 2 { segments = cards.map { TransactionSegmenter.Segment(range: $0, heroes: []) } }
         }
 
         var results: [ParsedReceipt] = []
@@ -737,6 +745,13 @@ enum ReceiptParser {
 
     /// 「优惠信息 / 满2随机立减 -¥0.04」→「随机立减 0.04」
     /// paid：已选定的实付金额。「立享优惠 / ¥28.00 / 已优惠 ¥2.00」里优惠后面紧跟的大字实付不能当优惠金额（3.6）
+    /// 3.7 (28)：退款 / 退货 / 撤销 / 冲正…（交易类型里出现即为收入）
+    static let refundWords = ["退货", "退款", "退回", "撤销", "冲正", "返还", "refund", "reversal", "returned"]
+    static func isRefundText(_ s: String) -> Bool {
+        let l = s.lowercased()
+        return refundWords.contains { l.contains($0) }
+    }
+
     static func discountNote(lines: [String], paid: Double? = nil) -> String? {
         let join = lines.joined(separator: " ")
         guard join.contains("优惠") || join.contains("立减") || join.contains("满减") || join.contains("折扣") else { return nil }
@@ -744,16 +759,19 @@ enum ReceiptParser {
             (#"云闪付立减\s*[:：]?\s*[¥￥\-]*\s*(\d+(?:\.\d{1,2})?)"#, "云闪付立减"),
             (#"随机立减\s*[:：]?\s*[¥￥\-]*\s*(\d+(?:\.\d{1,2})?)"#, "随机立减"),
             (#"满\d+(?:\.\d+)?(?:元)?(?:随机)?立减\s*[:：]?\s*[¥￥\-]*\s*(\d+(?:\.\d{1,2})?)"#, "随机立减"),
+            // 3.7 (28)：「碰一下立减 -0.20」等带名字的立减行：备注保留原标签
+            (#"([\p{Han}]{1,8}立减)\s*[:：]?\s*[¥￥\-−–]*\s*(\d+(?:\.\d{1,2})?)"#, "$1"),
             (#"(?:优惠|立减|满减|折扣)[^\d]{0,16}(\d+\.\d{1,2})"#, "优惠"),
         ]
         for (pat, label) in specs {
             guard let re = try? NSRegularExpression(pattern: pat) else { continue }
             let ns = join as NSString
             for m in re.matches(in: join, range: NSRange(location: 0, length: ns.length)) where m.numberOfRanges > 1 {
-                let amt = ns.substring(with: m.range(at: 1))
+                let named = label == "$1" && m.numberOfRanges > 2
+                let amt = ns.substring(with: m.range(at: named ? 2 : 1))
                 guard let v = Double(amt), v > 0, v < 10_000 else { continue }
                 if let paid, abs(v - paid) < 0.001 { continue }
-                return "\(label) \(amt)"
+                return "\(named ? ns.substring(with: m.range(at: 1)) : label) \(amt)"
             }
         }
         return nil
@@ -907,10 +925,28 @@ enum ReceiptParser {
         return promoPatterns.contains { $0.firstMatch(in: s, range: range) != nil }
     }
 
+    /// 3.7 (28)：积分 / 领取 等奖励行（「立即领取6积分」「Bonus」）不是商户
+    static func isBonusText(_ s: String) -> Bool {
+        let c = s.replacingOccurrences(of: " ", with: "")
+        if c.range(of: #"积分|立即领取|领取.{0,6}(券|红包|奖励)|^(?i:bonus|points?|rewards?)$"#, options: .regularExpression) != nil { return true }
+        return false
+    }
+
+    /// 3.7 (28)：模型标题是否只是优惠 / 奖励行的一部分（「碰一下立减」行里的「碰一下」）；
+    /// 原文里含这段文字的每一行都是优惠 / 奖励行 → 不能当标题
+    static func isPromoFragment(_ title: String, lines: [String]) -> Bool {
+        let t = title.replacingOccurrences(of: " ", with: "")
+        guard !t.isEmpty else { return false }
+        if isPromoText(t) || isBonusText(t) { return true }
+        let hits = lines.map { $0.replacingOccurrences(of: " ", with: "") }.filter { $0.contains(t) }
+        guard !hits.isEmpty else { return false }
+        return hits.allSatisfy { isPromoText($0) || isBonusText($0) }
+    }
+
     static func isPlausibleMerchant(_ s: String) -> Bool {
         guard s.count >= 2, s.count <= 30 else { return false }
         if merchantBlacklist.contains(where: { s.contains($0) }) { return false }
-        if isPromoText(s) { return false }
+        if isPromoText(s) || isBonusText(s) { return false }
         if englishBlacklist.contains(s.lowercased()) { return false }
         if s.hasPrefix("收到转账") || s.hasPrefix("收到红包") || s == "红包" || s == "转账" || s == "退款" || s == "全部账单" { return false }
         if ["余额", "账户余额", "零钱", "零钱通", "余额宝", "花呗", "微信支付", "支付宝"].contains(s) { return false }
@@ -1805,7 +1841,9 @@ enum ScreenLayouts {
             || (c.contains(where: { $0.contains("支付消息") }) && c.contains(where: { $0.contains("服务通知") })) {
             return .payAssistant
         }
-        let hasCard = c.contains { $0.contains("交易提醒") || $0.contains("动账提醒") || $0.contains("消费提醒") || $0.contains("账户变动") }
+        // 3.7 (28)：「交易成功提醒」「退款成功提醒」等（交易 / 消费 / 动账 / 退款…+ 提醒）也是银行推送卡片
+        let hasCard = c.contains { $0.contains("交易提醒") || $0.contains("动账提醒") || $0.contains("消费提醒") || $0.contains("账户变动")
+            || $0.range(of: #"(交易|消费|动账|退款|退货|支出|入账)[\p{Han}]{0,4}提醒"#, options: .regularExpression) != nil }
         let hasField = c.contains { $0.hasPrefix("交易金额") || $0.hasPrefix("交易类型") }
         if hasCard && hasField { return .bankPush }
         if !chatBubbles(texts).isEmpty { return .chatTransfer }
@@ -1889,6 +1927,27 @@ enum ScreenLayouts {
 
     // MARK: 银行公众号推送
 
+    /// 卡片标题行（交易成功提醒 / 动账提醒 / 消费提醒…）
+    static func isBankPushCardTitle(_ text: String) -> Bool {
+        let t = compact(text)
+        guard t.count <= 12, t.hasSuffix("提醒") || t.hasSuffix("通知") else { return false }
+        return t.range(of: #"(交易|消费|动账|退款|退货|支出|入账|账户变动)[\p{Han}]{0,4}(提醒|通知)$"#, options: .regularExpression) != nil
+    }
+
+    /// 每张卡片的行范围（标题上一行是「招商银行信用卡」这类银行名时一并归入）；第一张从 0 开始
+    static func bankPushCards(_ texts: [String]) -> [Range<Int>] {
+        var starts: [Int] = []
+        for (i, t) in texts.enumerated() where isBankPushCardTitle(t) {
+            var s = i
+            if i > 0, (texts[i - 1].contains("银行") || texts[i - 1].contains("信用卡")), !texts[i - 1].contains("："), !texts[i - 1].contains(":") { s = i - 1 }
+            if let last = starts.last, s <= last { continue }
+            starts.append(s)
+        }
+        guard starts.count >= 2 else { return [] }
+        starts[0] = 0
+        return starts.indices.map { k in starts[k]..<(k + 1 < starts.count ? starts[k + 1] : texts.count) }
+    }
+
     private static let typePattern = try! NSRegularExpression(pattern: #"交易类型\s*[:：]?\s*(\S+)"#)
 
     /// 标题里的银行与卡种（「浦发银行信用卡」）补到每笔的尾号上；交易类型 退货 / 退款 = 收入，还款 = 信用卡还款
@@ -1906,8 +1965,9 @@ enum ScreenLayouts {
             let raw = r.rawText as NSString
             if let m = typePattern.firstMatch(in: r.rawText, range: NSRange(location: 0, length: raw.length)) {
                 let type = raw.substring(with: m.range(at: 1))
-                if type.contains("退货") || type.contains("退款") {
+                if ReceiptParser.isRefundText(type) {
                     r.isIncome = true
+                    r.isRefund = true
                     r.categoryName = "退款"
                 } else if type.contains("还款") {
                     r.isCardRepayment = true

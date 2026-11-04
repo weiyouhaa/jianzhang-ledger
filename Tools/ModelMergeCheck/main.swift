@@ -529,5 +529,38 @@ check(okModel.receipts.first?.merchant == "示例面包坊", "3.6 正常商户�
 check(ModelPromptBuilder.instructions(expenseCategories: expenseCats, incomeCategories: incomeCats, accounts: accounts, level: .normal).contains("绝不能是优惠"),
       "3.6 指令要求 merchant 不能是优惠文字")
 
+// 3.7 (28)：支付宝英文详情：模型标题是「碰一下」「立即领取5积分」→ 用规则商户；优惠进备注（合成数据）
+let aliEN = ["Transaction Details", "示例便利店（示例店）", "-2.40", "Transaction successful", "Order total", "2.80", "碰一下立减", "-0.40",
+             "Payment time", "2026-10-12 08:15:30", "Payment", "CMB Debit Card(0000)", "method", "Item description", "示例-示例便利店",
+             "Bonus", "立即领取5积分", "Full name of", "示例商贸有限公司"]
+let aliRules = ReceiptParser.parseAll(lines: aliEN, now: now, calendar: cal)
+for (bad, amt) in [("碰一下立减", 2.4), ("碰一下", 2.4), ("立即领取5积分", 2.4), ("碰一下", 2.8)] {
+    let o = ModelMerge.merge(model: [ModelTransaction(amount: amt, kind: "expense", merchant: bad, categoryName: "购物", accountHint: "招商银行储蓄卡")],
+                             rules: aliRules, ctx: ctx(aliEN))
+    check(o.receipts.count == 1 && o.receipts.first?.merchant == "示例便利店(示例店)" && o.receipts.first?.amount == 2.4
+          && o.receipts.first?.discountNote == "碰一下立减 0.40",
+          "3.7 模型标题「\(bad)」/ 金额 \(amt) → 规则商户 + 实付 + 立减备注（\(o.receipts.first?.merchant ?? "nil") \(o.receipts.first?.amount ?? -1) \(o.receipts.first?.discountNote ?? "nil")）")
+}
+// 3.7 (28)：招行信用卡交易成功提醒×2 退货：模型判成支出也要改回收入 / 退款，两笔都保留
+let cmb = ["招商银行信用卡", "交易成功提醒", "交易时间：", "尾号0000信用卡 10月12日 20:51", "交易类型：", "退货-个人消费卡", "交易金额：",
+           "31.20人民币，点击查看详情", "交易商户：", "示例支付-示例App示例小店", "可用额度：", "¥ 12345.67",
+           "招商银行信用卡", "交易成功提醒", "交易时间：", "尾号0000信用卡 10月12日 20:52", "交易类型：", "退货-个人消费卡", "交易金额：",
+           "22.50人民币，点击查看详情", "交易商户：", "示例通-示例平台商户", "可用额度：", "¥ 12367.67"]
+let cmbRules = ReceiptParser.parseAll(lines: cmb, now: now, calendar: cal)
+let cmbModel = [ModelTransaction(amount: 31.2, kind: "expense", merchant: "示例支付-示例App示例小店", categoryName: "购物", accountHint: "招行信用卡", dateText: "10月12日 20:51"),
+                ModelTransaction(amount: 22.5, kind: "expense", merchant: "示例通-示例平台商户", categoryName: "购物", accountHint: "招行信用卡", dateText: "10月12日 20:52")]
+let oc = ModelMerge.merge(model: cmbModel, rules: cmbRules, ctx: ctx(cmb))
+check(oc.receipts.count == 2 && oc.receipts.allSatisfy { $0.isIncome && $0.categoryName == "退款" } && oc.receipts.map { $0.amount ?? 0 } == [31.2, 22.5],
+      "3.7 退货：模型判支出 → 规则交易类型为准，2 笔收入 / 退款（\(oc.receipts.map { "\($0.amount ?? -1) \($0.isIncome) \($0.categoryName ?? "-")" })）")
+check(!oc.receipts.contains { $0.amount == 12345.67 || $0.amount == 12367.67 }, "3.7 可用额度不是金额")
+// 没有「退款」分类 → 其他收入
+let noRefundCtx = ModelMerge.Context(lines: cmb, categories: expenseCats + ["工资", "其他收入"], incomeCategories: ["工资", "其他收入"],
+                                     accounts: accounts, now: now, calendar: cal)
+let on = ModelMerge.merge(model: cmbModel, rules: cmbRules, ctx: noRefundCtx)
+check(on.receipts.count == 2 && on.receipts.allSatisfy { $0.isIncome && $0.categoryName == "其他收入" },
+      "3.7 无退款分类 → 其他收入（\(on.receipts.map { $0.categoryName ?? "-" })）")
+check(ModelPromptBuilder.instructions(expenseCategories: expenseCats, incomeCategories: incomeCats, accounts: accounts, level: .normal).contains("冲正"),
+      "3.7 指令包含退款关键词")
+
 print(failures == 0 ? "ALL PASSED" : "\(failures) FAILED")
 exit(failures == 0 ? 0 : 1)

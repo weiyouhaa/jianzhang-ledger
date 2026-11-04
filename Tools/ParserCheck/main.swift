@@ -796,5 +796,59 @@ do {
     else { failures += 1; print("❌ 3.6 isPromoText 漏判 \(badPromo) 误判 \(badFine)") }
 }
 
+// 3.7 (28)：支付宝英文 Transaction Details（双栏，红字「碰一下立减」行在 Order total 下）——合成数据
+do {
+    let split = ["Transaction Details", "View all", "示例便利店（示例店）", "-2.40", "Transaction successful",
+                 "Order total", "2.80", "碰一下立减", "-0.40", "Payment time", "2026-10-12 08:15:30",
+                 "Payment", "CMB Debit Card(0000)", "method", "View debit order", "Item description", "示例-示例便利店",
+                 "Bonus", "立即领取5积分", "Acquirer", "示例支付有限公司", "Clearing", "示例清算有限公司", "institution",
+                 "Full name of", "示例商贸有限公司", "More"]
+    let joined = ["Transaction Details", "示例便利店（示例店）", "-2.40", "Transaction successful", "Order total 2.80",
+                  "碰一下立减 −0.40", "Payment time 2026-10-12 08:15:30", "Payment method CMB Debit Card(0000)",
+                  "Item description 示例-示例便利店", "Bonus 立即领取5积分", "Full name of merchant 示例商贸有限公司"]
+    for (name, l) in [("双栏分行", split), ("双栏同行", joined)] {
+        check("3.7 支付宝英文详情（\(name)）", l, amount: 2.4, merchant: "示例便利店(示例店)", date: "2026-10-12 08:15")
+        let all = ReceiptParser.parseAll(lines: l, now: now, calendar: cal)
+        let note = all.first?.discountNote
+        if all.count == 1, note == "碰一下立减 0.40" { print("✅ 3.7 立减行进备注（\(name)）：\(note!)") }
+        else { failures += 1; print("❌ 3.7 立减行备注（\(name)）：\(all.count) 笔 \(note ?? "nil")") }
+    }
+    let bonus = ["立即领取5积分", "领取积分", "Bonus"].filter { !ReceiptParser.isBonusText($0) }
+    let frag = ReceiptParser.isPromoFragment("碰一下", lines: split) && !ReceiptParser.isPromoFragment("示例便利店", lines: split)
+    if bonus.isEmpty && frag { print("✅ 3.7 积分行 / 立减行片段不能当标题") }
+    else { failures += 1; print("❌ 3.7 积分 / 片段判定：\(bonus) frag=\(frag)") }
+}
+
+// 3.7 (28)：招商银行信用卡服务号「交易成功提醒」×2（退货）——合成数据
+do {
+    let split = ["服务号通知", "晚上8:51", "招商银行信用卡", "交易成功提醒", "交易时间：", "尾号0000信用卡 10月12日 20:51",
+                 "交易类型：", "退货-个人消费卡", "交易金额：", "31.20人民币，点击查看详情", "交易商户：", "示例支付-示例App示例小店",
+                 "可用额度：", "¥ 12345.67", "招行信用卡", "小程序",
+                 "招商银行信用卡", "交易成功提醒", "交易时间：", "尾号0000信用卡 10月12日 20:52", "交易类型：", "退货-个人消费卡",
+                 "交易金额：", "22.50人民币，点击查看详情", "交易商户：", "示例通-示例平台商户", "可用额度：", "¥ 12367.67", "招行信用卡", "小程序"]
+    let joined = ["服务号通知", "招商银行信用卡", "交易成功提醒", "交易时间： 尾号0000信用卡 10月12日 20:51", "交易类型： 退货-个人消费卡",
+                  "交易金额： 31.20人民币，点击查看详情", "交易商户： 示例支付-示例App示例小店", "可用额度： ¥ 12345.67", "招行信用卡",
+                  "招商银行信用卡", "交易成功提醒", "交易时间： 尾号0000信用卡 10月12日 20:52", "交易类型： 撤销-个人消费卡",
+                  "交易金额： 22.50人民币，点击查看详情", "交易商户： 示例通-示例平台商户", "可用额度： ¥ 12367.67", "招行信用卡"]
+    for (name, l) in [("分行", split), ("同行", joined)] {
+        let all = ReceiptParser.parseAll(lines: l, now: now, calendar: cal)
+        let ok = all.count == 2
+            && all.map { $0.amount ?? 0 } == [31.2, 22.5]
+            && all.allSatisfy { $0.isIncome && $0.isRefund && $0.categoryName == "退款" && $0.accountHint?.cardTail == "0000"
+                && $0.accountHint?.type == "credit" && $0.accountHint?.bankName == "招商银行" }
+            && all.map { fmt($0.date) } == ["2026-10-12 20:51", "2026-10-12 20:52"]
+            && all.first?.merchant?.contains("示例App示例小店") == true
+        if ok { print("✅ 3.7 招行信用卡交易成功提醒×2 退货（\(name)）：2 笔收入 / 退款 / 尾号 / 时间") }
+        else { failures += 1; print("❌ 3.7 招行退货（\(name)）：" + all.map { "\($0.amount ?? -1) inc=\($0.isIncome) \($0.merchant ?? "-") \($0.categoryName ?? "-") \(fmt($0.date)) \($0.accountHint?.cardTail ?? "-")" }.joined(separator: " | ")) }
+        // 两笔不同退款不能被查重合并
+        let e = all.map { DuplicateMatcher.Entry(amount: $0.amount ?? 0, merchant: $0.merchant ?? "", date: $0.date ?? now, account: "招商银行0000") }
+        if e.count == 2, !DuplicateMatcher.matches(e[0], e[1]) { print("✅ 3.7 两笔退款查重不合并（\(name)）") }
+        else { failures += 1; print("❌ 3.7 两笔退款被判重复（\(name)）") }
+    }
+    let words = ["退货-个人消费卡", "退款", "退回", "撤销", "冲正", "返还", "Refund", "Reversal", "Returned"].filter { !ReceiptParser.isRefundText($0) }
+    if words.isEmpty && !ReceiptParser.isRefundText("消费-个人消费卡") { print("✅ 3.7 退款关键词") }
+    else { failures += 1; print("❌ 3.7 退款关键词漏判 \(words)") }
+}
+
 print(failures == 0 ? "ALL PASSED" : "\(failures) FAILED")
 exit(failures == 0 ? 0 : 1)

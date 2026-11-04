@@ -265,6 +265,8 @@ enum IntentRecorder {
         let category = categoryID.flatMap { DataStore.category(id: $0, in: context) }
             ?? hit?.category
             ?? DataStore.category(named: categoryName, kind: kind, in: context)
+            // 3.7 (28)：退款 / 退货没有「退款」分类时归「其他收入」
+            ?? (kind == .income && categoryName == "退款" ? DataStore.category(named: "其他收入", kind: kind, in: context) : nil)
         let account: LedgerAccount? = accountID.flatMap { DataStore.account(id: $0, in: context) }
             ?? DataStore.account(matching: accountHint, in: context)
             ?? hit?.account
