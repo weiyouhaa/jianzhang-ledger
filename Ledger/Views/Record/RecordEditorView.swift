@@ -180,8 +180,10 @@ struct RecordEditorView: View {
                             .accessibilityIdentifier("ocr-time-source")
                     }
                     TextField("备注", text: $note)
+                        .accessibilityIdentifier("editor-note")
                     if kind.countsInStats && !repayMode {
                         TextField("商户（可选）", text: $merchant)
+                            .accessibilityIdentifier("editor-merchant")
                         accountPicker(title: "账户", selection: userAccountBinding, allowNone: true)
                     }
                 } footer: { ThemedSectionFooter {
@@ -283,6 +285,10 @@ struct RecordEditorView: View {
                 if newKind.countsInStats && !categories.contains(where: { $0.id == selectedCategoryID }) {
                     selectedCategoryID = categories.first?.id
                 }
+            }
+            .onChange(of: allAccounts.count) { _, _ in
+                // 3.8 (29)：首帧 Query 为空时 enterRepayMode 选不了卡；账户到位后再补一次
+                if didLoad { refreshRepayTargetsIfNeeded() }
             }
             .onChange(of: merchant) { _, value in
                 applyRule(merchant: value, overrideCategory: !categoryTouched)
@@ -439,23 +445,27 @@ struct RecordEditorView: View {
         Section {
             LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 5), spacing: 14) {
                 if kind == .expense {
-                    VStack(spacing: 6) {
-                        CategoryIcon(icon: LedgerRecord.repaymentIcon, color: LedgerRecord.repaymentColor, size: 44, selected: repayMode)
-                        Text("信用卡还款")
-                            .font(.ui(.caption2))
-                            .lineLimit(1)
-                            .minimumScaleFactor(0.8)
-                            .foregroundStyle(repayMode ? Color.primary : Color.secondary)
-                    }
-                    .frame(maxWidth: .infinity)
-                    .contentShape(Rectangle())
-                    .accessibilityElement(children: .combine)
-                    .accessibilityAddTraits(.isButton)
-                    .accessibilityIdentifier("tile-card-repayment")
-                    .onTapGesture {
+                    // 3.8 (29)：用 Button 而不是 onTapGesture，UI 测试 / VoiceOver 的 activate 才能进还款模式
+                    Button {
                         UISelectionFeedbackGenerator().selectionChanged()
                         enterRepayMode(card: nil)
+                        refreshRepayTargetsIfNeeded()
+                    } label: {
+                        VStack(spacing: 6) {
+                            CategoryIcon(icon: LedgerRecord.repaymentIcon, color: LedgerRecord.repaymentColor, size: 44, selected: repayMode)
+                            Text("信用卡还款")
+                                .font(.ui(.caption2))
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.8)
+                                .foregroundStyle(repayMode ? Color.primary : Color.secondary)
+                        }
+                        .frame(maxWidth: .infinity)
+                        .contentShape(Rectangle())
                     }
+                    .buttonStyle(.borderless)
+                    .accessibilityIdentifier("tile-card-repayment")
+                    .accessibilityLabel("信用卡还款")
+                    .accessibilityAddTraits(.isButton)
                 }
                 ForEach(categories) { c in
                     VStack(spacing: 6) {
@@ -524,8 +534,16 @@ struct RecordEditorView: View {
         Section {
             accountPicker(title: "付款账户", selection: $accountID, allowNone: false, options: payerAccounts)
                 .accessibilityIdentifier("repay-from")
+                .accessibilityLabel("付款账户")
             accountPicker(title: "还款信用卡", selection: $toAccountID, allowNone: false, options: cardAccounts)
                 .accessibilityIdentifier("repay-card")
+                .accessibilityLabel("还款信用卡")
+            // 3.8 (29)：稳定探针（勿用极小透明 Text，iOS 26 会从 a11y 树里丢掉）
+            Text("还款表单")
+                .font(.ui(.caption2))
+                .foregroundStyle(.secondary)
+                .accessibilityIdentifier("repay-form")
+                .accessibilityLabel("还款表单")
             if let full = fullRepaymentAmount {
                 Button {
                     UISelectionFeedbackGenerator().selectionChanged()
@@ -551,21 +569,50 @@ struct RecordEditorView: View {
         } }
     }
 
-    /// 切到信用卡还款：付款账户默认用默认账户（非负债），信用卡默认选有欠款的第一张
+    /// 切到信用卡还款：付款账户默认用默认账户（非负债），信用卡默认选有欠款的第一张。
+    /// 3.8 (29)：显式传入的 card 不能被「账户 Query 尚未就绪」覆盖成 nil，否则全额还款按钮不出现。
     private func enterRepayMode(card: UUID?) {
         repayMode = true
         ruleHint = nil
-        if let card { toAccountID = card }
-        if selectedCard?.type.isLiability != true {
+        if let card {
+            toAccountID = card
+        } else if selectedCard?.type.isLiability != true {
             let active = allAccounts.filter { $0.type.isLiability && !$0.isArchived }
             toAccountID = (active.first(where: { $0.type.hasCreditLimit && $0.debt > 0 })
                 ?? active.first(where: { $0.type.hasCreditLimit }) ?? active.first)?.id
         }
+        // 账户列表可能在 onAppear 时还是空的：有显式 card 时保留 UUID，等 Query 到位后再解析
         let current = allAccounts.first(where: { $0.id == accountID })
         if current == nil || current?.type.isLiability == true || accountID == toAccountID {
             let payers = allAccounts.filter { !$0.type.isLiability && !$0.isArchived && !$0.type.isSocialSecurity && $0.id != toAccountID }
-            accountID = (payers.first(where: { $0.name == defaultAccount })
-                ?? payers.first(where: { $0.type == .debit }) ?? payers.first)?.id
+            if !payers.isEmpty {
+                accountID = (payers.first(where: { $0.name == defaultAccount })
+                    ?? payers.first(where: { $0.type == .debit }) ?? payers.first)?.id
+            }
+        }
+    }
+
+    /// Query 晚于首帧时补全还款目标 / 演示金额（避免全额还款按钮一直不出现）
+    private func refreshRepayTargetsIfNeeded() {
+        guard repayMode else { return }
+        if let repayCardID {
+            if toAccountID != repayCardID { toAccountID = repayCardID }
+        } else if toAccountID == nil || selectedCard?.type.isLiability != true {
+            let active = allAccounts.filter { $0.type.isLiability && !$0.isArchived }
+            toAccountID = (active.first(where: { $0.type.hasCreditLimit && $0.debt > 0 })
+                ?? active.first(where: { $0.type.hasCreditLimit }) ?? active.first)?.id
+        }
+        if accountID == nil || accountID == toAccountID
+            || allAccounts.first(where: { $0.id == accountID })?.type.isLiability == true {
+            let payers = allAccounts.filter { !$0.type.isLiability && !$0.isArchived && !$0.type.isSocialSecurity && $0.id != toAccountID }
+            if !payers.isEmpty {
+                accountID = (payers.first(where: { $0.name == defaultAccount })
+                    ?? payers.first(where: { $0.type == .debit }) ?? payers.first)?.id
+            }
+        }
+        if ScreenshotDemo.isActive, (amountText.isEmpty || Money.parse(amountText) == 0),
+           let full = fullRepaymentAmount {
+            amountText = String(format: "%.2f", full)
         }
     }
 
@@ -637,6 +684,7 @@ struct RecordEditorView: View {
             date = initialDate
             selectedCategoryID = allCategories.first(where: { $0.kind == .expense })?.id
             enterRepayMode(card: repayCardID)
+            refreshRepayTargetsIfNeeded()
             accountTouched = true
             if ScreenshotDemo.isActive, let full = fullRepaymentAmount {
                 amountText = String(format: "%.2f", full)

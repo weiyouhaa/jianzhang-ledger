@@ -39,7 +39,7 @@ jobs:
               for d in devs:
                   if d["name"].startswith("iPhone"):
                       iphones.append((ver, d["name"], d["udid"]))
-          prefs = ["iPhone 16 Pro", "iPhone 17 Pro", "iPhone 16", "iPhone 17"]
+          prefs = ["iPhone 15 Pro Max", "iPhone 16 Pro Max", "iPhone 17 Pro Max", "iPhone 15 Pro", "iPhone 16 Pro", "iPhone 17 Pro", "iPhone 16", "iPhone 17"]
           iphones.sort(reverse=True)
           for p in prefs:
               for v, n, u in iphones:

@@ -289,8 +289,9 @@ struct AssetsView: View {
 
     /// 从长按菜单里弹 sheet：等菜单（带预览）收起动画结束再设状态。
     /// 菜单还在收起时就 present，iOS 26/27 上 sheet 会被菜单的退场转场一起带走（闪一下就消失）。
+    /// 3.8 (29)：CI / iOS 26 上菜单退场偶发 >0.7s，提到 1.0s
     private func present(_ action: @escaping () -> Void) {
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.45, execute: action)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0, execute: action)
     }
 
     private func groups(_ list: [LedgerAccount], liability: Bool) -> [TypeGroup] {
