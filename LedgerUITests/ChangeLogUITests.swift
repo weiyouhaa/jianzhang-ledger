@@ -103,7 +103,7 @@ final class ChangeLogUITests: XCTestCase {
         let app = launch("decoyhome")
         let before = probeCount(app)
         XCTAssertGreaterThanOrEqual(before, 0)
-        editNote(app, row: "午饭外卖", append: "改")
+        editNote(app, row: "午饭", append: "改")
         // 给日志写入留足时间，再确认计数没变
         Thread.sleep(forTimeInterval: 3)
         XCTAssertEqual(probeCount(app), before, "防窥会话里的编辑写进了变动日志")
