@@ -562,5 +562,17 @@ check(on.receipts.count == 2 && on.receipts.allSatisfy { $0.isIncome && $0.categ
 check(ModelPromptBuilder.instructions(expenseCategories: expenseCats, incomeCategories: incomeCats, accounts: accounts, level: .normal).contains("冲正"),
       "3.7 指令包含退款关键词")
 
+
+// 3.9 (30)：规则引擎详情页退款必须带 isRefund（合成数据；模型未参与）
+do {
+    let lines = ["Transaction Details", "Sample Mall", "+59.00", "Status", "Refund successful",
+                 "Refund Time", "Oct 17, 2026 2:00 PM", "Refund Method", "Balance"]
+    let rules = ReceiptParser.parseAll(lines: lines, now: now, calendar: cal)
+    let o = ModelMerge.merge(model: nil, rules: rules, ctx: ctx(lines))
+    let r = o.receipts.first
+    check(r?.isIncome == true && r?.isRefund == true && r?.categoryName == "退款" && r?.amount == 59,
+          "3.9 规则退款 isRefund（inc=\(r?.isIncome ?? false) refund=\(r?.isRefund ?? false) cat=\(r?.categoryName ?? "nil") amt=\(r?.amount ?? -1)）")
+}
+
 print(failures == 0 ? "ALL PASSED" : "\(failures) FAILED")
 exit(failures == 0 ? 0 : 1)

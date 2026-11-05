@@ -850,5 +850,49 @@ do {
     else { failures += 1; print("❌ 3.7 退款关键词漏判 \(words)") }
 }
 
+
+// 3.9 (30)：抵扣 / 英文优惠备注 / 退款标志 / Instant Rebate 商户 / 整数立减 —— 合成数据
+do {
+    let dedupe = ["微信支付", "支付成功", "示例水果店", "-¥45.00", "订单金额 ¥50.00", "红包抵扣 ¥5.00", "支付方式 零钱"]
+    let r = ReceiptParser.parse(lines: dedupe, now: now, calendar: cal)
+    expect(r.amount == 45 && r.merchant == "示例水果店" && (r.discountNote?.contains("抵扣") == true) && (r.discountNote?.contains("5") == true),
+           "3.9 红包抵扣进备注（实际 \(r.discountNote ?? "nil")）")
+
+    let coupon = ["支付宝", "支付成功", "示例书店", "-¥42.00", "订单金额 ¥50.00", "用券抵扣 ¥8.00"]
+    let r2 = ReceiptParser.parse(lines: coupon, now: now, calendar: cal)
+    expect(r2.amount == 42 && (r2.discountNote?.contains("8") == true),
+           "3.9 用券抵扣进备注（实际 \(r2.discountNote ?? "nil")）")
+
+    let intOff = ["支付成功", "限时特惠", "立减5元", "示例花店", "-¥25.00", "订单金额 ¥30.00"]
+    let r3 = ReceiptParser.parse(lines: intOff, now: now, calendar: cal)
+    expect(r3.amount == 25 && r3.merchant == "示例花店" && (r3.discountNote?.contains("5") == true),
+           "3.9 整数立减5元进备注（实际 merchant=\(r3.merchant ?? "nil") note=\(r3.discountNote ?? "nil")）")
+
+    // Save $2 + coupon + Order 47：备注必须是 2，不能是 47
+    let save = ["Payment successful", "Sample Cafe", "-$45.00", "Order Amount $47.00", "Save $2.00 with coupon", "Payment Method Balance"]
+    let r4 = ReceiptParser.parse(lines: save, now: now, calendar: cal)
+    expect(r4.amount == 45 && r4.merchant == "Sample Cafe" && r4.discountNote == "优惠 2.00",
+           "3.9 Save+coupon 备注取 2 不取订单 47（实际 \(r4.discountNote ?? "nil") amt=\(r4.amount ?? -1)）")
+
+    // Instant Rebate：商户在订单金额下方
+    let rebate = ["UnionPay", "Payment successful", "-¥14.96", "Instant Rebate -$0.04", "Order Amount ¥15.00",
+                  "Sample Noodle Shop", "Payment Method CMB Debit[5858]"]
+    let r5 = ReceiptParser.parse(lines: rebate, now: now, calendar: cal)
+    expect(r5.amount == 14.96 && r5.merchant == "Sample Noodle Shop" && (r5.discountNote?.contains("0.04") == true),
+           "3.9 Instant Rebate 商户+备注（实际 merchant=\(r5.merchant ?? "nil") note=\(r5.discountNote ?? "nil")）")
+
+    // 英文退款详情：收入 + isRefund + 分类退款
+    let refund = ["Transaction Details", "Sample Mall", "+59.00", "Status", "Refund successful",
+                  "Refund Time", "Oct 17, 2026 2:00 PM", "Refund Method", "Balance"]
+    let r6 = ReceiptParser.parse(lines: refund, now: now, calendar: cal)
+    expect(r6.isIncome && r6.isRefund && r6.categoryName == "退款" && r6.amount == 59,
+           "3.9 英文退款 isRefund（inc=\(r6.isIncome) refund=\(r6.isRefund) cat=\(r6.categoryName ?? "nil")）")
+
+    let refundCN = ["账单详情", "示例商场", "+19.90", "退款成功", "退款方式", "余额"]
+    let r7 = ReceiptParser.parse(lines: refundCN, now: now, calendar: cal)
+    expect(r7.isIncome && r7.isRefund && r7.categoryName == "退款",
+           "3.9 中文退款 isRefund（inc=\(r7.isIncome) refund=\(r7.isRefund) cat=\(r7.categoryName ?? "nil")）")
+}
+
 print(failures == 0 ? "ALL PASSED" : "\(failures) FAILED")
 exit(failures == 0 ? 0 : 1)

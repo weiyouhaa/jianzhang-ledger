@@ -486,6 +486,14 @@ enum ReceiptParser {
         } else {
             result.categoryName = CategoryGuesser.guess(text: fullText, isIncome: result.isIncome)
         }
+        // 3.9 (30)：详情页退款（中/英）记收入并打 isRefund，分类缺省「退款」
+        // 银行推送路径本来就会设；这里补上微信/支付宝/云闪付退款成功页
+        if result.isIncome, isRefundText(fullText) || fullText.range(of: #"(?i)\brefund"#, options: .regularExpression) != nil {
+            result.isRefund = true
+            if result.categoryName == nil || result.categoryName == "其他收入" {
+                result.categoryName = "退款"
+            }
+        }
         return result
     }
 
@@ -557,7 +565,9 @@ enum ReceiptParser {
                                    "数量", "已省", "节省", "共省",
                                    // 3.6 (27) 英文优惠行：「Discount -$2.00」「Coupon -$1」不是实付
                                    "Discount", "discount", "DISCOUNT", "Coupon", "coupon", "Voucher", "voucher", "Cashback", "cashback",
-                                   "Promo", "promo", "Reward", "reward", "Points", "points", "Saved", "saved", "Savings", "savings"]
+                                   "Rebate", "rebate", "Instant Rebate",
+                                   "Promo", "promo", "Reward", "reward", "Points", "points", "Saved", "saved", "Savings", "savings",
+                                   "Save $", "Save ¥", "Save￥"]
     static let countSuffixes: Set<Character> = ["件", "个", "次", "份", "张", "笔", "位", "人", "天", "期", "号", "楼", "室", "%", "折", "斤", "克", "g", "G", "k", "K", "m", "M"]
 
     private static let amountPattern = try! NSRegularExpression(
@@ -754,15 +764,37 @@ enum ReceiptParser {
 
     static func discountNote(lines: [String], paid: Double? = nil) -> String? {
         let join = lines.joined(separator: " ")
-        guard join.contains("优惠") || join.contains("立减") || join.contains("满减") || join.contains("折扣") else { return nil }
+        // 3.9 (30)：中文「抵扣 / 立减5元」+ 英文 Discount / Save / Cashback / Instant Rebate 都进备注；
+        // 不把「优惠券」旁的订单金额误当成优惠（以前 Save $2 with coupon + Order amount 47 →「优惠 47.00」）
+        let cue = join.range(of: #"优惠|立减|满减|折扣|抵扣|返现|已省|Cashback|cashback|Discount|discount|Rebate|rebate|(?i)\bSave\b"#,
+                             options: .regularExpression) != nil
+        guard cue else { return nil }
         let specs: [(String, String)] = [
-            (#"云闪付立减\s*[:：]?\s*[¥￥\-]*\s*(\d+(?:\.\d{1,2})?)"#, "云闪付立减"),
-            (#"随机立减\s*[:：]?\s*[¥￥\-]*\s*(\d+(?:\.\d{1,2})?)"#, "随机立减"),
-            (#"满\d+(?:\.\d+)?(?:元)?(?:随机)?立减\s*[:：]?\s*[¥￥\-]*\s*(\d+(?:\.\d{1,2})?)"#, "随机立减"),
-            // 3.7 (28)：「碰一下立减 -0.20」等带名字的立减行：备注保留原标签
-            (#"([\p{Han}]{1,8}立减)\s*[:：]?\s*[¥￥\-−–]*\s*(\d+(?:\.\d{1,2})?)"#, "$1"),
-            (#"(?:优惠|立减|满减|折扣)[^\d]{0,16}(\d+\.\d{1,2})"#, "优惠"),
+            (#"云闪付立减\s*[:：]?\s*[¥￥$￡\-−–]*\s*(\d+(?:\.\d{1,2})?)"#, "云闪付立减"),
+            (#"随机立减\s*[:：]?\s*[¥￥$￡\-−–]*\s*(\d+(?:\.\d{1,2})?)"#, "随机立减"),
+            (#"满\d+(?:\.\d+)?(?:元)?(?:随机)?立减\s*[:：]?\s*[¥￥$￡\-−–]*\s*(\d+(?:\.\d{1,2})?)"#, "随机立减"),
+            // 「碰一下立减 -0.20」「限时特惠 立减5元」：标签可与立减分开；整数元也认
+            (#"([\p{Han}]{1,8}立减)\s*[:：]?\s*[¥￥$￡\-−–]*\s*(\d+(?:\.\d{1,2})?)\s*元?"#, "$1"),
+            (#"(?<![\p{Han}])立减\s*[:：]?\s*[¥￥$￡\-−–]*\s*(\d+(?:\.\d{1,2})?)\s*元?"#, "立减"),
+            (#"((?:消费)?(?:红包|用券|积分)?抵扣)\s*[:：]?\s*[¥￥$￡\-−–]*\s*(\d+(?:\.\d{1,2})?)"#, "$1"),
+            (#"(?i)(?:Instant\s+)?(?:Rebate|Cashbacks?|Discounts?)\s*[:：]?\s*[¥￥$￡\-−–]*\s*(\d+(?:\.\d{1,2})?)"#, "优惠"),
+            (#"(?i)\bSave\s*[¥￥$￡\-−–]*\s*(\d+(?:\.\d{1,2})?)"#, "优惠"),
+            // 「已优惠 ¥2.00」；「优惠」不能贴在「券」后（优惠券）
+            (#"(?<!券)已?优惠\s*[:：]?\s*[¥￥$￡\-−–]*\s*(\d+(?:\.\d{1,2})?)"#, "优惠"),
+            (#"(?:满减|折扣)\s*[:：]?\s*[¥￥$￡\-−–]*\s*(\d+(?:\.\d{1,2})?)"#, "优惠"),
+            // 兜底：标签后短距离小数金额；同样避开「优惠券」
+            (#"(?<!券)(?:优惠|立减|满减|折扣|抵扣)(?!券)[^\d券]{0,12}(\d+\.\d{1,2})"#, "优惠"),
         ]
+        // 订单金额候选：优惠备注不能抄成订单原价
+        let orderAmounts: Set<Double> = {
+            var s = Set<Double>()
+            let re = try! NSRegularExpression(pattern: #"(?:订单金额|Order\s*Amount|应付)\s*[:：]?\s*[¥￥$￡\-−–]*\s*(\d+(?:\.\d{1,2})?)"#)
+            let ns = join as NSString
+            for m in re.matches(in: join, range: NSRange(location: 0, length: ns.length)) where m.numberOfRanges > 1 {
+                if let v = Double(ns.substring(with: m.range(at: 1))) { s.insert(v) }
+            }
+            return s
+        }()
         for (pat, label) in specs {
             guard let re = try? NSRegularExpression(pattern: pat) else { continue }
             let ns = join as NSString
@@ -771,6 +803,7 @@ enum ReceiptParser {
                 let amt = ns.substring(with: m.range(at: named ? 2 : 1))
                 guard let v = Double(amt), v > 0, v < 10_000 else { continue }
                 if let paid, abs(v - paid) < 0.001 { continue }
+                if orderAmounts.contains(where: { abs($0 - v) < 0.001 }) { continue }
                 return "\(named ? ns.substring(with: m.range(at: 1)) : label) \(amt)"
             }
         }
@@ -860,9 +893,9 @@ enum ReceiptParser {
             v = cleanMerchant(v)
             if isPlausibleMerchant(v) { return v }
         }
-        // 再往下看两行（「订单金额 ¥1299」下一行才是商户的情况）
+        // 再往下看五行（「实付 / Instant Rebate / Order Amount / Sample Shop」夹心时商户更靠下；3.9）
         if let idx = amountLineIndex {
-            for i in (idx + 1)..<min(idx + 3, lines.count) {
+            for i in (idx + 1)..<min(idx + 6, lines.count) {
                 let v = cleanMerchant(lines[i])
                 if isPlausibleMerchant(v) { return v }
             }
@@ -915,7 +948,7 @@ enum ReceiptParser {
         #"立减|已优惠|优惠|满减|减免|抵扣|折扣|返现|返利|返券|积分|会员价|会员专享|会员日|专享价|领取|领券|去使用|立即使用|马上使用|下次可用|立享|特惠|特价|限时|福利|奖励金|已省|节省|共省|赠送|抽奖|新人专享|红包|代金券|优惠券|活动|权益"#,
         #"(?<!证)券(?!商)"#,
         #"\d+(?:\.\d)?\s*折|打\s*折|折后|折起"#,
-        #"(?i)\b(?:discounts?|coupons?|vouchers?|cash\s?back|promo(?:tion)?s?|promo\s+code|rewards?|points|bonus|savings?|save|off|deal|gift\s+card)\b"#,
+        #"(?i)\b(?:discounts?|coupons?|vouchers?|cash\s?back|rebates?|instant\s+rebate|promo(?:tion)?s?|promo\s+code|rewards?|points|bonus|savings?|save|off|deal|gift\s+card)\b"#,
         #"(?i)\d+\s*%\s*off"#,
     ].map { try! NSRegularExpression(pattern: $0) }
 
@@ -1607,7 +1640,9 @@ enum PaymentTerms {
         (#"Expenses?|Expenditures?|Spending"#, "支出"),
         (#"Service\s+Fee|Handling\s+Fee|Transaction\s+Fee"#, "手续费"),
         (#"(?:UnionPay|Union\s+Pay|QuickPass)\s+(?:Discount|Instant\s+Discount|Reduction)"#, "云闪付立减"),
-        (#"Discounts?|Coupons?|Vouchers?|Promotions?|Cashback|Points"#, "优惠"),
+        (#"Instant\s+Rebates?"#, "立减"),
+        (#"Discounts?|Coupons?|Vouchers?|Promotions?|Cashbacks?|Rebates?|Points"#, "优惠"),
+        (#"Save"#, "优惠"),
         (#"Consumption|Purchase"#, "消费"),
         (#"Today"#, "今天"), (#"Yesterday"#, "昨天"),
     ].map { (re("(?<![A-Za-z])(?:" + $0.0 + ")(?![A-Za-z])"), $0.1) }
