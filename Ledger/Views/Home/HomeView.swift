@@ -246,8 +246,9 @@ private struct HomeRecordList: View {
                                 Button { editorTarget = .edit(record) } label: {
                                     RecordRow(record: record)
                                 }
-                                .buttonStyle(.plain)
+                                .buttonStyle(.borderless)
                                 .accessibilityIdentifier("record-row")
+                                .accessibilityLabel(record.displayTitle)
                                 .swipeActions(edge: .trailing, allowsFullSwipe: false) {
                                         Button(role: .destructive) {
                                             pendingDelete = record
