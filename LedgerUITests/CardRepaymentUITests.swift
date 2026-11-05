@@ -155,8 +155,8 @@ final class CardRepaymentUITests: XCTestCase {
         XCTAssertTrue(tile.waitForNonExistence(timeout: 5), "保存后编辑页没有关闭")
 
         XCTAssertGreaterThan(waitForCount(app, above: before), before, "还款没有写入变动日志")
-        let end = Date().addingTimeInterval(5)
-        while routes.count <= routesBefore && Date() < end { Thread.sleep(forTimeInterval: 0.3) }
+        let routeEnd = Date().addingTimeInterval(5)
+        while routes.count <= routesBefore && Date() < routeEnd { Thread.sleep(forTimeInterval: 0.3) }
         if routes.count <= routesBefore { dump(app, "repay-home") }
         XCTAssertGreaterThan(routes.count, routesBefore, "明细里没有新的「付款账户 → 信用卡」还款行")
         XCTAssertTrue(routes.firstMatch.label.contains("→"), "还款行副标题：\(routes.firstMatch.label)")
