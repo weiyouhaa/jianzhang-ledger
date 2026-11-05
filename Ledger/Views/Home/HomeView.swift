@@ -242,9 +242,13 @@ private struct HomeRecordList: View {
                             .accessibilityAction { toggle(group.day) }
                         if !collapsed {
                             ForEach(group.records) { record in
-                                RecordRow(record: record)
-                                    .onTapGesture { editorTarget = .edit(record) }
-                                    .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                                // 3.8 (29)：Button 替代 onTapGesture，UI 测试点标题文字也能打开编辑页
+                                Button { editorTarget = .edit(record) } label: {
+                                    RecordRow(record: record)
+                                }
+                                .buttonStyle(.plain)
+                                .accessibilityIdentifier("record-row")
+                                .swipeActions(edge: .trailing, allowsFullSwipe: false) {
                                         Button(role: .destructive) {
                                             pendingDelete = record
                                         } label: {

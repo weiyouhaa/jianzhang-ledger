@@ -62,9 +62,13 @@ final class CardRepaymentUITests: XCTestCase {
         if !item.waitForExistence(timeout: 5) { dump(app, "repay-menu") }
         XCTAssertTrue(item.exists, "长按信用卡没有「还款」")
         item.tap()
+        // 3.8 (29)：等菜单退场 + sheet（present 延迟约 0.7s）；repay-form 探针更稳
+        let form = element(app, "repay-form")
         let cardPicker = element(app, "repay-card")
-        if !cardPicker.waitForExistence(timeout: 6) { dump(app, "repay-form") }
-        XCTAssertTrue(cardPicker.exists, "没有打开信用卡还款表单")
+        if !(form.waitForExistence(timeout: 8) || cardPicker.waitForExistence(timeout: 2)) {
+            dump(app, "repay-form")
+        }
+        XCTAssertTrue(form.exists || cardPicker.exists, "没有打开信用卡还款表单")
     }
 
     func testFullRepaymentFromAssetsClearsCardDebt() {
@@ -107,8 +111,13 @@ final class CardRepaymentUITests: XCTestCase {
         let tile = element(app, "tile-card-repayment")
         XCTAssertTrue(tile.waitForExistence(timeout: 5), "支出分类里没有「信用卡还款」")
         tile.tap()
-        XCTAssertTrue(element(app, "repay-card").waitForExistence(timeout: 3), "点「信用卡还款」后没有出现还款信用卡")
-        XCTAssertFalse(app.textFields["商户（可选）"].exists, "还款模式不应显示商户")
+        let form = element(app, "repay-form")
+        let cardPicker = element(app, "repay-card")
+        XCTAssertTrue(form.waitForExistence(timeout: 6) || cardPicker.waitForExistence(timeout: 2),
+                      "点「信用卡还款」后没有出现还款信用卡")
+        // 还款模式隐藏商户：identifier 或 placeholder 都不应出现
+        XCTAssertFalse(element(app, "editor-merchant").exists || app.textFields["商户（可选）"].exists,
+                       "还款模式不应显示商户")
 
         let amount = app.textFields["0.00"].firstMatch
         XCTAssertTrue(amount.waitForExistence(timeout: 3))

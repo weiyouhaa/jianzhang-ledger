@@ -180,8 +180,10 @@ struct RecordEditorView: View {
                             .accessibilityIdentifier("ocr-time-source")
                     }
                     TextField("备注", text: $note)
+                        .accessibilityIdentifier("editor-note")
                     if kind.countsInStats && !repayMode {
                         TextField("商户（可选）", text: $merchant)
+                            .accessibilityIdentifier("editor-merchant")
                         accountPicker(title: "账户", selection: userAccountBinding, allowNone: true)
                     }
                 } footer: { ThemedSectionFooter {
@@ -439,23 +441,24 @@ struct RecordEditorView: View {
         Section {
             LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 5), spacing: 14) {
                 if kind == .expense {
-                    VStack(spacing: 6) {
-                        CategoryIcon(icon: LedgerRecord.repaymentIcon, color: LedgerRecord.repaymentColor, size: 44, selected: repayMode)
-                        Text("信用卡还款")
-                            .font(.ui(.caption2))
-                            .lineLimit(1)
-                            .minimumScaleFactor(0.8)
-                            .foregroundStyle(repayMode ? Color.primary : Color.secondary)
-                    }
-                    .frame(maxWidth: .infinity)
-                    .contentShape(Rectangle())
-                    .accessibilityElement(children: .combine)
-                    .accessibilityAddTraits(.isButton)
-                    .accessibilityIdentifier("tile-card-repayment")
-                    .onTapGesture {
+                    // 3.8 (29)：用 Button 而不是 onTapGesture，UI 测试 / VoiceOver 的 activate 才能进还款模式
+                    Button {
                         UISelectionFeedbackGenerator().selectionChanged()
                         enterRepayMode(card: nil)
+                    } label: {
+                        VStack(spacing: 6) {
+                            CategoryIcon(icon: LedgerRecord.repaymentIcon, color: LedgerRecord.repaymentColor, size: 44, selected: repayMode)
+                            Text("信用卡还款")
+                                .font(.ui(.caption2))
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.8)
+                                .foregroundStyle(repayMode ? Color.primary : Color.secondary)
+                        }
+                        .frame(maxWidth: .infinity)
+                        .contentShape(Rectangle())
                     }
+                    .buttonStyle(.plain)
+                    .accessibilityIdentifier("tile-card-repayment")
                 }
                 ForEach(categories) { c in
                     VStack(spacing: 6) {
@@ -524,8 +527,16 @@ struct RecordEditorView: View {
         Section {
             accountPicker(title: "付款账户", selection: $accountID, allowNone: false, options: payerAccounts)
                 .accessibilityIdentifier("repay-from")
+                .accessibilityLabel("付款账户")
             accountPicker(title: "还款信用卡", selection: $toAccountID, allowNone: false, options: cardAccounts)
                 .accessibilityIdentifier("repay-card")
+                .accessibilityLabel("还款信用卡")
+            // 3.8 (29)：额外放一个稳定探针，避免 Form 里 Picker 的 identifier 偶发进不了 accessibility 树
+            Text(repayMode ? "还款表单" : "")
+                .font(.system(size: 1))
+                .foregroundStyle(.clear)
+                .accessibilityIdentifier("repay-form")
+                .accessibilityLabel("还款表单")
             if let full = fullRepaymentAmount {
                 Button {
                     UISelectionFeedbackGenerator().selectionChanged()

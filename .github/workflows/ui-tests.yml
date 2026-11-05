@@ -2,7 +2,7 @@ name: UI tests (Simulator)
 
 on:
   push:
-    branches: ["main"]
+    branches: ["main", "ci/**"]
     # 只在 App / UI 测试 / 工程配置变动时跑（其余情况手动 workflow_dispatch）
     paths:
       - "Ledger/**"
@@ -13,6 +13,11 @@ on:
 
 permissions:
   contents: read
+
+# 3.8：避免同分支连推打出一堆并行 UI 跑
+concurrency:
+  group: uitests-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   uitests:
@@ -38,14 +43,31 @@ jobs:
           data = json.load(sys.stdin)["devices"]
           iphones = []
           for runtime, devs in data.items():
-              if "iOS" not in runtime:
-                  continue
-              ver = tuple(int(x) for x in runtime.split("iOS-")[-1].split("-") if x.isdigit())
+              if "iOS" not in runtime and "iOS " not in runtime:
+                  # keys look like "com.apple.CoreSimulator.SimRuntime.iOS-18-5" or "iOS 18.5"
+                  if "iOS" not in runtime:
+                      continue
+              ver = tuple(int(x) for x in runtime.replace(".", "-").split("iOS-")[-1].split("-") if x.isdigit())
               for d in devs:
+                  if not d.get("isAvailable", True):
+                      continue
                   if d["name"].startswith("iPhone"):
                       iphones.append((ver, d["name"], d["udid"]))
-          prefs = ["iPhone 16 Pro", "iPhone 17 Pro", "iPhone 16", "iPhone 17"]
+          # 优先与真机同款；没有再退到较新 Pro / 普通机
+          prefs = [
+              "iPhone 15 Pro Max",
+              "iPhone 16 Pro Max",
+              "iPhone 17 Pro Max",
+              "iPhone 15 Pro",
+              "iPhone 16 Pro",
+              "iPhone 17 Pro",
+              "iPhone 15",
+              "iPhone 16",
+              "iPhone 17",
+          ]
           iphones.sort(reverse=True)
+          if not iphones:
+              sys.stderr.write("no iPhone simulators\n"); sys.exit(1)
           for p in prefs:
               for v, n, u in iphones:
                   if n == p:
@@ -53,14 +75,17 @@ jobs:
           print(iphones[0][2])
           ')
           echo "UDID=$UDID" >> "$GITHUB_ENV"
-          xcrun simctl list devices | grep "$UDID"
+          xcrun simctl list devices | grep "$UDID" || xcrun simctl list devices available | head -40
 
       - name: Run UI tests
         run: |
           set -o pipefail
+          # 不并行、不克隆额外模拟器；复用上面挑中的一台
           xcodebuild test \
             -project Ledger.xcodeproj -scheme Ledger -configuration Debug \
             -destination "id=$UDID" -derivedDataPath build \
+            -parallel-testing-enabled NO \
+            -maximum-concurrent-test-simulator-destinations 1 \
             -resultBundlePath "$RUNNER_TEMP/UITests.xcresult" \
             CODE_SIGNING_ALLOWED=NO \
             | tee "$RUNNER_TEMP/uitest.log" | grep -E "error:|Test Case|passed|failed|TEST|XCTAssert|UI-DUMP" || true

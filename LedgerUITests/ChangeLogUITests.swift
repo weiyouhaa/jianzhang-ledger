@@ -31,12 +31,32 @@ final class ChangeLogUITests: XCTestCase {
     }
 
     /// 打开某条记录、在备注后追加文字并保存
+    private func element(_ app: XCUIApplication, _ id: String) -> XCUIElement {
+        app.descendants(matching: .any).matching(identifier: id).firstMatch
+    }
+
     private func editNote(_ app: XCUIApplication, row: String, append: String) {
-        let cell = app.staticTexts[row].firstMatch
+        // 3.8 (29)：先点带 identifier 的行按钮；否则点标题文字
+        let byId = app.descendants(matching: .any).matching(
+            NSPredicate(format: "identifier == %@ AND label CONTAINS %@", "record-row", row)
+        ).firstMatch
+        let cell = byId.waitForExistence(timeout: 2) ? byId : app.staticTexts[row].firstMatch
         XCTAssertTrue(cell.waitForExistence(timeout: 15), "找不到记录「\(row)」")
         cell.tap()
-        let note = app.textFields["备注"].firstMatch
-        XCTAssertTrue(note.waitForExistence(timeout: 5), "编辑页没有备注输入框")
+        // 备注有内容时 a11y 名常是值而不是「备注」，改用稳定 identifier
+        let note = element(app, "editor-note")
+        if !note.waitForExistence(timeout: 6) {
+            // 兼容旧构建：再试 placeholder
+            let fallback = app.textFields["备注"].firstMatch
+            XCTAssertTrue(fallback.waitForExistence(timeout: 2), "编辑页没有备注输入框")
+            fallback.tap()
+            fallback.typeText(append)
+            let save = app.buttons["保存"].firstMatch
+            XCTAssertTrue(save.waitForExistence(timeout: 3))
+            save.tap()
+            XCTAssertTrue(fallback.waitForNonExistence(timeout: 5), "保存后编辑页没有关闭")
+            return
+        }
         note.tap()
         note.typeText(append)
         let save = app.buttons["保存"].firstMatch
@@ -83,7 +103,7 @@ final class ChangeLogUITests: XCTestCase {
         let app = launch("decoyhome")
         let before = probeCount(app)
         XCTAssertGreaterThanOrEqual(before, 0)
-        editNote(app, row: "午饭", append: "改")
+        editNote(app, row: "午饭外卖", append: "改")
         // 给日志写入留足时间，再确认计数没变
         Thread.sleep(forTimeInterval: 3)
         XCTAssertEqual(probeCount(app), before, "防窥会话里的编辑写进了变动日志")
