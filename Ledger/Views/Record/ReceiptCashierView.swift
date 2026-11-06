@@ -622,6 +622,13 @@ struct ReceiptCashierView: View {
 
     // MARK: - Helpers
 
+    private static func approvedDateLabel() -> String {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.dateFormat = "yyyy.MM.dd"
+        return f.string(from: Date())
+    }
+
     private var displayAmount: String {
         if let a = parsedAmount { return Money.format(a) }
         if amountText.isEmpty { return "¥0.00" }
