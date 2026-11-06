@@ -84,14 +84,18 @@ struct HomeView: View {
             }
             .navigationDestination(isPresented: $showDemoSearch) { SearchView() }
             .sheet(item: $editorTarget) { target in
-                switch target {
-                case .new:
-                    RecordEditorView(record: nil, initialDate: newRecordDate)
-                case .newOCR:
-                    RecordEditorView(record: nil, initialDate: newRecordDate, startInOCRMode: true)
-                case .edit(let record):
-                    RecordEditorView(record: record)
+                Group {
+                    switch target {
+                    case .new:
+                        RecordEditorView(record: nil, initialDate: newRecordDate)
+                    case .newOCR:
+                        RecordEditorView(record: nil, initialDate: newRecordDate, startInOCRMode: true)
+                    case .edit(let record):
+                        RecordEditorView(record: record)
+                    }
                 }
+                .presentationDetents(theme.isReceipt && (target.id == "new" || target.id == "new-ocr") ? [.large] : [.large])
+                .presentationDragIndicator(theme.isReceipt ? .visible : .hidden)
             }
             .sheet(item: $stubTarget) { target in
                 ReceiptStubSheet(record: target.record) {
@@ -350,6 +354,7 @@ private struct HomeRecordList: View {
         .task {
             // 截图模式：直接打开记一笔 / 搜索
             if ScreenshotDemo.screen == "add" && editorTarget == nil { editorTarget = .new }
+            if ScreenshotDemo.screen == "addocr" && editorTarget == nil { editorTarget = .newOCR }
             if ScreenshotDemo.screen == "search" && !showDemoSearch { showDemoSearch = true }
             if ScreenshotDemo.screen == "editrec" && editorTarget == nil {
                 // 3.4 (25) 截图：打开一条演示记录的编辑页（悬浮卡片）

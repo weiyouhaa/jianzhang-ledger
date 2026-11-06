@@ -72,7 +72,7 @@ struct ReceiptCashierView: View {
             VStack(spacing: 0) {
                 modeBar
                 ScrollView {
-                    VStack(spacing: ReceiptStyle.Space.m) {
+                    VStack(spacing: ReceiptStyle.Space.s) {
                         if submode == .manual {
                             manualSheet
                             keypad
@@ -81,7 +81,7 @@ struct ReceiptCashierView: View {
                         }
                     }
                     .padding(.horizontal, 16)
-                    .padding(.vertical, 12)
+                    .padding(.vertical, 8)
                 }
             }
             .themedScreenBackground()
@@ -662,10 +662,26 @@ struct ReceiptCashierView: View {
             accountID = selectableAccounts.first?.id
         }
         if ScreenshotDemo.isActive, amountText.isEmpty {
-            amountText = "35.00"
-            note = "精品手冲咖啡"
-            if let c = categories.first(where: { $0.name == "餐饮" }) { selectedCategoryID = c.id }
-            if let a = selectableAccounts.first(where: { $0.name.contains("招行信用") }) { accountID = a.id }
+            if ScreenshotDemo.screen == "addocr" || startInOCRMode {
+                // 设计稿 OCR 凭条样例（合成）
+                hasOCRResult = true
+                submode = .ocr
+                kind = .expense
+                amountText = "11.11"
+                merchant = "一起"
+                note = ""
+                ocrEngineLine = "共 1 笔 · 引擎规则 · Apple 智能未给出有效结果，已用规则识别"
+                ocrTimeHint = "时间未识别（已用当前时间），点此校准"
+                if let c = categories.first(where: { $0.name == "购物" }) { selectedCategoryID = c.id }
+                if let a = selectableAccounts.first(where: { $0.name.contains("浦发") || $0.name.contains("信用") }) {
+                    accountID = a.id
+                }
+            } else {
+                amountText = "35.00"
+                note = "精品手冲咖啡"
+                if let c = categories.first(where: { $0.name == "餐饮" }) { selectedCategoryID = c.id }
+                if let a = selectableAccounts.first(where: { $0.name.contains("招行信用") }) { accountID = a.id }
+            }
         }
     }
 
