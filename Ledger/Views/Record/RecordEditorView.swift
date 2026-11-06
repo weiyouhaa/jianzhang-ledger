@@ -123,6 +123,9 @@ struct RecordEditorView: View {
     }
 
     var body: some View {
+        if theme.isReceipt && record == nil {
+            ReceiptCashierView(initialDate: initialDate, startInOCRMode: startInOCRMode)
+        } else {
         NavigationStack {
             ThemedForm {
                 if theme.isReceipt && record == nil {
@@ -340,7 +343,8 @@ struct RecordEditorView: View {
                 Text(alertMessage ?? "")
             }
 
-        }
+        } // NavigationStack
+        } // else default form
     }
 
     // MARK: - 顶部卡片（3.1 (22)）

@@ -212,16 +212,38 @@ struct StatsView: View {
         }
     }
 
+    @ViewBuilder
     private func pieCard(totals: [CategoryTotal], total: Double) -> some View {
+        if theme.isReceipt {
+            card {
+                VStack(alignment: .leading, spacing: 12) {
+                    HStack {
+                        Text("\(kind.title)构成 · BREAKDOWN").font(cardTitleFont)
+                        Spacer()
+                        Text("STAMP CHART")
+                            .font(theme.labelFont)
+                            .foregroundStyle(theme.faint)
+                    }
+                    StampRingChart(slices: Array(totals.prefix(5)).map {
+                        StampRingChart.Slice(id: $0.id, label: $0.name, amount: $0.total, color: $0.color)
+                    })
+                }
+            }
+        } else {
+            defaultPieCard(totals: totals, total: total)
+        }
+    }
+
+    private func defaultPieCard(totals: [CategoryTotal], total: Double) -> some View {
         let selected = totals.first { $0.id == selectedPieID }
         return card {
             VStack(alignment: .leading, spacing: 12) {
-                Text(theme.isReceipt ? "\(kind.title)构成 · STAMP" : "\(kind.title)构成").font(cardTitleFont)
+                Text("\(kind.title)构成").font(cardTitleFont)
                 Chart(totals) { item in
                     SectorMark(
                         angle: .value("金额", item.total),
-                        innerRadius: .ratio(theme.isReceipt ? 0.68 : 0.62),
-                        angularInset: theme.isReceipt ? 2.2 : 1.5
+                        innerRadius: .ratio(0.62),
+                        angularInset: 1.5
                     )
                     .cornerRadius(4)
                     .foregroundStyle(item.color)
@@ -281,7 +303,6 @@ struct StatsView: View {
                     chartHint
                 }
 
-                // 图例（可点选，图表手势的后备）
                 LazyVGrid(columns: [GridItem(.adaptive(minimum: 90), alignment: .leading)], alignment: .leading, spacing: 8) {
                     ForEach(totals.prefix(8)) { item in
                         Button {

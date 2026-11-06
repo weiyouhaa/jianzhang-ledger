@@ -68,8 +68,9 @@ enum ScreenshotDemo {
         }
 
         let samples: [Sample] = [
+            .init(day: 0, hour: 22, minute: 9, amount: 11.11, category: "购物", kind: .expense, note: "", merchant: "一起", account: "信用卡", source: "ocr"),
             .init(day: 0, hour: 12, minute: 18, amount: 35, category: "餐饮", kind: .expense, note: "", merchant: "星巴克咖啡", account: "微信", source: "ocr"),
-            .init(day: 0, hour: 8, minute: 45, amount: 23.5, category: "交通", kind: .expense, note: "打车去公司", merchant: "滴滴出行", account: "支付宝", source: "ocr"),
+            .init(day: 0, hour: 8, minute: 45, amount: 23.5, category: "交通", kind: .expense, note: "打车去公司", merchant: "", account: "支付宝", source: "ocr"),
             .init(day: 0, hour: 7, minute: 30, amount: 18, category: "餐饮", kind: .expense, note: "早餐", merchant: "", account: "现金", source: "manual"),
             .init(day: 1, hour: 19, minute: 20, amount: 286.4, category: "购物", kind: .expense, note: "周末采购", merchant: "盒马鲜生", account: "花呗", source: "manual"),
             .init(day: 1, hour: 15, minute: 2, amount: 69.9, category: "娱乐", kind: .expense, note: "电影票", merchant: "猫眼电影", account: "微信", source: "shortcut"),

@@ -121,6 +121,7 @@ jobs:
           shoot stats    light 32-receipt-stats receipt
           shoot assets   light 33-receipt-assets receipt
           shoot settings dark  34-receipt-settings-dark receipt
+          shoot settings light 41-receipt-settings receipt
           shoot add      light 35-receipt-add receipt
           shoot reviewsnippet light 36-receipt-review-snippet receipt
           shoot lock     dark  37-receipt-lock-dark receipt
