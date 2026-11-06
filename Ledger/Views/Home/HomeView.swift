@@ -84,18 +84,14 @@ struct HomeView: View {
             }
             .navigationDestination(isPresented: $showDemoSearch) { SearchView() }
             .sheet(item: $editorTarget) { target in
-                Group {
-                    switch target {
-                    case .new:
-                        RecordEditorView(record: nil, initialDate: newRecordDate)
-                    case .newOCR:
-                        RecordEditorView(record: nil, initialDate: newRecordDate, startInOCRMode: true)
-                    case .edit(let record):
-                        RecordEditorView(record: record)
-                    }
+                switch target {
+                case .new:
+                    RecordEditorView(record: nil, initialDate: newRecordDate)
+                case .newOCR:
+                    RecordEditorView(record: nil, initialDate: newRecordDate, startInOCRMode: true)
+                case .edit(let record):
+                    RecordEditorView(record: record)
                 }
-                .presentationDetents(theme.isReceipt && (target.id == "new" || target.id == "new-ocr") ? [.large] : [.large])
-                .presentationDragIndicator(theme.isReceipt ? .visible : .hidden)
             }
             .sheet(item: $stubTarget) { target in
                 ReceiptStubSheet(record: target.record) {
