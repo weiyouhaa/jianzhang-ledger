@@ -18,7 +18,7 @@ enum AppSkin: String, CaseIterable, Identifiable {
     var detail: String {
         switch self {
         case .default: return "青绿渐变卡片，圆角系统风格"
-        case .receipt: return "暖白纸色 · 打字机字体 · 虚线分隔 · 暗红点缀"
+        case .receipt: return "棉浆白纸 · 宋体/打字机 · 朱砂印章 · 齿孔小票"
         }
     }
 

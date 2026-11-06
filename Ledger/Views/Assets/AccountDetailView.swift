@@ -4,6 +4,7 @@ import Charts
 
 /// 账户详情：余额、额度、余额走势、相关记录
 struct AccountDetailView: View {
+    @Environment(\.appTheme) private var theme
     let account: LedgerAccount
 
     @Environment(\.modelContext) private var context
@@ -59,7 +60,9 @@ struct AccountDetailView: View {
             }
 
             if points.count > 1 {
-                Section(account.type.isLiability ? "欠款走势" : "余额走势") {
+                Section(account.type.isLiability
+                    ? (theme.isReceipt ? "欠款走势 · 毫米坐标纸" : "欠款走势")
+                    : (theme.isReceipt ? "余额走势 · 毫米坐标纸" : "余额走势")) {
                     trendChart(points)
                         .frame(height: 160)
                         .padding(.vertical, 6)
@@ -120,7 +123,7 @@ struct AccountDetailView: View {
         let liability = account.type.isLiability
         VStack(alignment: .leading, spacing: 14) {
             HStack(spacing: 10) {
-                CategoryIcon(icon: account.iconName, color: .white, size: 36)
+                CategoryIcon(icon: account.iconName, color: headerInk, size: 36)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(account.type.title).font(.ui(.subheadline).weight(.semibold))
                     if !account.includeInNetWorth {
@@ -185,14 +188,25 @@ struct AccountDetailView: View {
                 .font(.ui(.caption))
             }
         }
-        .foregroundStyle(.white)
+        .foregroundStyle(headerInk)
         .padding(20)
         .background(
-            RoundedRectangle(cornerRadius: 24, style: .continuous)
-                .fill(LinearGradient(colors: [account.color, account.color.opacity(0.7)],
-                                     startPoint: .topLeading, endPoint: .bottomTrailing))
+            RoundedRectangle(cornerRadius: theme.isReceipt ? ReceiptStyle.corner : 24, style: .continuous)
+                .fill(headerFill)
         )
         .padding(.vertical, 4)
+    }
+
+    /// 4.0：小票皮肤信用卡卡面改用朱砂底 + 暖象牙高对比文字（设计稿 STATEMENT CARD）
+    private var headerInk: Color {
+        theme.isReceipt ? ReceiptStyle.color(ReceiptStyle.statementInk, dark: theme.scheme == .dark) : .white
+    }
+    private var headerFill: AnyShapeStyle {
+        if theme.isReceipt {
+            return AnyShapeStyle(ReceiptStyle.color(ReceiptStyle.statementFill, dark: theme.scheme == .dark))
+        }
+        return AnyShapeStyle(LinearGradient(colors: [account.color, account.color.opacity(0.7)],
+                                            startPoint: .topLeading, endPoint: .bottomTrailing))
     }
 
     private func actionButton(_ title: String, icon: String, action: @escaping () -> Void) -> some View {
@@ -249,19 +263,29 @@ struct AccountDetailView: View {
     }
 
     private func trendChart(_ points: [BalancePoint]) -> some View {
-        Chart(points) { p in
+        let line = theme.isReceipt ? theme.accent : account.color
+        let fillTop = theme.isReceipt ? theme.accent.opacity(0.28) : account.color.opacity(0.3)
+        let fillBot = theme.isReceipt ? theme.accent.opacity(0.02) : account.color.opacity(0.02)
+        return Chart(points) { p in
             AreaMark(x: .value("时间", p.date), y: .value("余额", p.value))
-                .foregroundStyle(LinearGradient(colors: [account.color.opacity(0.3), account.color.opacity(0.02)],
+                .foregroundStyle(LinearGradient(colors: [fillTop, fillBot],
                                                 startPoint: .top, endPoint: .bottom))
                 .interpolationMethod(.stepEnd)
             LineMark(x: .value("时间", p.date), y: .value("余额", p.value))
-                .foregroundStyle(account.color)
+                .foregroundStyle(line)
                 .lineStyle(StrokeStyle(lineWidth: 2))
                 .interpolationMethod(.stepEnd)
+            if theme.isReceipt {
+                PointMark(x: .value("时间", p.date), y: .value("余额", p.value))
+                    .foregroundStyle(line)
+                    .symbolSize(28)
+            }
         }
         .chartYAxis {
             AxisMarks(position: .leading) { value in
-                AxisGridLine()
+                AxisGridLine(stroke: StrokeStyle(lineWidth: theme.isReceipt ? 0.5 : 1,
+                                                 dash: theme.isReceipt ? [1, 3] : []))
+                    .foregroundStyle(theme.isReceipt ? theme.accent.opacity(0.12) : Color.secondary.opacity(0.3))
                 AxisValueLabel {
                     if let v = value.as(Double.self) {
                         Text(hideAmounts ? "**" : Money.compact(v))
@@ -271,12 +295,54 @@ struct AccountDetailView: View {
         }
         .chartXAxis {
             AxisMarks(values: .automatic(desiredCount: 4)) { _ in
-                AxisGridLine()
+                AxisGridLine(stroke: StrokeStyle(lineWidth: theme.isReceipt ? 0.5 : 1,
+                                                 dash: theme.isReceipt ? [1, 3] : []))
+                    .foregroundStyle(theme.isReceipt ? theme.accent.opacity(0.10) : Color.secondary.opacity(0.3))
                 AxisValueLabel(format: .dateTime.month(.defaultDigits).day())
+            }
+        }
+        .chartPlotStyle { plot in
+            if theme.isReceipt {
+                plot.background(
+                    MillimeterGridBackground(line: theme.accent.opacity(0.09),
+                                             subline: theme.accent.opacity(0.04))
+                )
+            } else {
+                plot
             }
         }
     }
 }
+
+/// 4.0 小票：欠款走势底的毫米坐标纸
+private struct MillimeterGridBackground: View {
+    var line: Color
+    var subline: Color
+    var body: some View {
+        Canvas { ctx, size in
+            let major: CGFloat = 20
+            let minor: CGFloat = 5
+            var x: CGFloat = 0
+            while x <= size.width {
+                var path = Path()
+                path.move(to: CGPoint(x: x, y: 0))
+                path.addLine(to: CGPoint(x: x, y: size.height))
+                ctx.stroke(path, with: .color(Int(x / minor) % Int(major / minor) == 0 ? line : subline), lineWidth: 0.5)
+                x += minor
+            }
+            var y: CGFloat = 0
+            while y <= size.height {
+                var path = Path()
+                path.move(to: CGPoint(x: 0, y: y))
+                path.addLine(to: CGPoint(x: size.width, y: y))
+                ctx.stroke(path, with: .color(Int(y / minor) % Int(major / minor) == 0 ? line : subline), lineWidth: 0.5)
+                y += minor
+            }
+        }
+        .allowsHitTesting(false)
+    }
+}
+
 
 /// 余额校准：输入实际余额，生成一笔不计入统计的校准记录
 struct BalanceAdjustView: View {

@@ -41,6 +41,11 @@ struct BudgetLineRow: View {
                     .minimumScaleFactor(0.8)
                 }
             }
+            Text(BudgetProgressView.tickBarPublic(ratio: ratio))
+                .font(theme.metaFont)
+                .foregroundStyle(theme.budgetColor(ratio))
+                .lineLimit(1)
+                .minimumScaleFactor(0.5)
             ReceiptBar(ratio: ratio, fill: theme.budgetColor(ratio), track: theme.rule.opacity(0.6))
             if line.carry != 0 {
                 Text("含上月结转 \(line.carry > 0 ? "+" : "")\(Money.format(line.carry))")

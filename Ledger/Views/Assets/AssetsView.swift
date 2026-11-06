@@ -4,6 +4,7 @@ import Charts
 
 /// 「资产」页：净资产、各账户余额、净资产趋势
 struct AssetsView: View {
+    @Environment(\.appTheme) private var theme
     @Query(sort: \LedgerAccount.sortOrder) private var accounts: [LedgerAccount]
     @Query(sort: \LedgerRecord.date) private var records: [LedgerRecord]
     @AppStorage(SettingsKey.hideAmounts) private var hideAmounts = false
@@ -125,13 +126,16 @@ struct AssetsView: View {
           }
             .themedRootTitle("资产")
             .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    Button {
-                        withAnimation { hideAmounts.toggle() }
-                    } label: {
-                        Image(systemName: hideAmounts ? "eye.slash" : "eye")
+                // 4.0 小票：去掉左上角重复大眼睛，仅保留净资产旁内联开关（设计稿）
+                if !theme.isReceipt {
+                    ToolbarItem(placement: .topBarLeading) {
+                        Button {
+                            withAnimation { hideAmounts.toggle() }
+                        } label: {
+                            Image(systemName: hideAmounts ? "eye.slash" : "eye")
+                        }
+                        .accessibilityLabel(hideAmounts ? "显示金额" : "隐藏金额")
                     }
-                    .accessibilityLabel(hideAmounts ? "显示金额" : "隐藏金额")
                 }
                 ToolbarItem(placement: .topBarTrailing) {
                     Menu {
