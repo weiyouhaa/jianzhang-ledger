@@ -1,13 +1,13 @@
 import SwiftUI
 
-// 3.5 (26) 小票皮肤设计系统（Receipt Atlas 风格的「印刷文具」质感）。
+// 4.0 (31) 小票皮肤设计系统 · 精致拟物小票 V3.0（Aesop / Le Labo 热敏纸质感）。
 // 只依赖 SwiftUI，CI 在 macOS 上渲染预览（Tools/RenderPreview）时也会编译这个文件。
 // 规则：
-// - 色板：暖白纸 / 近黑墨 / 一种暗红强调 / 柔和暖灰；分类图标用降饱和的墨水色，不用鲜艳的系统色
-// - 字号：只用 5 档（hero 34 / title 20 / body 16 / meta 13 / label 11），数字统一等宽右对齐
+// - 色板：棉浆白纸 / 暖象牙墨 / 朱砂 vermilion / 森绿收入 / 琥珀警示；分类图标降饱和，不用系统高饱和色
+// - 字号：5 档（hero 34 / title 20 / body 16 / meta 13 / label 11），数字等宽；中文宋体 + 拉丁打字机
 // - 间距：8pt 网格（4 只用于同一组内的紧密行距）
-// - 卡片：一种样式（纸面 + 大圆角，无描边）；锯齿 / 齿孔边只用在顶部汇总卡（hero）
-// - 分隔：统一一种细虚线（0.75pt，2-3 点距）
+// - 卡片：纸面 + 大圆角；锯齿 / 齿孔边用在顶部汇总卡（hero）与欠款走势卡
+// - 分隔：细虚线（0.75pt，2-3 点距）；坐标纸网格仅用于走势图底
 enum ReceiptStyle {
     // MARK: 间距（8pt 网格）
     enum Space {
@@ -41,15 +41,25 @@ enum ReceiptStyle {
     struct Pair { let light: String; let dark: String
         func hex(dark isDark: Bool) -> String { isDark ? dark : light }
     }
-    static let paper = Pair(light: "#FCF9F3", dark: "#25221F")
-    static let backdrop = Pair(light: "#F1ECE2", dark: "#181614")
-    static let ink = Pair(light: "#1F1B17", dark: "#EEE7DB")
-    static let faint = Pair(light: "#8A8177", dark: "#9D958A")
-    static let rule = Pair(light: "#D8CFBF", dark: "#4A443C")
-    static let accent = Pair(light: "#8F2D26", dark: "#D98C80")
-    static let income = Pair(light: "#3E6B4F", dark: "#97BFA2")
-    /// 预算接近上限（≥ 80%）：赭石色，代替系统橙
-    static let caution = Pair(light: "#A6762E", dark: "#D4A867")
+    // 棉浆白纸（浅）/ 黑金炭票（深）——对齐 3.9 UI/UX 设计稿 token
+    static let paper = Pair(light: "#FAF7F0", dark: "#23201D")
+    static let paperElevated = Pair(light: "#FFFDF9", dark: "#2B2723")
+    static let backdrop = Pair(light: "#EAE3D5", dark: "#12100E")
+    static let ink = Pair(light: "#221E1C", dark: "#EDE6DC")
+    static let faint = Pair(light: "#6B635B", dark: "#A0968A")
+    static let muted = Pair(light: "#9A9086", dark: "#6C6359")
+    static let rule = Pair(light: "#DCD4C6", dark: "#36312C")
+    static let ruleDashed = Pair(light: "#C9BFAE", dark: "#453F38")
+    /// 朱砂 vermilion（主强调 / 超支 / 印章）
+    static let accent = Pair(light: "#A63628", dark: "#DF6250")
+    /// 森绿（收入）
+    static let income = Pair(light: "#2C5E43", dark: "#579E78")
+    /// 琥珀警示（时间未识别、接近预算上限）
+    static let caution = Pair(light: "#9E631B", dark: "#E0A24E")
+    /// 信用卡 STATEMENT 卡面（朱砂底上的暖象牙文字）
+    static let statementFill = Pair(light: "#8F2A22", dark: "#5C241E")
+    static let statementInk = Pair(light: "#FFF8F0", dark: "#F5E6D8")
+    static let slot = Pair(light: "#BEB5A6", dark: "#070605")
 
     static func color(_ pair: Pair, dark: Bool) -> Color { rgbColor(rgb(pair.hex(dark: dark))) }
 

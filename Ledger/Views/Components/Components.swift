@@ -76,7 +76,16 @@ struct RecordRow: View {
                         Text(record.accountName)
                     }
                     if record.source == "ocr" {
-                        Image(systemName: "text.viewfinder")
+                        if theme.isReceipt {
+                            Text("[识图]")
+                                .font(theme.labelFont)
+                                .tracking(ReceiptStyle.labelTracking * 0.4)
+                                .foregroundStyle(theme.accent)
+                                .padding(.horizontal, 4).padding(.vertical, 1)
+                                .overlay(RoundedRectangle(cornerRadius: 3).strokeBorder(theme.accent.opacity(0.45), lineWidth: 1))
+                        } else {
+                            Image(systemName: "text.viewfinder")
+                        }
                     } else if record.source == "shortcut" {
                         Image(systemName: "square.2.layers.3d")
                     }
@@ -143,6 +152,12 @@ struct BudgetProgressView: View {
                 }
                 .lineLimit(1)
                 .minimumScaleFactor(0.8)
+                // 4.0：字符刻度条（||||||||）+ 细条并存，贴设计稿「字符刻度」
+                Text(Self.tickBarPublic(ratio: ratio))
+                    .font(theme.metaFont)
+                    .foregroundStyle(theme.budgetColor(ratio, threshold: 0.8))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.5)
                 ReceiptBar(ratio: ratio, fill: theme.budgetColor(ratio, threshold: 0.8), track: theme.rule.opacity(0.6))
             }
         } else {
@@ -166,6 +181,12 @@ struct BudgetProgressView: View {
                 .frame(height: 8)
             }
         }
+    }
+
+    /// 24 格字符进度：满格 ▓ / 空格 ░（等宽打印感）
+    static func tickBarPublic(ratio: Double, width: Int = 24) -> String {
+        let filled = max(0, min(width, Int((ratio * Double(width)).rounded())))
+        return String(repeating: "▓", count: filled) + String(repeating: "░", count: width - filled)
     }
 
     private func barColor(_ ratio: Double) -> Color {

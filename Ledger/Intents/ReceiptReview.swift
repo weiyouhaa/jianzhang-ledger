@@ -206,25 +206,36 @@ struct ReviewSnippetDemoView: View {
                         .font(.system(size: 13, weight: .bold))
                         .foregroundStyle(.white)
                         .frame(width: 24, height: 24)
-                        .background(Color.accentColor, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+                        .background((receipt ? Color(hex: "#A63628") : Color.accentColor),
+                                    in: RoundedRectangle(cornerRadius: 6, style: .continuous))
                     Text("简账 · 识图记账").font(.footnote.weight(.semibold)).foregroundStyle(.secondary)
                     Spacer()
+                    if receipt {
+                        Text("取消 ESC")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                            .padding(.horizontal, 8).padding(.vertical, 4)
+                            .background(RoundedRectangle(cornerRadius: 6).strokeBorder(Color.secondary.opacity(0.35)))
+                    }
                 }
                 Text("识别到 4 笔，请核对：").font(.headline)
                 ReviewSnippetView(title: "识别结果", rows: Self.rows)
                     .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
                 VStack(spacing: 8) {
-                    choice("✅ 全部保存（3 笔）", .accentColor, prominent: true)
+                    // 4.0 小票：朱砂印章主按钮 + 纸质存根副键；取消移到右上角热区外
+                    choice("核对无误 · 盖章入账（3 笔）", receipt ? Color(hex: "#A63628") : .accentColor, prominent: true)
                     HStack(spacing: 8) {
-                        choice("✏️ 修改第几笔…", .primary)
-                        choice("🗑 删除第几笔…", .red)
+                        choice("修改第几笔…", .primary)
+                        choice("撕毁作废", receipt ? Color(hex: "#A63628") : .red)
                     }
-                    choice("📄 下一页（第 3–4 笔）", .primary)
+                    choice("下一页（第 3–4 笔）", .primary)
                     HStack(spacing: 8) {
-                        choice("➕ 添加一笔（打开 App）", .primary)
-                        choice("♻️ 重复的 1 笔仍然保存", .primary)
+                        choice("添加一笔（打开 App）", .primary)
+                        choice("重复的 1 笔仍然保存", .primary)
                     }
-                    choice("取消", .secondary)
+                    if !receipt {
+                        choice("取消", .secondary)
+                    }
                 }
                 Text("示意图：需要改金额/商户/时间时选「在 App 里改」，会先保存再打开简账（弹窗内不再弹出键盘）。")
                     .font(.caption2)
@@ -237,15 +248,27 @@ struct ReviewSnippetDemoView: View {
         }
     }
 
+    private var receipt: Bool { AppSkin.current == .receipt }
+
     private func choice(_ title: String, _ color: Color, prominent: Bool = false) -> some View {
         Text(title)
-            .font(.subheadline.weight(.semibold))
+            .font(receipt ? .system(.subheadline, design: .serif).weight(.semibold) : .subheadline.weight(.semibold))
             .lineLimit(1)
             .minimumScaleFactor(0.8)
             .foregroundStyle(prominent ? Color.white : color)
             .frame(maxWidth: .infinity)
-            .padding(.vertical, 12)
-            .background(prominent ? AnyShapeStyle(Color.accentColor) : AnyShapeStyle(Color(.tertiarySystemFill)),
-                        in: Capsule())
+            .padding(.vertical, receipt ? 13 : 12)
+            .background(
+                prominent
+                    ? AnyShapeStyle(receipt ? Color(hex: "#A63628") : Color.accentColor)
+                    : AnyShapeStyle(receipt ? Color(hex: "#F2EDE2") : Color(.tertiarySystemFill)),
+                in: RoundedRectangle(cornerRadius: receipt ? 10 : 20, style: .continuous)
+            )
+            .overlay {
+                if receipt && !prominent {
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .strokeBorder(Color(hex: "#C9BFAE"), lineWidth: 1)
+                }
+            }
     }
 }

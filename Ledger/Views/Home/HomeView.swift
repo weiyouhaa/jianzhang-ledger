@@ -449,6 +449,11 @@ struct SummaryCard: View {
     /// 一个大号结余数字、两列对齐的支出 / 收入，预算用点引线行；只有这张 hero 卡用齿孔下沿
     private var receiptBody: some View {
         VStack(alignment: .leading, spacing: ReceiptStyle.Space.m) {
+            HStack(alignment: .firstTextBaseline) {
+                ReceiptLabelText(text: "MONTHLY STATEMENT", color: theme.faint)
+                Spacer()
+                ReceiptLabelText(text: "NO. \(Self.statementNo())", color: theme.faint)
+            }
             HStack(alignment: .center, spacing: ReceiptStyle.Space.xxs) {
                 if canStep {
                     Button(action: onPrevious) {
@@ -509,9 +514,9 @@ struct SummaryCard: View {
             }
 
             HStack(alignment: .top) {
-                StatBlock(title: "支出", value: Money.masked(expense, hidden: hideAmounts))
+                StatBlock(title: "支出 · OUT", value: Money.masked(expense, hidden: hideAmounts))
                 Spacer()
-                StatBlock(title: "收入", value: Money.masked(income, hidden: hideAmounts), alignment: .trailing)
+                StatBlock(title: "收入 · IN", value: Money.masked(income, hidden: hideAmounts), alignment: .trailing)
             }
 
             if budget > 0 && !hideAmounts {
@@ -524,6 +529,14 @@ struct SummaryCard: View {
         .padding(.bottom, ReceiptStyle.Space.m)
         .receiptSurface(theme, hero: true)
         .padding(.vertical, 4)
+    }
+
+    private static func statementNo() -> String {
+        let cal = DateText.calendar
+        let now = Date()
+        let y = cal.component(.year, from: now)
+        let m = cal.component(.month, from: now)
+        return String(format: "%04d%02d", y, m)
     }
 
     private var defaultBody: some View {
