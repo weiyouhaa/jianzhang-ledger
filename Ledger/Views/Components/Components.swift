@@ -138,26 +138,39 @@ struct BudgetProgressView: View {
         let ratio = budget > 0 ? spent / budget : 0
         let over = ratio > 1
         if theme.isReceipt {
-            // 3.5 (26) 小票皮肤：标签 ···· 数值 的点引线行 + 3pt 细条；超支用暗红、接近上限用赭石，不用系统红橙
+            // 4.1 设计稿：OVERRUN 朱砂印 + [|····] 字符刻度 + 细条
             VStack(alignment: .leading, spacing: ReceiptStyle.Space.xs) {
                 HStack(alignment: .firstTextBaseline, spacing: ReceiptStyle.Space.xs) {
                     ReceiptLabelText(text: title, color: theme.faint)
                     Text(Money.format(budget))
                         .font(theme.metaFont).monospacedDigit()
                         .foregroundStyle(theme.faint)
-                    DotLeader(color: theme.rule)
-                    Text(over ? "超支 \(Money.format(spent - budget))" : "剩余 \(Money.format(budget - spent))")
-                        .font(theme.metaFont).monospacedDigit()
-                        .foregroundStyle(over ? theme.accent : theme.ink)
+                    Spacer(minLength: 4)
+                    if over {
+                        Text("OVERRUN · 超支 \(Money.format(spent - budget))")
+                            .font(theme.labelFont)
+                            .foregroundStyle(theme.accent)
+                            .padding(.horizontal, 6).padding(.vertical, 3)
+                            .overlay(RoundedRectangle(cornerRadius: 3).strokeBorder(theme.accent.opacity(0.55), lineWidth: 1.2))
+                            .rotationEffect(.degrees(-2))
+                    } else {
+                        Text("剩余 \(Money.format(budget - spent))")
+                            .font(theme.metaFont).monospacedDigit()
+                            .foregroundStyle(theme.ink)
+                    }
                 }
                 .lineLimit(1)
-                .minimumScaleFactor(0.8)
-                // 4.0：字符刻度条（||||||||）+ 细条并存，贴设计稿「字符刻度」
-                Text(Self.tickBarPublic(ratio: ratio))
-                    .font(theme.metaFont)
-                    .foregroundStyle(theme.budgetColor(ratio, threshold: 0.8))
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.5)
+                .minimumScaleFactor(0.75)
+                HStack(spacing: 8) {
+                    Text(over ? "超支" : "剩余 \(Money.format(max(0, budget - spent)))")
+                        .font(theme.metaFont)
+                        .foregroundStyle(theme.budgetColor(ratio, threshold: 0.8))
+                    Text(Self.tickBarPublic(ratio: ratio))
+                        .font(theme.metaFont)
+                        .foregroundStyle(theme.budgetColor(ratio, threshold: 0.8))
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.5)
+                }
                 ReceiptBar(ratio: ratio, fill: theme.budgetColor(ratio, threshold: 0.8), track: theme.rule.opacity(0.6))
             }
         } else {
@@ -183,10 +196,10 @@ struct BudgetProgressView: View {
         }
     }
 
-    /// 24 格字符进度：满格 ▓ / 空格 ░（等宽打印感）
-    static func tickBarPublic(ratio: Double, width: Int = 24) -> String {
-        let filled = max(0, min(width, Int((ratio * Double(width)).rounded())))
-        return String(repeating: "▓", count: filled) + String(repeating: "░", count: width - filled)
+    /// 设计稿字符刻度：[||||||||····] 满格 | / 空格 ·
+    static func tickBarPublic(ratio: Double, width: Int = 20) -> String {
+        let filled = max(0, min(width, Int((min(ratio, 1) * Double(width)).rounded())))
+        return "[" + String(repeating: "|", count: filled) + String(repeating: "·", count: width - filled) + "]"
     }
 
     private func barColor(_ ratio: Double) -> Color {

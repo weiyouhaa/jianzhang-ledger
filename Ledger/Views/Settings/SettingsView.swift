@@ -12,6 +12,8 @@ struct SettingsView: View {
     @AppStorage(SettingsKey.currencySymbol) private var currencySymbol = "¥"
     @AppStorage(SettingsKey.appearance, store: .standard) private var appearance = 0
     @AppStorage(SettingsKey.skin, store: .standard) private var skinRaw = AppSkin.default.rawValue
+    @AppStorage(SettingsKey.receiptPaper, store: .standard) private var receiptPaperRaw = ReceiptPaper.cotton.rawValue
+    @AppStorage(SettingsKey.receiptFab, store: .standard) private var receiptFabRaw = ReceiptFabStyle.seal.rawValue
     @AppStorage(SettingsKey.defaultAccount) private var defaultAccount = ""
     @AppStorage(RepaymentSetting.key) private var repaymentAsExpense = false
     /// 识图「识别引擎」：设备级设置
@@ -450,14 +452,36 @@ struct SettingsView: View {
                 Label("皮肤", systemImage: "paintpalette.fill")
             }
             .accessibilityIdentifier("settings-skin")
+            if skinRaw == AppSkin.receipt.rawValue {
+                Picker(selection: $receiptPaperRaw) {
+                    ForEach(ReceiptPaper.allCases) { p in
+                        Text(p.label).tag(p.rawValue)
+                    }
+                } label: {
+                    Label("小票纸张", systemImage: "doc.plaintext")
+                }
+                .accessibilityIdentifier("settings-receipt-paper")
+                Picker(selection: $receiptFabRaw) {
+                    ForEach(ReceiptFabStyle.allCases) { f in
+                        Text(f.label).tag(f.rawValue)
+                    }
+                } label: {
+                    Label("悬浮记账", systemImage: "plus.viewfinder")
+                }
+                .accessibilityIdentifier("settings-receipt-fab")
+            }
             SkinLivePreview(skin: AppSkin.stored(skinRaw))
                 .listRowInsets(EdgeInsets(top: 10, leading: 16, bottom: 10, trailing: 16))
                 .listRowBackground(Color.clear)
                 .animation(.easeInOut(duration: 0.2), value: skinRaw)
+                .animation(.easeInOut(duration: 0.2), value: receiptPaperRaw)
         } header: { ThemedSectionHeader {
             Text("外观")
         } } footer: { ThemedSectionFooter {
-            Text(AppSkin.stored(skinRaw).detail + "。皮肤为设备级设置，真实账本与防窥账本外观一致。")
+            let paperNote = skinRaw == AppSkin.receipt.rawValue
+                ? " 当前纸张：" + (ReceiptPaper(rawValue: receiptPaperRaw) ?? .cotton).detail + "。"
+                : ""
+            Text(AppSkin.stored(skinRaw).detail + paperNote + " 皮肤与纸张为设备级设置，真实账本与防窥账本外观一致。")
         } }
     }
 

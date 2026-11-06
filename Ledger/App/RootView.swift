@@ -7,6 +7,8 @@ struct RootView: View {
     @Environment(\.scenePhase) private var scenePhase
     @AppStorage(SettingsKey.appearance, store: .standard) private var appearance = 0
     @AppStorage(SettingsKey.skin, store: .standard) private var skinRaw = AppSkin.default.rawValue
+    @AppStorage(SettingsKey.receiptPaper, store: .standard) private var receiptPaperRaw = ReceiptPaper.cotton.rawValue
+    @AppStorage(SettingsKey.receiptFab, store: .standard) private var receiptFabRaw = ReceiptFabStyle.seal.rawValue
     @AppStorage(SettingsKey.hideInAppSwitcher, store: .standard) private var hideInAppSwitcher = true
     @State private var lockWindowShown = false
     /// 3.2 (23) 当前已应用到 UIKit 外观（导航栏 / 标签栏）的皮肤；变化时整棵主界面重建一次
@@ -18,7 +20,7 @@ struct RootView: View {
         ZStack {
             MainTabView(tab: $tab)
                 .modifier(RootThemeInjector(skinRaw: chromeSkin))
-                .id(chromeSkin)
+                .id("\(chromeSkin)-\(receiptPaperRaw)-\(receiptFabRaw)")
 
             if ScreenshotDemo.screen == "reviewsnippet" {
                 ReviewSnippetDemoView().zIndex(3)

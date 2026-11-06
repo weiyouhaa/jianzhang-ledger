@@ -14,6 +14,8 @@ struct RecordEditorView: View {
     var prefill: RecordPrefill? = nil
     /// 资产页长按信用卡「还款」：直接进入信用卡还款，并选好这张卡
     var repayCardID: UUID? = nil
+    /// 4.1 设计稿：从「识图」入口打开时，记账弹窗内置切到截屏识图子模式
+    var startInOCRMode: Bool = false
 
     @Environment(\.modelContext) private var context
     @Environment(\.dismiss) private var dismiss
@@ -46,6 +48,9 @@ struct RecordEditorView: View {
     @State private var ruleHint: String?
     /// 支出页的「信用卡还款」：保存为 付款账户 → 负债账户 的转账（付款账户减少，欠款减少，默认不计入支出统计）
     @State private var repayMode = false
+    /// receipt 皮肤记一笔双模：manual / ocr（贴设计稿顶栏切换）
+    private enum EditorSubmode: String { case manual, ocr }
+    @State private var editorSubmode: EditorSubmode = .manual
 
     @State private var photoItem: PhotosPickerItem?
     @State private var isRecognizing = false
@@ -120,6 +125,37 @@ struct RecordEditorView: View {
     var body: some View {
         NavigationStack {
             ThemedForm {
+                if theme.isReceipt && record == nil {
+                    Section {
+                        Picker("记账方式", selection: $editorSubmode) {
+                            Text("⌨️ 手工记账").tag(EditorSubmode.manual)
+                            Text("📷 截屏识图").tag(EditorSubmode.ocr)
+                        }
+                        .pickerStyle(.segmented)
+                        .listRowSeparator(.hidden)
+                        .accessibilityIdentifier("editor-submode")
+                    }
+                }
+                if theme.isReceipt && record == nil && editorSubmode == .ocr {
+                    Section {
+                        PhotosPicker(selection: $photoItem, matching: .images, photoLibrary: .shared()) {
+                            HStack {
+                                Label(isRecognizing ? "正在识别…" : "选择支付截图识别", systemImage: "text.viewfinder")
+                                Spacer()
+                                if isRecognizing { ProgressView() }
+                            }
+                        }
+                        .disabled(isRecognizing)
+                        .accessibilityIdentifier("editor-ocr-picker")
+                        if let ocrEngineLine {
+                            Text(ocrEngineLine)
+                                .font(.ui(.caption2))
+                                .foregroundStyle(.secondary)
+                        }
+                    } footer: { ThemedSectionFooter {
+                        Text("在本机识别金额、商户、时间与付款账户；识别后可直接改字段再保存。图片不会上传。")
+                    } }
+                }
                 Section {
                     if kind == .adjustment {
                         Label("余额校准（不计入收支统计）", systemImage: "slider.horizontal.3")
@@ -192,7 +228,7 @@ struct RecordEditorView: View {
                     }
                 } }
 
-                if kind.countsInStats {
+                if kind.countsInStats && !(theme.isReceipt && record == nil && editorSubmode == .ocr) {
                     Section {
                         PhotosPicker(selection: $photoItem, matching: .images, photoLibrary: .shared()) {
                             HStack {
@@ -276,6 +312,7 @@ struct RecordEditorView: View {
                 }
             }
             .onAppear {
+                if startInOCRMode { editorSubmode = .ocr }
                 load()
                 // 预加载端侧模型，选图识别时少等冷启动
                 AppleIntelligenceExtractor.prewarm()

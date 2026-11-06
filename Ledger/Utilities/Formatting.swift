@@ -105,6 +105,10 @@ enum SettingsKey {
     static let currencySymbol = "currencySymbol"
     static let appearance = "appearance"          // 0 跟随系统 1 浅色 2 深色
     static let skin = "appearance.skin"            // default / receipt（设备级，真实防窥共用）
+    /// 小票纸张：cotton 棉浆白 / vintage 原浆暖黄（设备级；深色仍跟系统明暗）
+    static let receiptPaper = "appearance.receiptPaper"
+    /// 小票悬浮记账方案：seal 双联火漆 / capsule 中置出纸 / pulltab 侧边拉环
+    static let receiptFab = "appearance.receiptFab"
     static let editorCardCollapsed = "appearance.editorCardCollapsed"  // 编辑页顶部卡片折叠（设备级，真实防窥共用）
     static let defaultAccount = "defaultAccount"
     static let hideInAppSwitcher = "hideInAppSwitcher"

@@ -14,14 +14,23 @@ struct HomeView: View {
     @State private var editorTarget: EditorTarget?
     @State private var pendingDelete: LedgerRecord?
     @State private var showDemoSearch = false
+    @State private var stubTarget: ReceiptStubTarget?
+
+    struct ReceiptStubTarget: Identifiable {
+        let id: UUID
+        let record: LedgerRecord
+        init(_ record: LedgerRecord) { self.id = record.id; self.record = record }
+    }
 
     enum EditorTarget: Identifiable {
         case new
+        case newOCR
         case edit(LedgerRecord)
 
         var id: String {
             switch self {
             case .new: return "new"
+            case .newOCR: return "new-ocr"
             case .edit(let r): return "edit-" + r.id.uuidString
             }
         }
@@ -34,21 +43,32 @@ struct HomeView: View {
                            showRangeSheet: $showRangeSheet,
                            editorTarget: $editorTarget,
                            pendingDelete: $pendingDelete,
-                           showDemoSearch: $showDemoSearch)
+                           showDemoSearch: $showDemoSearch,
+                           stubTarget: $stubTarget)
             .themedRootTitle("简账")
+            .toolbar {
+                if theme.isReceipt {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Text("FOLIO · 纸本账")
+                            .font(theme.labelFont)
+                            .foregroundStyle(theme.accent)
+                            .padding(.horizontal, 6).padding(.vertical, 3)
+                            .overlay(RoundedRectangle(cornerRadius: 3).strokeBorder(theme.accent.opacity(0.55), lineWidth: 1))
+                            .accessibilityLabel("纸本账")
+                    }
+                }
+            }
             .overlay(alignment: .bottomTrailing) {
-                Button {
-                    editorTarget = .new
-                } label: {
-                    if theme.isReceipt {
-                        // 3.5 (26) 小票皮肤：实色暗红圆章，细投影，不用渐变和彩色光晕
-                        Image(systemName: "plus")
-                            .font(.system(size: 22, weight: .semibold))
-                            .foregroundStyle(theme.paper)
-                            .frame(width: 56, height: 56)
-                            .background(Circle().fill(theme.accent))
-                            .shadow(color: Color.black.opacity(0.16), radius: 4, y: 2)
-                    } else {
+                if theme.isReceipt {
+                    ReceiptHomeFab(
+                        style: ReceiptFabStyle.current,
+                        onAdd: { editorTarget = .new },
+                        onOCR: { editorTarget = .newOCR }
+                    )
+                    .padding(.trailing, 18)
+                    .padding(.bottom, 18)
+                } else {
+                    Button { editorTarget = .new } label: {
                         Image(systemName: "plus")
                             .font(.ui(.title2).weight(.bold))
                             .foregroundStyle(.white)
@@ -56,19 +76,26 @@ struct HomeView: View {
                             .background(Circle().fill(Color.themeAccent.gradient))
                             .shadow(color: Color.themeAccent.opacity(0.4), radius: 10, y: 5)
                     }
+                    .accessibilityLabel("记一笔")
+                    .accessibilityIdentifier("home-add")
+                    .padding(.trailing, 22)
+                    .padding(.bottom, 20)
                 }
-                .accessibilityLabel("记一笔")
-                .accessibilityIdentifier("home-add")
-                .padding(.trailing, 22)
-                .padding(.bottom, 20)
             }
             .navigationDestination(isPresented: $showDemoSearch) { SearchView() }
             .sheet(item: $editorTarget) { target in
                 switch target {
                 case .new:
                     RecordEditorView(record: nil, initialDate: newRecordDate)
+                case .newOCR:
+                    RecordEditorView(record: nil, initialDate: newRecordDate, startInOCRMode: true)
                 case .edit(let record):
                     RecordEditorView(record: record)
+                }
+            }
+            .sheet(item: $stubTarget) { target in
+                ReceiptStubSheet(record: target.record) {
+                    editorTarget = .edit(target.record)
                 }
             }
             .sheet(isPresented: $showRangeSheet) {
@@ -135,18 +162,22 @@ private struct HomeRecordList: View {
     @Binding var editorTarget: HomeView.EditorTarget?
     @Binding var pendingDelete: LedgerRecord?
     @Binding var showDemoSearch: Bool
+    @Binding var stubTarget: HomeView.ReceiptStubTarget?
+    @Environment(\.appTheme) private var theme
 
     /// 范围内（单月时多带上个月，供预算结转）的记录；余额校准在谓词里就排除（2.0 (13)：只在账户明细和变动日志里显示）
     @Query private var queried: [LedgerRecord]
 
     init(range: Binding<HomeDateRange>, collapsedDays: Binding<Set<Date>>, showRangeSheet: Binding<Bool>,
-         editorTarget: Binding<HomeView.EditorTarget?>, pendingDelete: Binding<LedgerRecord?>, showDemoSearch: Binding<Bool>) {
+         editorTarget: Binding<HomeView.EditorTarget?>, pendingDelete: Binding<LedgerRecord?>, showDemoSearch: Binding<Bool>,
+         stubTarget: Binding<HomeView.ReceiptStubTarget?>) {
         _range = range
         _collapsedDays = collapsedDays
         _showRangeSheet = showRangeSheet
         _editorTarget = editorTarget
         _pendingDelete = pendingDelete
         _showDemoSearch = showDemoSearch
+        _stubTarget = stubTarget
         let r = range.wrappedValue
         let lo = r.queryLowerBound(calendar: DateText.calendar) ?? Date.distantPast
         let hi = r.end ?? Date.distantFuture
@@ -243,7 +274,13 @@ private struct HomeRecordList: View {
                         if !collapsed {
                             ForEach(group.records) { record in
                                 // 3.8 (29)：Button 替代 onTapGesture，UI 测试点标题文字也能打开编辑页
-                                Button { editorTarget = .edit(record) } label: {
+                                Button {
+                                    if theme.isReceipt {
+                                        stubTarget = ReceiptStubTarget(record)
+                                    } else {
+                                        editorTarget = .edit(record)
+                                    }
+                                } label: {
                                     RecordRow(record: record)
                                 }
                                 .buttonStyle(.borderless)
@@ -452,7 +489,7 @@ struct SummaryCard: View {
             HStack(alignment: .firstTextBaseline) {
                 ReceiptLabelText(text: "MONTHLY STATEMENT", color: theme.faint)
                 Spacer()
-                ReceiptLabelText(text: "NO. \(Self.statementNo())", color: theme.faint)
+                ReceiptLabelText(text: "NO. \(Self.statementNo(count: count))", color: theme.faint)
             }
             HStack(alignment: .center, spacing: ReceiptStyle.Space.xxs) {
                 if canStep {
@@ -496,14 +533,14 @@ struct SummaryCard: View {
                     .accessibilityLabel("下一段")
                 }
                 Spacer(minLength: ReceiptStyle.Space.xs)
-                ReceiptLabelText(text: "\(count) 笔", color: theme.faint)
+                ReceiptLabelText(text: "共 \(count) 笔", color: theme.faint)
             }
             .buttonStyle(.plain)
 
             ThemedDashedRule()
 
             VStack(alignment: .leading, spacing: ReceiptStyle.Space.xs) {
-                ReceiptLabelText(text: balanceTitle, color: theme.faint)
+                ReceiptLabelText(text: balanceTitle + " · NET BALANCE", color: theme.faint)
                 Text(Money.masked(income - expense, hidden: hideAmounts))
                     .font(theme.heroAmountFont)
                     .monospacedDigit()
@@ -514,9 +551,9 @@ struct SummaryCard: View {
             }
 
             HStack(alignment: .top) {
-                StatBlock(title: "支出 · OUT", value: Money.masked(expense, hidden: hideAmounts))
+                StatBlock(title: "总支出 · OUT", value: Money.masked(expense, hidden: hideAmounts))
                 Spacer()
-                StatBlock(title: "收入 · IN", value: Money.masked(income, hidden: hideAmounts), alignment: .trailing)
+                StatBlock(title: "总收入 · IN", value: Money.masked(income, hidden: hideAmounts), alignment: .trailing)
             }
 
             if budget > 0 && !hideAmounts {
@@ -531,12 +568,13 @@ struct SummaryCard: View {
         .padding(.vertical, 4)
     }
 
-    private static func statementNo() -> String {
+    private static func statementNo(count: Int) -> String {
         let cal = DateText.calendar
         let now = Date()
         let y = cal.component(.year, from: now)
         let m = cal.component(.month, from: now)
-        return String(format: "%04d%02d", y, m)
+        // 设计稿：NO. 202611-020（年月-笔数，三位）
+        return String(format: "%04d%02d-%03d", y, m, max(0, min(count, 999)))
     }
 
     private var defaultBody: some View {

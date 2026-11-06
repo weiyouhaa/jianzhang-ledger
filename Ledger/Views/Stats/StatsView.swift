@@ -188,12 +188,19 @@ struct StatsView: View {
         let days = max(1, daysElapsed())
         return card {
             VStack(spacing: 14) {
+                if theme.isReceipt {
+                    HStack {
+                        ReceiptLabelText(text: "LEDGER AUDIT", color: theme.faint)
+                        Spacer()
+                        ReceiptLabelText(text: periodTitle, color: theme.faint)
+                    }
+                }
                 HStack {
-                    StatBlock(title: "支出", value: Money.format(expense))
+                    StatBlock(title: theme.isReceipt ? "总支出 · OUT" : "支出", value: Money.format(expense))
                     Spacer()
-                    StatBlock(title: "收入", value: Money.format(income), alignment: .center)
+                    StatBlock(title: theme.isReceipt ? "总收入 · IN" : "收入", value: Money.format(income), alignment: .center)
                     Spacer()
-                    StatBlock(title: "结余", value: Money.format(income - expense), alignment: .trailing)
+                    StatBlock(title: theme.isReceipt ? "结余 · NET" : "结余", value: Money.format(income - expense), alignment: .trailing)
                 }
                 Divider()
                 HStack {
@@ -209,12 +216,12 @@ struct StatsView: View {
         let selected = totals.first { $0.id == selectedPieID }
         return card {
             VStack(alignment: .leading, spacing: 12) {
-                Text("\(kind.title)构成").font(cardTitleFont)
+                Text(theme.isReceipt ? "\(kind.title)构成 · STAMP" : "\(kind.title)构成").font(cardTitleFont)
                 Chart(totals) { item in
                     SectorMark(
                         angle: .value("金额", item.total),
-                        innerRadius: .ratio(0.62),
-                        angularInset: 1.5
+                        innerRadius: .ratio(theme.isReceipt ? 0.68 : 0.62),
+                        angularInset: theme.isReceipt ? 2.2 : 1.5
                     )
                     .cornerRadius(4)
                     .foregroundStyle(item.color)
