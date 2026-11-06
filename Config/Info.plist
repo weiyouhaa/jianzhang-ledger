@@ -37,6 +37,8 @@
 	<key>UIAppFonts</key>
 	<array>
 		<string>SpecialElite-Regular.ttf</string>
+		<string>IBMPlexMono-Regular.otf</string>
+		<string>IBMPlexMono-Bold.otf</string>
 		<string>CourierPrime-Regular.ttf</string>
 		<string>CourierPrime-Bold.ttf</string>
 		<string>JZNotoSerifSC-Regular.ttf</string>

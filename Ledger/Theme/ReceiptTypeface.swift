@@ -7,7 +7,7 @@ import UIKit
 
 // 3.2 (23) 小票皮肤字体（只依赖 SwiftUI + CoreText，CI 在 macOS 上渲染预览时也能用）。
 // - 大标题 / 粗体数字：Special Elite（Apache 2.0，做旧打字机，与参考图「Receipt Atlas / RECEIPT」同款）
-// - 正文：Courier Prime（SIL OFL 1.1，干净的打字机等宽）
+// - 正文数字：4.1 起 IBM Plex Mono（SIL OFL 1.1，设计稿指定）；Courier Prime 仍打包作回落
 // - 中文：3.6 (27) 起打包「思源宋体」同源的 Noto Serif SC（SIL OFL 1.1）子集，改名为 JZ Noto Serif SC，
 //   常规 / 粗体两档，收录 GB2312 全部 + App 内所有中文 + 全角标点。两款拉丁字体都没有中文字形，
 //   用 CoreText 级联（cascade list）回落：打包宋体 → 系统宋体（有的话）→ 系统中文字体（苹方）。
@@ -15,10 +15,15 @@ import UIKit
 // 字体文件和许可证在 Ledger/Resources/Fonts/，Info.plist 的 UIAppFonts 注册。
 enum ReceiptTypeface {
     static let display = "SpecialElite-Regular"
-    static let mono = "CourierPrime-Regular"
-    static let monoBold = "CourierPrime-Bold"
+    /// 4.1：设计稿 IBM Plex Mono；不可用时回落 Courier Prime
+    static let mono = "IBMPlexMono"
+    static let monoBold = "IBMPlexMono-Bold"
+    static let monoFallback = "CourierPrime-Regular"
+    static let monoBoldFallback = "CourierPrime-Bold"
     static let fileNames = [
-        "SpecialElite-Regular.ttf", "CourierPrime-Regular.ttf", "CourierPrime-Bold.ttf",
+        "SpecialElite-Regular.ttf",
+        "IBMPlexMono-Regular.otf", "IBMPlexMono-Bold.otf",
+        "CourierPrime-Regular.ttf", "CourierPrime-Bold.ttf",
         "JZNotoSerifSC-Regular.ttf", "JZNotoSerifSC-Bold.ttf",
     ]
 
@@ -31,13 +36,15 @@ enum ReceiptTypeface {
 
     /// 中文级联列表：只放确实已注册的字体（3.3 的空白标题就是级联到不存在的字体引起的），最后由系统补苹方
     static func cjkCascadeNames(for name: String) -> [String] {
-        let regular = (name == mono)
+        let regular = (name == mono || name == monoFallback)
         return [regular ? cjkSerif : cjkSerifBold, regular ? systemSerif : systemSerifBold].filter(isAvailable)
     }
 
-    /// 打包字体加载失败时的兜底（系统自带 Courier New）
+    /// 打包字体加载失败时的兜底：先 Courier Prime，再系统 Courier New
     private static func systemFallback(for name: String) -> String {
-        name == mono ? "CourierNewPSMT" : "CourierNewPS-BoldMT"
+        if name == mono { return isAvailable(monoFallback) ? monoFallback : "CourierNewPSMT" }
+        if name == monoBold { return isAvailable(monoBoldFallback) ? monoBoldFallback : "CourierNewPS-BoldMT" }
+        return name.contains("Bold") || name.contains("bold") ? "CourierNewPS-BoldMT" : "CourierNewPSMT"
     }
 
     // MARK: SwiftUI Font

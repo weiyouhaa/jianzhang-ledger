@@ -18,7 +18,7 @@ enum AppSkin: String, CaseIterable, Identifiable {
     var detail: String {
         switch self {
         case .default: return "青绿渐变卡片，圆角系统风格"
-        case .receipt: return "棉浆白纸 · 宋体/打字机 · 朱砂印章 · 齿孔小票"
+        case .receipt: return "棉浆白/原浆暖黄 · IBM Plex Mono · 朱砂印章 · 立体纸感"
         }
     }
 
@@ -70,22 +70,23 @@ struct AppTheme: Equatable {
                 usesTypewriter: false
             )
         case .receipt:
-            // 3.5 (26) 色板统一由 ReceiptStyle 提供（App、快捷指令片段、预览共用）
+            // 4.1：按纸张方案（棉浆白 / 原浆暖黄）+ 明暗解析；深色统一炭票
             let dark = scheme == .dark
+            let pal = ReceiptStyle.palette(paper: ReceiptPaper.current, dark: dark)
             let c = { (p: ReceiptStyle.Pair) in ReceiptStyle.color(p, dark: dark) }
             return AppTheme(
                 skin: .receipt, scheme: dark ? .dark : .light,
-                accent: c(ReceiptStyle.accent),
-                income: c(ReceiptStyle.income),
-                ink: c(ReceiptStyle.ink),
-                faint: c(ReceiptStyle.faint),
-                rule: c(ReceiptStyle.rule),
-                paper: c(ReceiptStyle.paper),
-                backdrop: c(ReceiptStyle.backdrop),
-                heroFill: [c(ReceiptStyle.paper)],
-                heroInk: c(ReceiptStyle.ink),
-                heroFaint: c(ReceiptStyle.faint),
-                cardFill: c(ReceiptStyle.paper),
+                accent: c(pal.accent),
+                income: c(pal.income),
+                ink: c(pal.ink),
+                faint: c(pal.faint),
+                rule: c(pal.rule),
+                paper: c(pal.paper),
+                backdrop: c(pal.backdrop),
+                heroFill: [c(pal.paper)],
+                heroInk: c(pal.ink),
+                heroFaint: c(pal.faint),
+                cardFill: c(pal.elevated),
                 cardCorner: ReceiptStyle.corner,
                 usesDashedRules: true,
                 usesTypewriter: true
@@ -216,18 +217,40 @@ extension View {
     /// 3.5 (26) 小票皮肤卡片底：普通卡片 = 纸面圆角；hero = 上圆角 + 下沿齿孔 + 极淡投影
     @ViewBuilder
     func receiptSurface(_ theme: AppTheme, hero: Bool = false) -> some View {
+        // 4.1 V4：多层纸感阴影（近距 + 中距 + 远距），模拟设计稿 drop-shadow 叠层
+        let dark = theme.scheme == .dark
+        let near = Color.black.opacity(dark ? 0.55 : 0.10)
+        let mid = Color.black.opacity(dark ? 0.35 : 0.08)
+        let far = Color.black.opacity(dark ? 0.22 : 0.05)
         if hero {
             self
                 .padding(.bottom, 4)
                 .background(
                     PerforatedCardShape()
                         .fill(theme.paper)
-                        .shadow(color: Color.black.opacity(theme.scheme == .dark ? 0.25 : 0.05), radius: 1.5, y: 1)
+                        .shadow(color: near, radius: 1.2, y: 1)
+                        .shadow(color: mid, radius: 8, y: 5)
+                        .shadow(color: far, radius: 18, y: 12)
                 )
+                .overlay(alignment: .top) {
+                    // 顶部卷纸高光
+                    LinearGradient(
+                        colors: [
+                            Color.white.opacity(dark ? 0.08 : 0.55),
+                            Color.clear
+                        ],
+                        startPoint: .top, endPoint: .bottom
+                    )
+                    .frame(height: 18)
+                    .clipShape(PerforatedCardShape())
+                    .allowsHitTesting(false)
+                }
         } else {
             self.background(
                 RoundedRectangle(cornerRadius: ReceiptStyle.corner, style: .continuous)
-                    .fill(theme.paper)
+                    .fill(theme.cardFill)
+                    .shadow(color: near, radius: 1.0, y: 1)
+                    .shadow(color: mid, radius: 6, y: 4)
             )
         }
     }
