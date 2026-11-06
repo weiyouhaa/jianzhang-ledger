@@ -123,6 +123,7 @@ jobs:
           shoot settings dark  34-receipt-settings-dark receipt
           shoot settings light 41-receipt-settings receipt
           shoot add      light 35-receipt-add receipt
+          shoot addocr   light 42-receipt-ocr receipt
           shoot reviewsnippet light 36-receipt-review-snippet receipt
           shoot lock     dark  37-receipt-lock-dark receipt
           ls -l screenshots

@@ -86,6 +86,25 @@ struct StatsView: View {
 
                     overviewCard(expense: expense, income: income, count: periodRecords.count)
 
+                    Picker("类型", selection: $kind) {
+                        ForEach(RecordKind.categoryKinds) { k in Text(k.title).tag(k) }
+                    }
+                    .pickerStyle(.segmented)
+
+                    // 4.2 设计稿：印章环紧接审计单，预算单在后（小票皮肤）
+                    if kindRecords.isEmpty {
+                        card {
+                            ThemedEmptyState("暂无\(kind.title)数据", systemImage: "chart.pie",
+                                                   description: Text("换个时间段看看吧"))
+                        }
+                    } else {
+                        pieCard(totals: totals, total: total)
+                        if !theme.isReceipt {
+                            trendCard(trend: trend)
+                            rankingCard(totals: totals, total: total, records: kindRecords)
+                        }
+                    }
+
                     if period == .month {
                         let status = BudgetService.status(records: allRecords, categories: categories, month: anchor, prefs: prefs)
                         if status.total != nil || !status.categories.isEmpty {
@@ -100,18 +119,7 @@ struct StatsView: View {
                         }
                     }
 
-                    Picker("类型", selection: $kind) {
-                        ForEach(RecordKind.categoryKinds) { k in Text(k.title).tag(k) }
-                    }
-                    .pickerStyle(.segmented)
-
-                    if kindRecords.isEmpty {
-                        card {
-                            ThemedEmptyState("暂无\(kind.title)数据", systemImage: "chart.pie",
-                                                   description: Text("换个时间段看看吧"))
-                        }
-                    } else {
-                        pieCard(totals: totals, total: total)
+                    if !kindRecords.isEmpty && theme.isReceipt {
                         trendCard(trend: trend)
                         rankingCard(totals: totals, total: total, records: kindRecords)
                     }
@@ -196,11 +204,11 @@ struct StatsView: View {
                     }
                 }
                 HStack {
-                    StatBlock(title: theme.isReceipt ? "总支出 · OUT" : "支出", value: Money.format(expense))
+                    StatBlock(title: "支出", value: Money.format(expense))
                     Spacer()
-                    StatBlock(title: theme.isReceipt ? "总收入 · IN" : "收入", value: Money.format(income), alignment: .center)
+                    StatBlock(title: "收入", value: Money.format(income), alignment: .center)
                     Spacer()
-                    StatBlock(title: theme.isReceipt ? "结余 · NET" : "结余", value: Money.format(income - expense), alignment: .trailing)
+                    StatBlock(title: "结余", value: Money.format(income - expense), alignment: .trailing)
                 }
                 Divider()
                 HStack {

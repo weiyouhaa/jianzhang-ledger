@@ -350,6 +350,7 @@ private struct HomeRecordList: View {
         .task {
             // 截图模式：直接打开记一笔 / 搜索
             if ScreenshotDemo.screen == "add" && editorTarget == nil { editorTarget = .new }
+            if ScreenshotDemo.screen == "addocr" && editorTarget == nil { editorTarget = .newOCR }
             if ScreenshotDemo.screen == "search" && !showDemoSearch { showDemoSearch = true }
             if ScreenshotDemo.screen == "editrec" && editorTarget == nil {
                 // 3.4 (25) 截图：打开一条演示记录的编辑页（悬浮卡片）

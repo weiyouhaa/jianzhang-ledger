@@ -3,6 +3,7 @@ import SwiftData
 import AppIntents
 
 struct SettingsView: View {
+    @Environment(\.appTheme) private var theme
     @EnvironmentObject private var lock: AppLockManager
     @Environment(\.modelContext) private var context
     @Query(sort: \LedgerRecord.date, order: .reverse) private var records: [LedgerRecord]
@@ -47,6 +48,9 @@ struct SettingsView: View {
     var body: some View {
         NavigationStack {
             ThemedForm {
+                if theme.isReceipt {
+                    appearanceSection
+                }
                 securitySection
                 if !session.isDecoy {
                     bookkeepingSection
@@ -56,7 +60,9 @@ struct SettingsView: View {
                 } else {
                     decoyDataSection
                 }
-                appearanceSection
+                if !theme.isReceipt {
+                    appearanceSection
+                }
                 if !session.isDecoy {
                     dataSection
                 }
