@@ -1,6 +1,12 @@
 import SwiftUI
 import SwiftData
 
+private struct ReceiptStubTarget: Identifiable {
+    let id: UUID
+    let record: LedgerRecord
+    init(_ record: LedgerRecord) { self.id = record.id; self.record = record }
+}
+
 struct HomeView: View {
     @Environment(\.modelContext) private var context
     @Environment(\.scenePhase) private var scenePhase
@@ -15,12 +21,6 @@ struct HomeView: View {
     @State private var pendingDelete: LedgerRecord?
     @State private var showDemoSearch = false
     @State private var stubTarget: ReceiptStubTarget?
-
-    struct ReceiptStubTarget: Identifiable {
-        let id: UUID
-        let record: LedgerRecord
-        init(_ record: LedgerRecord) { self.id = record.id; self.record = record }
-    }
 
     enum EditorTarget: Identifiable {
         case new
@@ -162,7 +162,7 @@ private struct HomeRecordList: View {
     @Binding var editorTarget: HomeView.EditorTarget?
     @Binding var pendingDelete: LedgerRecord?
     @Binding var showDemoSearch: Bool
-    @Binding var stubTarget: HomeView.ReceiptStubTarget?
+    @Binding var stubTarget: ReceiptStubTarget?
     @Environment(\.appTheme) private var theme
 
     /// 范围内（单月时多带上个月，供预算结转）的记录；余额校准在谓词里就排除（2.0 (13)：只在账户明细和变动日志里显示）
@@ -170,7 +170,7 @@ private struct HomeRecordList: View {
 
     init(range: Binding<HomeDateRange>, collapsedDays: Binding<Set<Date>>, showRangeSheet: Binding<Bool>,
          editorTarget: Binding<HomeView.EditorTarget?>, pendingDelete: Binding<LedgerRecord?>, showDemoSearch: Binding<Bool>,
-         stubTarget: Binding<HomeView.ReceiptStubTarget?>) {
+         stubTarget: Binding<ReceiptStubTarget?>) {
         _range = range
         _collapsedDays = collapsedDays
         _showRangeSheet = showRangeSheet
