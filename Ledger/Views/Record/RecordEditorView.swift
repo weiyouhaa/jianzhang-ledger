@@ -21,6 +21,7 @@ struct RecordEditorView: View {
     @Environment(\.dismiss) private var dismiss
     @Query(sort: \LedgerCategory.sortOrder) private var allCategories: [LedgerCategory]
     @Query(sort: \LedgerAccount.sortOrder) private var allAccounts: [LedgerAccount]
+    @Query(sort: \CategoryRule.hitCount, order: .reverse) private var allRules: [CategoryRule]
     @AppStorage(SettingsKey.defaultAccount) private var defaultAccount = ""
     @Environment(\.ledgerPrefs) private var prefs
     @Environment(\.appTheme) private var theme
@@ -52,10 +53,11 @@ struct RecordEditorView: View {
     private enum EditorSubmode: String { case manual, ocr }
     @State private var editorSubmode: EditorSubmode = .manual
 
-    @State private var photoItem: PhotosPickerItem?
+    @State private var photoItems: [PhotosPickerItem] = []
     @State private var isRecognizing = false
     @State private var alertMessage: String?
     @State private var showDeleteConfirm = false
+    @State private var savedCountInSession = 0
     @State private var detectedReceipts: [ParsedReceipt] = []
     @State private var showReceiptPicker = false
     /// 上次识图使用的引擎（Apple 智能 / 规则）及回退说明
@@ -123,8 +125,17 @@ struct RecordEditorView: View {
     }
 
     var body: some View {
-        if theme.isReceipt && record == nil {
-            ReceiptCashierView(initialDate: initialDate, startInOCRMode: startInOCRMode)
+        // 4.3 (46)：修改已有记录统一走系统表单（record != nil 不进收银台）；收银台只用于新建 / 再来一笔 / 退款
+        if theme.isReceipt && record == nil && initialKind != .contribution && initialKind != .adjustment {
+            ReceiptCashierView(
+                record: record,
+                initialDate: initialDate,
+                initialKind: initialKind,
+                presetAccountID: presetAccountID,
+                prefill: prefill,
+                repayCardID: repayCardID,
+                startInOCRMode: startInOCRMode
+            )
         } else {
         NavigationStack {
             ThemedForm {
@@ -141,9 +152,9 @@ struct RecordEditorView: View {
                 }
                 if theme.isReceipt && record == nil && editorSubmode == .ocr {
                     Section {
-                        PhotosPicker(selection: $photoItem, matching: .images, photoLibrary: .shared()) {
+                        PhotosPicker(selection: $photoItems, maxSelectionCount: 10, matching: .images, photoLibrary: .shared()) {
                             HStack {
-                                Label(isRecognizing ? "正在识别…" : "选择支付截图识别", systemImage: "text.viewfinder")
+                                Label(isRecognizing ? "正在识别…" : "选择支付截图识别（可多选）", systemImage: "text.viewfinder")
                                 Spacer()
                                 if isRecognizing { ProgressView() }
                             }
@@ -212,6 +223,38 @@ struct RecordEditorView: View {
 
                 Section {
                     DatePicker("时间", selection: $date)
+                    HStack(spacing: 8) {
+                        Text("快捷日期")
+                            .font(.ui(.caption))
+                            .foregroundStyle(.secondary)
+                        Spacer()
+                        ForEach([(0, "今天"), (-1, "昨天"), (-2, "前天")], id: \.0) { offset, label in
+                            let targetDate = Calendar.current.date(byAdding: .day, value: offset, to: Date()) ?? Date()
+                            let isSameDay = Calendar.current.isDate(date, inSameDayAs: targetDate)
+                            Button {
+                                ReceiptHaptics.selection()
+                                let cal = Calendar.current
+                                let comps = cal.dateComponents([.hour, .minute, .second], from: date)
+                                withAnimation(.snappy(duration: 0.22)) {
+                                    if let d = cal.date(byAdding: .day, value: offset, to: Date()),
+                                       let merged = cal.date(bySettingHour: comps.hour ?? 12, minute: comps.minute ?? 0, second: comps.second ?? 0, of: d) {
+                                        date = merged
+                                    } else {
+                                        date = targetDate
+                                    }
+                                }
+                            } label: {
+                                Text(label)
+                                    .font(.ui(.caption).weight(isSameDay ? .semibold : .regular))
+                                    .padding(.horizontal, 10)
+                                    .padding(.vertical, 4)
+                                    .background(Capsule().fill(isSameDay ? Color.themeAccent.opacity(0.16) : Color(.secondarySystemFill)))
+                                    .foregroundStyle(isSameDay ? Color.themeAccent : .primary)
+                                    .scaleEffect(isSameDay ? 1.03 : 1.0)
+                            }
+                            .buttonStyle(ReceiptPressButtonStyle())
+                        }
+                    }
                     if let ocrTimeHint, ocrTimeHintDate == date {
                         Label(ocrTimeHint, systemImage: "clock.badge.questionmark")
                             .font(.ui(.caption))
@@ -223,6 +266,30 @@ struct RecordEditorView: View {
                     if kind.countsInStats && !repayMode {
                         TextField("商户（可选）", text: $merchant)
                             .accessibilityIdentifier("editor-merchant")
+                        let suggestions = suggestedMerchants
+                        if !suggestions.isEmpty {
+                            ScrollView(.horizontal, showsIndicators: false) {
+                                HStack(spacing: 6) {
+                                    Text("常去：")
+                                        .font(.ui(.caption2))
+                                        .foregroundStyle(.secondary)
+                                    ForEach(suggestions, id: \.self) { m in
+                                        Button {
+                                            UISelectionFeedbackGenerator().selectionChanged()
+                                            merchant = m
+                                        } label: {
+                                            Text(m)
+                                                .font(.ui(.caption))
+                                                .padding(.horizontal, 9)
+                                                .padding(.vertical, 4)
+                                                .background(Capsule().fill(merchant == m ? Color.themeAccent.opacity(0.16) : Color(.secondarySystemFill)))
+                                                .foregroundStyle(merchant == m ? Color.themeAccent : .primary)
+                                        }
+                                        .buttonStyle(.plain)
+                                    }
+                                }
+                            }
+                        }
                         accountPicker(title: "账户", selection: userAccountBinding, allowNone: true)
                     }
                 } footer: { ThemedSectionFooter {
@@ -233,22 +300,38 @@ struct RecordEditorView: View {
 
                 if kind.countsInStats && !(theme.isReceipt && record == nil && editorSubmode == .ocr) {
                     Section {
-                        PhotosPicker(selection: $photoItem, matching: .images, photoLibrary: .shared()) {
+                        PhotosPicker(selection: $photoItems, maxSelectionCount: 10, matching: .images, photoLibrary: .shared()) {
                             HStack {
-                                Label("从支付截图识别填写", systemImage: "text.viewfinder")
+                                Label("从支付截图识别填写（支持多选）", systemImage: "text.viewfinder")
                                 Spacer()
                                 if isRecognizing { ProgressView() }
                             }
                         }
                         .disabled(isRecognizing)
-                        .confirmationDialog("识别到 \(detectedReceipts.count) 笔交易，选择要填写的一笔", isPresented: $showReceiptPicker,
+                        .confirmationDialog("识别到 \(detectedReceipts.count) 笔交易，选择入账方式", isPresented: $showReceiptPicker,
                                             titleVisibility: .visible) {
+                            Button("一键全部入账（共 \(detectedReceipts.count) 笔）") {
+                                let saved = Self.batchInsert(
+                                    receipts: detectedReceipts,
+                                    reference: ocrReference ?? Date(),
+                                    fallback: ocrFallback ?? CaptureTime(date: date, source: .now),
+                                    defaultAccountName: defaultAccount,
+                                    allCategories: allCategories,
+                                    selectableAccounts: selectableAccounts,
+                                    in: context
+                                )
+                                if saved > 0 {
+                                    UINotificationFeedbackGenerator().notificationOccurred(.success)
+                                    BudgetMonitor.check(in: context)
+                                    dismiss()
+                                }
+                            }
                             ForEach(Array(detectedReceipts.enumerated()), id: \.offset) { _, r in
-                                Button(Self.receiptTitle(r)) { apply(r) }
+                                Button("单选微调：" + Self.receiptTitle(r)) { apply(r) }
                             }
                             Button("取消", role: .cancel) {}
                         } message: {
-                            Text("其余几笔可再次识别后选择，或用快捷指令「识图记账」一次全部记入。" + (ocrEngineLine.map { "\n" + $0 } ?? ""))
+                            Text("可直接一次全部记入账本，或单选其中一笔在表单中微调。" + (ocrEngineLine.map { "\n" + $0 } ?? ""))
                         }
                     } footer: { ThemedSectionFooter {
                         VStack(alignment: .leading, spacing: 4) {
@@ -260,6 +343,26 @@ struct RecordEditorView: View {
                             }
                         }
                     } }
+                }
+
+                if record == nil {
+                    Section {
+                        Button {
+                            save(keepOpen: true)
+                        } label: {
+                            HStack {
+                                Label("保存并再记一笔", systemImage: "arrow.triangle.2.circlepath")
+                                Spacer()
+                                if savedCountInSession > 0 {
+                                    Text("已连记 \(savedCountInSession) 笔")
+                                        .font(.ui(.caption))
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
+                        }
+                        .disabled(!canSave)
+                        .accessibilityIdentifier("editor-save-next")
+                    }
                 }
 
                 if let record, record.kind != .adjustment {
@@ -317,8 +420,11 @@ struct RecordEditorView: View {
             .onAppear {
                 if startInOCRMode { editorSubmode = .ocr }
                 load()
-                // 预加载端侧模型，选图识别时少等冷启动
-                AppleIntelligenceExtractor.prewarm()
+                if record == nil {
+                    // 预加载端侧模型（带当前分类与账户词表），选图识别时直接复用已预热会话
+                    let vocab = DataStore.ocrVocabulary(categories: allCategories, accounts: allAccounts, isDecoy: SessionManager.shared.isDecoy)
+                    AppleIntelligenceExtractor.prewarm(vocabulary: vocab)
+                }
             }
             .onChange(of: kind) { _, newKind in
                 if newKind != .expense { repayMode = false }
@@ -333,9 +439,9 @@ struct RecordEditorView: View {
             .onChange(of: merchant) { _, value in
                 applyRule(merchant: value, overrideCategory: !categoryTouched)
             }
-            .onChange(of: photoItem) { _, item in
-                guard let item else { return }
-                Task { await recognize(item) }
+            .onChange(of: photoItems) { _, items in
+                guard !items.isEmpty else { return }
+                Task { await recognizeBatch(items) }
             }
             .alert("提示", isPresented: alertBinding) {
                 Button("好", role: .cancel) { alertMessage = nil }
@@ -673,6 +779,21 @@ struct RecordEditorView: View {
         Binding(get: { accountID }, set: { accountID = $0; accountTouched = true })
     }
 
+    private var suggestedMerchants: [String] {
+        let catID = selectedCategoryID?.uuidString ?? ""
+        var out: [String] = []
+        for r in allRules where r.isEnabled {
+            let name = (r.displayName.isEmpty ? r.keyword : r.displayName).trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !name.isEmpty, !out.contains(name) else { continue }
+            if !catID.isEmpty && r.categoryID == catID {
+                out.insert(name, at: 0)
+            } else if r.kind == nil || r.kind == kind {
+                out.append(name)
+            }
+        }
+        return Array(out.prefix(8))
+    }
+
     /// 套用记账规则（分类记忆）。只影响新记录，且不覆盖用户手动选择的分类 / 账户。
     private func applyRule(merchant value: String, overrideCategory: Bool) {
         guard record == nil, kind.countsInStats else { return }
@@ -745,7 +866,7 @@ struct RecordEditorView: View {
         }
     }
 
-    private func save() {
+    private func save(keepOpen: Bool = false) {
         guard let amount = parsedAmount, amountValid else {
             alertMessage = "请输入有效的金额"
             return
@@ -763,7 +884,7 @@ struct RecordEditorView: View {
         let toAccount: LedgerAccount? = kind == .transfer ? allAccounts.first(where: { $0.id == toAccountID }) : nil
         let fee: Double
         if repayMode {
-            fee = record?.isCreditRepayment == true ? (record?.fee ?? 0) : 0
+            fee = record?.isCreditRepayment == true ? (record?.fee ?? 0) : max(0, Money.parse(feeText) ?? 0)
         } else {
             fee = kind == .transfer ? max(0, Money.parse(feeText) ?? 0) : 0
         }
@@ -805,6 +926,16 @@ struct RecordEditorView: View {
             }
             UINotificationFeedbackGenerator().notificationOccurred(.success)
             BudgetMonitor.check(in: context)
+            if keepOpen {
+                savedCountInSession += 1
+                amountText = ""
+                feeText = ""
+                note = ""
+                merchant = ""
+                ruleHint = nil
+                amountFocused = true
+                return
+            }
             dismiss()
         } catch {
             alertMessage = "保存失败：\(error.localizedDescription)"
@@ -813,50 +944,69 @@ struct RecordEditorView: View {
 
     private func deleteRecord() {
         guard let record else { return }
-        context.delete(record)
-        try? context.save()
+        let ctx = context
         dismiss()
+        // 等 sheet 退场后再删除，避免退场重绘时读取已删除的模型对象
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+            ctx.delete(record)
+            try? ctx.save()
+        }
     }
 
     // MARK: - 识图
 
     @MainActor
-    private func recognize(_ item: PhotosPickerItem) async {
+    private func recognizeBatch(_ items: [PhotosPickerItem]) async {
         isRecognizing = true
         defer {
             isRecognizing = false
-            photoItem = nil
+            photoItems = []
         }
-        do {
-            guard let data = try await item.loadTransferable(type: Data.self) else {
-                alertMessage = "无法读取这张图片"
-                return
+        let vocab = DataStore.ocrVocabulary(categories: allCategories, accounts: allAccounts, isDecoy: SessionManager.shared.isDecoy)
+        var allFound: [ParsedReceipt] = []
+        var firstRaw: [ParsedReceipt] = []
+        var lastEngineLine: String? = nil
+
+        for item in items {
+            do {
+                guard let data = try await item.loadTransferable(type: Data.self) else { continue }
+                let started = Date()
+                let capture = ScreenshotTime.capture(data: data, assetIdentifier: item.itemIdentifier, now: started)
+                let reference = CaptureTime.reference(capture: capture, now: started)
+                RunLog.shared.log(.info, "capture-time", "截图时间：\(capture?.source.logTag ?? "无（按现在）")")
+                let recognition = try await ReceiptRecognizer.recognizeDetailed(imageData: data, now: reference, vocabulary: vocab)
+                lastEngineLine = recognition.engineLine
+                let fb = CaptureTime.fallback(capture: capture, statusBar: recognition.statusBarClock,
+                                              now: Date(), calendar: .current)
+                ocrReference = reference
+                ocrFallback = fb
+                let valid = recognition.receipts.filter { ($0.amount ?? 0) > 0 }.map { r -> ParsedReceipt in
+                    var copy = r
+                    if copy.date == nil {
+                        let resolved = CaptureTime.resolve(recognized: nil, reference: reference, fallback: fb)
+                        if resolved.source != .now { copy.date = resolved.date }
+                    }
+                    return copy
+                }
+                allFound.append(contentsOf: valid)
+                if firstRaw.isEmpty { firstRaw = recognition.receipts }
+            } catch {
+                alertMessage = "识别失败：\(error.localizedDescription)"
             }
-            let vocab = OCRVocabulary(
-                expenseCategories: allCategories.filter { $0.kind == .expense }.map(\.name),
-                incomeCategories: allCategories.filter { $0.kind == .income }.map(\.name),
-                accounts: allAccounts.filter { !$0.isArchived }.map(\.name))
-            // 截图时间：照片库创建时间（只在已有照片权限时读取，不弹权限）→ 图片 EXIF / XMP 拍摄时间
-            let started = Date()
-            let capture = ScreenshotTime.capture(data: data, assetIdentifier: item.itemIdentifier, now: started)
-            let reference = CaptureTime.reference(capture: capture, now: started)
-            RunLog.shared.log(.info, "capture-time", "截图时间：\(capture?.source.logTag ?? "无（按现在）")")
-            let recognition = try await ReceiptRecognizer.recognizeDetailed(imageData: data, now: reference, vocabulary: vocab)
-            ocrEngineLine = recognition.engineLine
-            ocrReference = reference
-            ocrFallback = CaptureTime.fallback(capture: capture, statusBar: recognition.statusBarClock,
-                                               now: Date(), calendar: .current)
-            let all = recognition.receipts
-            let found = all.filter { ($0.amount ?? 0) > 0 }
-            if found.count > 1 {
-                // 一张截图里有多笔：让用户选择要填写哪一笔
-                detectedReceipts = found
-                showReceiptPicker = true
-            } else {
-                apply(found.first ?? all.first ?? ParsedReceipt())
-            }
-        } catch {
-            alertMessage = "识别失败：\(error.localizedDescription)"
+        }
+
+        if items.count > 1 {
+            ocrEngineLine = "已选 \(items.count) 张截图 · 识别到 \(allFound.count) 笔" + (lastEngineLine.map { " · " + $0 } ?? "")
+        } else {
+            ocrEngineLine = lastEngineLine
+        }
+        if allFound.count > 1 {
+            detectedReceipts = allFound
+            showReceiptPicker = true
+        } else if let single = allFound.first ?? firstRaw.first {
+            apply(single)
+        } else {
+            alertMessage = "无法识别图片中的交易信息"
         }
     }
 
@@ -874,6 +1024,7 @@ struct RecordEditorView: View {
             alertMessage = "没有识别到金额，请手动填写"
             return
         }
+        feeText = (parsed.fee ?? 0) > 0 ? String(format: "%.2f", parsed.fee!) : ""
         if parsed.isCardRepayment {
             kind = .expense
             amountText = String(format: "%.2f", amount)
@@ -885,6 +1036,7 @@ struct RecordEditorView: View {
                 accountID = payer.id
             }
             enterRepayMode(card: card?.type.isLiability == true ? card?.id : nil)
+            if note.isEmpty || source == "ocr" { note = parsed.discountNote ?? "" }
             ocrAccountTail = parsed.accountHint?.cardTail
             ocrCardTail = parsed.repaymentCard?.cardTail
             source = "ocr"
@@ -901,7 +1053,9 @@ struct RecordEditorView: View {
                                        excluding: from?.id, in: context)
             if let from { accountID = from.id }
             toAccountID = to?.id == accountID ? nil : to?.id
-            if note.isEmpty, let n = parsed.transferNote { note = n }
+            if note.isEmpty || source == "ocr" {
+                note = [parsed.transferNote, parsed.discountNote].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · ")
+            }
             ocrAccountTail = parsed.transferFrom?.cardTail
             ocrCardTail = parsed.transferTo?.cardTail
             source = "ocr"
@@ -910,10 +1064,10 @@ struct RecordEditorView: View {
         kind = parsed.isIncome ? .income : .expense
         amountText = String(format: "%.2f", amount)
         if let m = parsed.merchant { merchant = m }
-        if note.isEmpty, let n = parsed.discountNote { note = n }
+        if note.isEmpty || source == "ocr" { note = parsed.discountNote ?? "" }
         applyDate(parsed)
         let list = allCategories.filter { $0.kind == kind }
-        let hit = RuleStore.match(merchant: parsed.merchant ?? "", kind: kind, in: context, countHit: false)
+        let hit = RuleStore.match(merchant: parsed.merchant ?? "", text: parsed.discountNote ?? note, kind: kind, in: context, countHit: false)
         if let c = hit?.category, c.kind == kind {
             // 记账规则优先于关键词猜测
             selectedCategoryID = c.id
@@ -949,5 +1103,92 @@ struct RecordEditorView: View {
     private func account(named name: String?) -> LedgerAccount? {
         guard let name, !name.isEmpty else { return nil }
         return allAccounts.first(where: { $0.name == name && !$0.isArchived })
+    }
+
+    /// 多笔截图一键批量入账（复用与单笔相同的分类规则、账户匹配与信用卡还款/互转识别）
+    @MainActor
+    static func batchInsert(
+        receipts: [ParsedReceipt],
+        reference: Date,
+        fallback: CaptureTime,
+        defaultAccountName: String,
+        allCategories: [LedgerCategory],
+        selectableAccounts: [LedgerAccount],
+        in context: ModelContext
+    ) -> Int {
+        var saved = 0
+        let defaultAcc = (defaultAccountName.isEmpty ? nil : defaultAccountName).flatMap { name in
+            selectableAccounts.first(where: { $0.name == name })
+        } ?? selectableAccounts.first
+
+        for parsed in receipts {
+            guard let amount = parsed.amount, amount > 0 else { continue }
+            let t = CaptureTime.resolve(recognized: parsed.date, reference: reference, fallback: fallback)
+            let recDate = t.date
+            let feeVal = max(0, parsed.fee ?? 0)
+
+            if parsed.isCardRepayment {
+                let card = DataStore.account(matching: parsed.repaymentCard ?? AccountHint(type: "credit"),
+                                             modelName: parsed.repaymentCardName, role: .card, in: context)
+                    ?? selectableAccounts.filter { $0.type.isLiability }.first
+                let payer = DataStore.account(matching: parsed.accountHint, modelName: parsed.accountName, role: .payer,
+                                              excluding: card?.id, in: context)
+                    ?? selectableAccounts.filter { !$0.type.isLiability && !$0.type.isSocialSecurity && $0.id != card?.id }.first
+                let rec = LedgerRecord(amount: (amount * 100).rounded() / 100, kind: .transfer, category: nil,
+                                       note: parsed.discountNote ?? "", merchant: "信用卡还款",
+                                       account: payer?.name ?? "", date: recDate, source: "ocr")
+                rec.accountRef = payer
+                rec.toAccount = card
+                rec.fee = feeVal
+                context.insert(rec)
+                CardTailMemory.learn(tail: parsed.accountHint?.cardTail, accountID: payer?.id)
+                CardTailMemory.learn(tail: parsed.repaymentCard?.cardTail, accountID: card?.id)
+                saved += 1
+                continue
+            }
+
+            if parsed.isSelfTransfer {
+                let from = DataStore.account(matching: parsed.transferFrom, modelName: parsed.transferFromName, role: .single, in: context)
+                let to = DataStore.account(matching: parsed.transferTo, modelName: parsed.transferToName, role: .single,
+                                           excluding: from?.id, in: context)
+                let note = [parsed.transferNote, parsed.discountNote].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · ")
+                let rec = LedgerRecord(amount: (amount * 100).rounded() / 100, kind: .transfer, category: nil,
+                                       note: note, merchant: parsed.transferNote ?? "转账",
+                                       account: from?.name ?? "", date: recDate, source: "ocr")
+                rec.accountRef = from
+                rec.toAccount = to?.id == from?.id ? nil : to
+                rec.fee = feeVal
+                context.insert(rec)
+                CardTailMemory.learn(tail: parsed.transferFrom?.cardTail, accountID: from?.id)
+                CardTailMemory.learn(tail: parsed.transferTo?.cardTail, accountID: to?.id)
+                saved += 1
+                continue
+            }
+
+            let recKind: RecordKind = parsed.isIncome ? .income : .expense
+            let list = allCategories.filter { $0.kind == recKind }
+            let hit = RuleStore.match(merchant: parsed.merchant ?? "", text: parsed.discountNote ?? "", kind: recKind, in: context, countHit: true)
+            let cat: LedgerCategory? = {
+                if let c = hit?.category, c.kind == recKind { return c }
+                if let name = parsed.categoryName, let c = list.first(where: { $0.name == name }) { return c }
+                return list.first
+            }()
+            let from = DataStore.account(matching: parsed.accountHint, modelName: parsed.accountName, role: .single, in: context)
+                ?? selectableAccounts.first(where: { $0.name == (parsed.accountName ?? "") })
+                ?? hit?.account
+                ?? RuleStore.lastAccount(for: cat, in: context)
+                ?? defaultAcc
+            let rec = LedgerRecord(amount: (amount * 100).rounded() / 100, kind: recKind, category: cat,
+                                   note: parsed.discountNote ?? "", merchant: parsed.merchant ?? "",
+                                   account: from?.name ?? "", date: recDate, source: "ocr")
+            rec.accountRef = from
+            context.insert(rec)
+            CardTailMemory.learn(tail: parsed.accountHint?.cardTail, accountID: from?.id)
+            saved += 1
+        }
+        if saved > 0 {
+            try? context.save()
+        }
+        return saved
     }
 }

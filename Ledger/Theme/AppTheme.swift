@@ -94,9 +94,11 @@ struct AppTheme: Equatable {
         }
     }
 
-    /// 预算接近上限的提示色：默认皮肤 = 系统橙；小票皮肤 = 赭石
+    /// 预算接近上限的提示色：默认皮肤 = 系统橙；小票皮肤 = 赭石（跟随纸张方案）
     var caution: Color {
-        isReceipt ? ReceiptStyle.color(ReceiptStyle.caution, dark: scheme == .dark) : .orange
+        guard isReceipt else { return .orange }
+        let dark = scheme == .dark
+        return ReceiptStyle.color(ReceiptStyle.palette(paper: ReceiptPaper.current, dark: dark).caution, dark: dark)
     }
 
     /// 预算超支 / 进度条颜色（默认皮肤保持原来的红 / 橙 / 绿）
@@ -106,12 +108,36 @@ struct AppTheme: Equatable {
         return isReceipt ? ink.opacity(0.72) : income
     }
 
-    /// 3.5 (26) 小票皮肤字号档位（hero 34 / title 20 / body 16 / meta 13 / label 11）
-    var heroAmountFont: Font { ReceiptTypeface.scaled(ReceiptTypeface.monoBold, ReceiptStyle.Size.hero, relativeTo: .largeTitle) }
-    var sectionTitleFont: Font { ReceiptTypeface.scaled(ReceiptTypeface.display, ReceiptStyle.Size.title, relativeTo: .title3) }
-    var rowTitleFont: Font { ReceiptTypeface.scaled(ReceiptTypeface.mono, ReceiptStyle.Size.body, relativeTo: .body) }
-    var rowAmountFont: Font { ReceiptTypeface.scaled(ReceiptTypeface.monoBold, ReceiptStyle.Size.body, relativeTo: .body) }
+    /// 设计稿字号档位（hero 32 / title 20 / row 15 / amount 14 / meta 12 / label 10.5）
+    /// 数字一律 IBM Plex Mono 常规字重：设计稿的金额是 400，不用粗体压纸面。
+    var heroAmountFont: Font { ReceiptTypeface.scaled(ReceiptTypeface.mono, ReceiptStyle.Size.hero, relativeTo: .largeTitle) }
+    var sectionTitleFont: Font { ReceiptTypeface.scaled(ReceiptTypeface.cjkSerifBold, ReceiptStyle.Size.title, relativeTo: .title3) }
+    var rowTitleFont: Font { ReceiptTypeface.scaled(ReceiptTypeface.cjkSerifBold, ReceiptStyle.Size.rowTitle, relativeTo: .body) }
+    var rowAmountFont: Font { ReceiptTypeface.scaled(ReceiptTypeface.mono, ReceiptStyle.Size.rowAmount + 0.5, relativeTo: .body) }
+    var strongAmountFont: Font { ReceiptTypeface.scaled(ReceiptTypeface.monoBold, ReceiptStyle.Size.rowAmount, relativeTo: .body) }
     var metaFont: Font { ReceiptTypeface.scaled(ReceiptTypeface.mono, ReceiptStyle.Size.meta, relativeTo: .footnote) }
+
+    /// 设计稿里的宋体小标题（预算 / 支出构成 / 今天 / 净资产…）
+    var serifTitleFont: Font {
+        ReceiptTypeface.scaled(ReceiptTypeface.cjkSerifBold, ReceiptStyle.Size.rowTitle, relativeTo: .body)
+    }
+    /// 票面说明标签（11-12pt 宋体常规）
+    var serifLabelFont: Font {
+        ReceiptTypeface.scaled(ReceiptTypeface.cjkSerif, ReceiptStyle.Size.meta, relativeTo: .footnote)
+    }
+    var serifSectionFont: Font {
+        ReceiptTypeface.scaled(ReceiptTypeface.cjkSerifBold, ReceiptStyle.Size.title, relativeTo: .title3)
+    }
+    /// 票面卡片标题（支出构成 / 预算 / 分类排行）
+    var cardTitleFont: Font {
+        ReceiptTypeface.scaled(ReceiptTypeface.cjkSerifBold, ReceiptStyle.Size.cardTitle, relativeTo: .headline)
+    }
+
+    /// 固定字号金额（收银台 26 / 凭条 26 / 净资产 30）
+    func amountFont(_ size: CGFloat, weight: Font.Weight = .regular) -> Font {
+        let bold = weight == .semibold || weight == .bold || weight == .heavy || weight == .black
+        return ReceiptTypeface.scaled(bold ? ReceiptTypeface.monoBold : ReceiptTypeface.mono, size, relativeTo: .body)
+    }
 
     /// 小票皮肤的小号字距标签字体
     var labelFont: Font {
@@ -214,45 +240,82 @@ struct ThemedCardBackground: ViewModifier {
 }
 
 extension View {
-    /// 3.5 (26) 小票皮肤卡片底：普通卡片 = 纸面圆角；hero = 上圆角 + 下沿齿孔 + 极淡投影
+    /// 小票纸面。hero = 下沿锯齿撕边；slot = 上沿机械出纸口。
     @ViewBuilder
-    func receiptSurface(_ theme: AppTheme, hero: Bool = false) -> some View {
-        // 4.1 V4：多层纸感阴影（近距 + 中距 + 远距），模拟设计稿 drop-shadow 叠层
-        let dark = theme.scheme == .dark
-        let near = Color.black.opacity(dark ? 0.55 : 0.10)
-        let mid = Color.black.opacity(dark ? 0.35 : 0.08)
-        let far = Color.black.opacity(dark ? 0.22 : 0.05)
-        if hero {
-            self
-                .padding(.bottom, 4)
-                .background(
-                    PerforatedCardShape()
-                        .fill(theme.paper)
-                        .shadow(color: near, radius: 1.2, y: 1)
-                        .shadow(color: mid, radius: 8, y: 5)
-                        .shadow(color: far, radius: 18, y: 12)
-                )
-                .overlay(alignment: .top) {
-                    // 顶部卷纸高光
-                    LinearGradient(
-                        colors: [
-                            Color.white.opacity(dark ? 0.08 : 0.55),
-                            Color.clear
-                        ],
-                        startPoint: .top, endPoint: .bottom
-                    )
-                    .frame(height: 18)
-                    .clipShape(PerforatedCardShape())
-                    .allowsHitTesting(false)
-                }
+    func receiptSurface(_ theme: AppTheme, hero: Bool = false, slot: Bool = false) -> some View {
+        let sheet = ReceiptSheetBody(hero: hero) { self }
+        if slot {
+            VStack(spacing: -5) {
+                PrinterSlot()
+                sheet
+            }
         } else {
-            self.background(
-                RoundedRectangle(cornerRadius: ReceiptStyle.corner, style: .continuous)
-                    .fill(theme.cardFill)
-                    .shadow(color: near, radius: 1.0, y: 1)
-                    .shadow(color: mid, radius: 6, y: 4)
-            )
+            sheet
         }
+    }
+}
+
+/// 纸面本体：卷纸高光、纤维点、内倒角、三层投影。锯齿用形状本身投下阴影。
+private struct ReceiptSheetBody<Content: View>: View {
+    var hero: Bool
+    @ViewBuilder var content: Content
+    @Environment(\.appTheme) private var theme
+
+    var body: some View {
+        let dark = theme.scheme == .dark
+        let near = Color.black.opacity(dark ? 0.62 : 0.16)
+        let mid = Color.black.opacity(dark ? 0.42 : 0.12)
+        let far = Color.black.opacity(dark ? 0.32 : 0.08)
+        let shape = hero
+            ? AnyShape(PerforatedCardShape())
+            : AnyShape(RoundedRectangle(cornerRadius: ReceiptStyle.corner, style: .continuous))
+        // 性能：投影只加在纸面底形上（不再对整张票面内容做 3 次离屏模糊），
+        // 纤维点用预渲染的平铺小图，滚动时不再逐点重绘。
+        content
+            .padding(.bottom, hero ? 6 : 0)
+            .background {
+                shape.fill(hero ? theme.paper : theme.cardFill)
+                    .shadow(color: near, radius: 1.5, y: 1)
+                    .shadow(color: far, radius: 14, y: 9)
+            }
+            .overlay {
+                ReceiptFiber()
+                    .clipShape(shape)
+                    .allowsHitTesting(false)
+            }
+            .overlay(alignment: .top) {
+                LinearGradient(
+                    colors: [
+                        Color.white.opacity(dark ? 0.10 : 0.72),
+                        Color.white.opacity(dark ? 0.02 : 0.0)
+                    ],
+                    startPoint: .top, endPoint: .bottom
+                )
+                .frame(height: 22)
+                .clipShape(shape)
+                .allowsHitTesting(false)
+            }
+            .overlay(shape.stroke(Color.white.opacity(dark ? 0.08 : 0.75), lineWidth: 0.9))
+            .overlay(shape.stroke(theme.rule.opacity(dark ? 0.55 : 0.65), lineWidth: 0.6))
+            .padding(.bottom, hero ? 8 : 0)
+    }
+}
+
+/// 极淡棉浆纤维点，不参与点击（预渲染 14×14 平铺小图，只生成一次）
+private struct ReceiptFiber: View {
+    private static let tile: UIImage = {
+        let size = CGSize(width: 14, height: 14)
+        let format = UIGraphicsImageRendererFormat.default()
+        format.opaque = false
+        return UIGraphicsImageRenderer(size: size, format: format).image { ctx in
+            UIColor(red: 0.55, green: 0.46, blue: 0.35, alpha: 0.05).setFill()
+            ctx.cgContext.fillEllipse(in: CGRect(x: 2, y: 2, width: 1, height: 1))
+        }
+    }()
+
+    var body: some View {
+        Image(uiImage: Self.tile)
+            .resizable(resizingMode: .tile)
     }
 }
 
@@ -326,12 +389,23 @@ struct SkinLivePreview: View {
             }
         }
         .padding(14)
-        .background(
-            RoundedRectangle(cornerRadius: theme.cardCorner, style: .continuous)
-                .fill(theme.paper)
-        )
+        .modifier(SkinPreviewPaper(theme: theme))
         .environment(\.appTheme, theme)
         .tint(theme.accent)
+    }
+}
+
+private struct SkinPreviewPaper: ViewModifier {
+    let theme: AppTheme
+    func body(content: Content) -> some View {
+        if theme.isReceipt {
+            content.receiptSurface(theme, hero: true, slot: true)
+        } else {
+            content.background(
+                RoundedRectangle(cornerRadius: theme.cardCorner, style: .continuous)
+                    .fill(theme.paper)
+            )
+        }
     }
 }
 

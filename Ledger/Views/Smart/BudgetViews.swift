@@ -16,37 +16,35 @@ struct BudgetLineRow: View {
         }
     }
 
-    /// 3.5 (26) 小票皮肤：名称 / 已用 ··· 百分比 两列对齐，细条，状态色降饱和
+    /// 设计稿预算执行单：分类名 + 已用 / 预算（含百分比）一行，剩余 + 字符刻度一行，行间实线
     private func receiptBody(_ ratio: Double) -> some View {
-        VStack(alignment: .leading, spacing: ReceiptStyle.Space.xs) {
-            HStack(spacing: ReceiptStyle.Space.s) {
-                CategoryIcon(icon: line.icon, color: Color.skinTint(line.colorHex), size: compact ? 26 : 30)
-                VStack(alignment: .leading, spacing: ReceiptStyle.Space.xxs) {
-                    HStack(alignment: .firstTextBaseline, spacing: ReceiptStyle.Space.xs) {
-                        Text(line.name).font(theme.rowTitleFont).foregroundStyle(theme.ink)
-                        DotLeader(color: theme.rule)
-                        Text("\(Money.percent(ratio))%")
-                            .font(theme.rowAmountFont).monospacedDigit()
-                            .foregroundStyle(ratio >= 0.8 ? theme.budgetColor(ratio) : theme.ink)
-                    }
-                    HStack(alignment: .firstTextBaseline) {
-                        Text(line.isOver ? "超支 \(Money.format(line.spent - line.budget))" : "剩余 \(Money.format(line.remaining))")
-                            .foregroundStyle(line.isOver ? theme.accent : theme.faint)
-                        Spacer(minLength: ReceiptStyle.Space.xs)
-                        Text("\(Money.format(line.spent)) / \(Money.format(line.budget))")
-                            .foregroundStyle(theme.faint)
-                    }
+        VStack(alignment: .leading, spacing: ReceiptStyle.Space.xxs) {
+            HStack(alignment: .firstTextBaseline, spacing: ReceiptStyle.Space.xs) {
+                Text(line.name)
+                    .font(theme.serifTitleFont)
+                    .foregroundStyle(theme.ink)
+                Spacer(minLength: ReceiptStyle.Space.xs)
+                Text("\(Money.format(line.spent)) / \(Money.format(line.budget))")
                     .font(theme.metaFont).monospacedDigit()
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.8)
-                }
+                    .foregroundStyle(theme.ink)
+                Text("(\(Money.percent(ratio))%)")
+                    .font(theme.metaFont).monospacedDigit()
+                    .foregroundStyle(theme.faint)
             }
-            Text(BudgetProgressView.tickBarPublic(ratio: ratio))
-                .font(theme.metaFont)
-                .foregroundStyle(theme.budgetColor(ratio))
-                .lineLimit(1)
-                .minimumScaleFactor(0.5)
-            ReceiptBar(ratio: ratio, fill: theme.budgetColor(ratio), track: theme.rule.opacity(0.6))
+            .lineLimit(1)
+            .minimumScaleFactor(0.8)
+
+            HStack(alignment: .firstTextBaseline, spacing: ReceiptStyle.Space.xs) {
+                Text(line.isOver ? "超支 \(Money.format(line.spent - line.budget))" : "剩余 \(Money.format(line.remaining))")
+                    .foregroundStyle(line.isOver ? theme.accent : theme.faint)
+                Spacer(minLength: ReceiptStyle.Space.xs)
+                Text(BudgetProgressView.tickBarPublic(ratio: ratio))
+                    .foregroundStyle(theme.budgetColor(ratio))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.5)
+            }
+            .font(theme.metaFont).monospacedDigit()
+
             if line.carry != 0 {
                 Text("含上月结转 \(line.carry > 0 ? "+" : "")\(Money.format(line.carry))")
                     .font(theme.metaFont)
@@ -132,17 +130,61 @@ struct BudgetView: View {
         ThemedForm {
             if status.total != nil || status.yearly != nil {
                 Section {
-                    if let t = status.total { BudgetLineRow(line: t).padding(.vertical, 4) }
+                    if let t = status.total {
+                        BudgetLineRow(line: t).padding(.vertical, 4)
+                        if !t.isOver && t.remaining > 0 {
+                            let cal = DateText.calendar
+                            let now = Date()
+                            let totalDays = cal.range(of: .day, in: .month, for: now)?.count ?? 30
+                            let todayDay = cal.component(.day, from: now)
+                            let leftDays = max(1, totalDays - todayDay + 1)
+                            HStack {
+                                Label("本月剩余 \(leftDays) 天 · 日均可花", systemImage: "calendar.day.timeline.left")
+                                    .font(.ui(.caption))
+                                    .foregroundStyle(.secondary)
+                                Spacer()
+                                Text(Money.format(t.remaining / Double(leftDays)) + " / 天")
+                                    .font(.ui(.caption).weight(.semibold).monospacedDigit())
+                                    .foregroundStyle(Color.themeIncome)
+                                    .contentTransition(.numericText())
+                            }
+                        }
+                    }
                     if let y = status.yearly { BudgetLineRow(line: y).padding(.vertical, 4) }
                 } header: { ThemedSectionHeader { Text("本期进度") } }
             }
 
             Section {
                 amountField("每月总预算", text: $monthlyText) { monthly = $0 }
+                if categorySum > 0 && abs(monthly - categorySum) > 0.01 {
+                    Button {
+                        ReceiptHaptics.success()
+                        withAnimation(.spring(response: 0.35, dampingFraction: 0.82)) {
+                            monthly = categorySum
+                            monthlyText = Money.plain(categorySum)
+                        }
+                    } label: {
+                        Label("用分类预算合计设为月总预算（\(Money.format(categorySum))）", systemImage: "sum")
+                            .font(.ui(.caption))
+                    }
+                }
                 Toggle(isOn: $rollover) {
                     Label("结余结转到下月", systemImage: "arrow.uturn.forward")
                 }
                 amountField("年度总预算", text: $yearlyText) { yearly = $0 }
+                if monthly > 0 && abs(yearly - monthly * 12) > 0.01 {
+                    Button {
+                        ReceiptHaptics.success()
+                        let targetYearly = monthly * 12
+                        withAnimation(.spring(response: 0.35, dampingFraction: 0.82)) {
+                            yearly = targetYearly
+                            yearlyText = Money.plain(targetYearly)
+                        }
+                    } label: {
+                        Label("按月预算 × 12 设为年度总预算（\(Money.format(monthly * 12))）", systemImage: "multiply.circle")
+                            .font(.ui(.caption))
+                    }
+                }
             } header: { ThemedSectionHeader {
                 Text("总预算")
             } } footer: { ThemedSectionFooter {
@@ -261,30 +303,57 @@ struct BudgetView: View {
 /// 统计页：本月预算 + 分类预算进度
 struct BudgetStatsCard: View {
     let status: BudgetStatus
+    @Environment(\.appTheme) private var theme
+
+    private var hasBudget: Bool { status.total != nil || !status.categories.isEmpty }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                Label("预算", systemImage: "target").font(.ui(.headline))
-                Spacer()
+        VStack(alignment: .leading, spacing: theme.isReceipt ? ReceiptStyle.Space.s : 12) {
+            HStack(alignment: .center) {
+                if theme.isReceipt {
+                    Text("◎ 预算").font(theme.cardTitleFont).foregroundStyle(theme.ink)
+                } else {
+                    Label("预算", systemImage: "target").font(.ui(.headline))
+                }
+                Spacer(minLength: 8)
+                if theme.isReceipt, let t = status.total, t.isOver {
+                    VermilionStamp(text: "超支 \(Money.format(t.spent - t.budget))")
+                }
                 NavigationLink {
                     BudgetView()
                 } label: {
                     HStack(spacing: 2) {
-                        Text("管理")
+                        Text(hasBudget ? "设置" : "去设置")
                         Image(systemName: "chevron.right")
                     }
-                    .font(.ui(.subheadline))
+                    .font(theme.isReceipt ? theme.metaFont : .ui(.subheadline))
+                    .foregroundStyle(theme.isReceipt ? theme.faint : Color.accentColor)
                 }
+                .accessibilityIdentifier("budget-manage")
+            }
+            if theme.isReceipt {
+                ThemedDashedRule()
             }
             if let t = status.total {
                 BudgetProgressView(spent: t.spent, budget: t.budget, title: t.carry == 0 ? "本月预算" : "本月预算（含结转）")
             }
             if !status.categories.isEmpty {
-                if status.total != nil { Divider() }
-                ForEach(status.categories) { line in
+                if status.total != nil {
+                    if theme.isReceipt { Rectangle().fill(theme.rule).frame(height: 1) } else { Divider() }
+                }
+                // 设计稿：每个分类之间一条 1pt 实线
+                ForEach(Array(status.categories.enumerated()), id: \.element.id) { index, line in
+                    if theme.isReceipt && index > 0 {
+                        Rectangle().fill(theme.rule).frame(height: 1)
+                    }
                     BudgetLineRow(line: line, compact: true)
                 }
+            }
+            if !hasBudget {
+                Text("还没有本月预算。设一笔每月总额，或给餐饮、购物等分类单独设限额，这里会按已花金额画出执行进度。")
+                    .font(theme.isReceipt ? theme.metaFont : .ui(.subheadline))
+                    .foregroundStyle(theme.faint)
+                    .fixedSize(horizontal: false, vertical: true)
             }
         }
     }

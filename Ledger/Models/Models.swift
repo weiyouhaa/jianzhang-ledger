@@ -115,11 +115,15 @@ final class LedgerRecord {
         }
     }
 
-    /// 列表中显示的标题：备注 > 商户 > 分类名（转账显示「A → B」）
+    /// 列表中显示的标题：商户 > 备注 > 分类名（转账显示「A → B」）
     var displayTitle: String {
-        if !note.isEmpty { return note }
-        if isCreditRepayment { return "信用卡还款" }
+        if isCreditRepayment {
+            if !merchant.isEmpty { return merchant }
+            if !note.isEmpty { return note }
+            return "信用卡还款"
+        }
         if !merchant.isEmpty { return merchant }
+        if !note.isEmpty { return note }
         if kind == .transfer { return (accountRef?.name ?? "?") + " → " + (toAccount?.name ?? "?") }
         if kind == .contribution { return (accountRef?.name ?? "") + "缴存" }
         return categoryName

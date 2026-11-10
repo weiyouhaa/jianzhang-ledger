@@ -1,7 +1,7 @@
 import Foundation
 import SwiftData
 
-/// 打开记账页时预填的内容（来自周期账单提醒）
+/// 打开记账页时预填的内容（来自周期账单提醒、再来一笔或退款冲账）
 struct RecordPrefill: Identifiable, Equatable {
     let id = UUID()
     var amount: Double
@@ -13,6 +13,38 @@ struct RecordPrefill: Identifiable, Equatable {
     var merchant: String
     var date: Date
     var recurringKey: String
+
+    /// 「再来一笔」：复制原记录的金额、类型、分类、账户、商户与备注，时间更新为当前时间
+    static func duplicate(from record: LedgerRecord, date: Date = Date()) -> RecordPrefill {
+        RecordPrefill(
+            amount: record.amount,
+            kind: record.kind,
+            categoryID: record.category?.id,
+            accountID: record.accountRef?.id,
+            toAccountID: record.toAccount?.id,
+            note: record.note,
+            merchant: record.merchant,
+            date: date,
+            recurringKey: ""
+        )
+    }
+
+    /// 「记录退款」：基于原支出记录生成同商户、同账户、当前时间的收入（退款）预填
+    static func refund(from record: LedgerRecord, refundCategoryID: UUID?, date: Date = Date()) -> RecordPrefill {
+        let baseNote = record.note.trimmingCharacters(in: .whitespacesAndNewlines)
+        let refundNote = baseNote.isEmpty ? "原支出退款" : (baseNote.contains("退款") ? baseNote : "\(baseNote) · 退款")
+        return RecordPrefill(
+            amount: record.amount,
+            kind: .income,
+            categoryID: refundCategoryID,
+            accountID: record.accountRef?.id,
+            toAccountID: nil,
+            note: refundNote,
+            merchant: record.merchant,
+            date: date,
+            recurringKey: ""
+        )
+    }
 }
 
 /// 周期账单：到期自动记账（启动 / 回到前台时追补到今天，幂等），以及「已付」确认

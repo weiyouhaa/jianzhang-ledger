@@ -12,6 +12,7 @@ struct RulesView: View {
     @State private var editorTarget: EditorTarget?
     @State private var pendingDelete: CategoryRule?
     @State private var searchText = ""
+    @State private var kindFilter = 0   // 0 全部 1 支出 2 收入
 
     enum EditorTarget: Identifiable {
         case new
@@ -25,21 +26,44 @@ struct RulesView: View {
     }
 
     private func filtered(_ list: [CategoryRule]) -> [CategoryRule] {
+        var base = list
+        if kindFilter == 1 {
+            base = base.filter { r in
+                let k = r.kind ?? categories.first(where: { $0.id.uuidString == r.categoryID })?.kind
+                return k == .expense
+            }
+        } else if kindFilter == 2 {
+            base = base.filter { r in
+                let k = r.kind ?? categories.first(where: { $0.id.uuidString == r.categoryID })?.kind
+                return k == .income
+            }
+        }
         let q = searchText.trimmingCharacters(in: .whitespaces)
-        guard !q.isEmpty else { return list }
-        return list.filter { $0.displayName.localizedCaseInsensitiveContains(q) || $0.keyword.localizedCaseInsensitiveContains(q) }
+        guard !q.isEmpty else { return base }
+        return base.filter { $0.displayName.localizedCaseInsensitiveContains(q) || $0.keyword.localizedCaseInsensitiveContains(q) }
     }
 
     var body: some View {
         let manual = filtered(rules.filter { !$0.isLearned })
         let learned = filtered(rules.filter(\.isLearned))
+        let totalHits = rules.reduce(0) { $0 + $1.hitCount }
         ThemedList {
             Section {
                 Toggle(isOn: $learnEnabled) {
                     Label("自动记住商户分类", systemImage: "brain.head.profile")
                 }
+                if !rules.isEmpty {
+                    Picker("筛选类型", selection: $kindFilter.animation(.snappy(duration: 0.22))) {
+                        Text("全部（\(rules.count)）").tag(0)
+                        Text("支出规则").tag(1)
+                        Text("收入规则").tag(2)
+                    }
+                    .pickerStyle(.segmented)
+                    .onChange(of: kindFilter) { _, _ in ReceiptHaptics.selection() }
+                }
             } footer: { ThemedSectionFooter {
-                Text("记账或修改记录时，记住「商户 → 分类 / 账户」。之后识图记账、快捷指令和账单导入会优先按规则分类，比关键词猜测更准。")
+                Text("记账或修改记录时，记住「商户 → 分类 / 账户」。之后识图记账、快捷指令和账单导入会优先按规则分类，比关键词猜测更准。"
+                     + (totalHits > 0 ? " 已累计自动命中 \(totalHits) 次。" : ""))
             } }
 
             Section {
@@ -140,6 +164,13 @@ struct RulesView: View {
         .tint(.primary)
         .swipeActions(edge: .trailing, allowsFullSwipe: false) {
             Button(role: .destructive) { pendingDelete = rule } label: { Label("删除", systemImage: "trash") }
+            Button {
+                rule.isEnabled.toggle()
+                try? context.save()
+            } label: {
+                Label(rule.isEnabled ? "停用" : "启用", systemImage: rule.isEnabled ? "pause.circle" : "play.circle")
+            }
+            .tint(.orange)
         }
     }
 }

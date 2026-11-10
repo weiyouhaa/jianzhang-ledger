@@ -6,7 +6,7 @@ struct RootView: View {
     @EnvironmentObject private var session: SessionManager
     @Environment(\.scenePhase) private var scenePhase
     @AppStorage(SettingsKey.appearance, store: .standard) private var appearance = 0
-    @AppStorage(SettingsKey.skin, store: .standard) private var skinRaw = AppSkin.default.rawValue
+    @AppStorage(SettingsKey.skin, store: .standard) private var skinRaw = AppSkin.defaultSkinRaw
     @AppStorage(SettingsKey.receiptPaper, store: .standard) private var receiptPaperRaw = ReceiptPaper.cotton.rawValue
     @AppStorage(SettingsKey.receiptFab, store: .standard) private var receiptFabRaw = ReceiptFabStyle.seal.rawValue
     @AppStorage(SettingsKey.hideInAppSwitcher, store: .standard) private var hideInAppSwitcher = true
@@ -97,7 +97,7 @@ struct RootView: View {
                 BillImportCenter.shared.consumePendingIfPossible(isLocked: false)
             }
             if phase == .active {
-                AppleIntelligenceExtractor.prewarm()
+                AppleIntelligenceExtractor.prewarm(vocabulary: IntentRecorder.ocrVocabulary())
                 Task { @MainActor in
                     if !SessionManager.shared.isDecoy {
                         if DataStore.syncStatus.isCloud { DataStore.dedupeCategories(in: DataStore.shared.mainContext) }

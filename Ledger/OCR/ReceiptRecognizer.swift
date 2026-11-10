@@ -124,9 +124,13 @@ enum ReceiptRecognizer {
     }
 
     /// 规则解析结果（没有任何一笔时返回一个只带原文的结果）
-    static func ruleReceipts(_ lines: [OCRLine], now: Date) -> [ParsedReceipt] {
-        let all = ReceiptParser.parseAll(lines: lines, now: now)
-        return all.isEmpty ? [ReceiptParser.parse(lines: lines.map(\.text), now: now)] : all
+    static func ruleReceipts(_ lines: [OCRLine], now: Date,
+                             screen: PaymentScreen? = nil,
+                             prepared: [OCRLine]? = nil) -> [ParsedReceipt] {
+        let scr = screen ?? ReceiptParser.screen(lines)
+        let prep = prepared ?? ReceiptParser.prepare(lines, screen: scr)
+        let all = ReceiptParser.parseAll(lines: lines, now: now, screen: scr, preparedLines: prep)
+        return all.isEmpty ? [ReceiptParser.parse(lines: lines.map(\.text), now: now, screen: scr, preparedLines: prep)] : all
     }
 
     /// 金额不是有限正数或超过上限（1 亿）的结果视为没有识别到金额
@@ -138,16 +142,52 @@ enum ReceiptRecognizer {
         }
     }
 
+    /// 规则引擎是否已识别出完整、高置信度的结果（金额明确 + 已识别商户/还款卡/互转账户）
+    static func isRulesHighConfidence(_ rules: [ParsedReceipt]) -> Bool {
+        let valid = rules.filter { ($0.amount ?? 0) > 0 }
+        guard !valid.isEmpty else { return false }
+        return valid.allSatisfy { r in
+            guard r.score >= 40 else { return false }
+            if r.isCardRepayment { return r.repaymentCard != nil }
+            if r.isSelfTransfer { return r.transferFrom != nil || r.transferTo != nil }
+            return !(r.merchant ?? "").isEmpty || r.isRefund
+        }
+    }
+
+    /// 规则引擎是否已 100% 完整识别全部关键字段（高分金额 + 商户 + 分类 + 付款方式线索/明确渠道 + 交易时间），无需再等待端侧大模型
+    static func isRulesCompleteAndCertain(_ rules: [ParsedReceipt], screen: PaymentScreen = .init()) -> Bool {
+        let valid = rules.filter { ($0.amount ?? 0) > 0 }
+        guard !valid.isEmpty else { return false }
+        let hasKnownChannel = screen.app == .wechat || screen.app == .alipay
+        return valid.allSatisfy { r in
+            guard r.score >= 80, r.date != nil else { return false }
+            if r.isCardRepayment {
+                return r.repaymentCard?.bankName != nil && (r.accountHint != nil || hasKnownChannel)
+            }
+            if r.isSelfTransfer {
+                return r.transferFrom != nil && r.transferTo != nil
+            }
+            guard let merchant = r.merchant, !merchant.isEmpty,
+                  let category = r.categoryName, !category.isEmpty else { return false }
+            if let hint = r.accountHint {
+                return hint.bankName != nil || hint.cardTail != nil
+                    || ["wechat", "alipay", "consumerCredit", "credit", "debit", "cash"].contains(hint.type ?? "")
+            }
+            return hasKnownChannel
+        }
+    }
+
     static func seconds(_ ms: Int) -> String { String(format: "%.1f 秒", Double(ms) / 1000) }
 
     static func extract(lines: [OCRLine], now: Date, vocabulary: OCRVocabulary?, context: OCRRunContext,
                         ocrMs: Int = 0, plan: ModelPlan? = nil, startedAt: Date? = nil) async -> OCRRecognition {
         // 截图来源（微信 / 支付宝 / 银行 / 云闪付，中文或英文界面）：日志只记标签，不记文字
         let screen = ReceiptParser.screen(lines)
+        let prepared = ReceiptParser.prepare(lines, screen: screen)
         RunLog.shared.log(.info, "screen", "来源：\(screen.tag)")
         let tRules = Date()
         // 规则结果同样过金额上限（例如把长数字串误识别成金额），后续换算 / 预算计算都不会溢出
-        let rules = sanitize(ruleReceipts(lines, now: now))
+        let rules = sanitize(ruleReceipts(lines, now: now, screen: screen, prepared: prepared))
         RunLog.shared.log(.info, "rules", "规则解析：\(rules.filter { ($0.amount ?? 0) > 0 }.count) 笔，用时 \(Int(Date().timeIntervalSince(tRules) * 1000)) ms")
         // 只在真正要用 Apple 智能时才查询模型状态：关闭时完全不触碰 FoundationModels
         var checkedStatus: AppleIntelligenceStatus?
@@ -186,23 +226,40 @@ enum ReceiptRecognizer {
         guard status.isAvailable else {
             return finish(OCRRecognition(receipts: rules, engine: .rules, note: "Apple 智能\(status.shortReason)"))
         }
-        let prepared = ReceiptParser.prepare(lines, screen: screen)
         guard prepared.contains(where: { $0.text.rangeOfCharacter(from: .decimalDigits) != nil }) else {
             return finish(OCRRecognition(receipts: rules, engine: .rules, note: nil), reason: "截图中没有数字")
+        }
+        if isRulesCompleteAndCertain(rules, screen: screen) {
+            let fastRules: [ParsedReceipt] = rules.map { r in
+                var copy = r
+                if copy.accountHint == nil, !copy.isSelfTransfer {
+                    if screen.app == .wechat { copy.accountHint = AccountHint(type: "wechat") }
+                    else if screen.app == .alipay { copy.accountHint = AccountHint(type: "alipay") }
+                }
+                return copy
+            }
+            return finish(OCRRecognition(receipts: fastRules, engine: .rules, note: "规则极速识别"),
+                          reason: "规则已完整高置信识别全部字段")
         }
         let vocab = vocabulary ?? OCRVocabulary(expenseCategories: [], incomeCategories: [], accounts: [])
         let ctx = ModelMerge.Context(lines: prepared.map(\.text),
                                      categories: vocab.expenseCategories + vocab.incomeCategories,
                                      incomeCategories: vocab.incomeCategories, accounts: vocab.accounts,
                                      now: now, calendar: .current)
-        // 超时按已用时间自适应：OCR 快就多给模型一些时间（快捷指令最多 15 秒）
+        // 超时按规则置信度与已用时间自适应：
+        // 规则已高置信度完整识别时，模型最多给 1.6 秒（预热会话下通常 0.5–1.0 秒即完成，冷启动也不拖慢到 5–6 秒）；
+        // 规则缺失商户/金额时，最多给 3.5 秒让模型兜底
         let elapsed = Date().timeIntervalSince(startedAt ?? Date().addingTimeInterval(-Double(ocrMs) / 1000))
-        let timeout = ModelBudget.timeout(shortcut: context == .shortcut, elapsed: elapsed)
+        let rulesConfident = isRulesHighConfidence(rules)
+        let validRuleCount = max(1, rules.filter { ($0.amount ?? 0) > 0 }.count)
+        let baseTimeout = ModelBudget.timeout(shortcut: context == .shortcut, elapsed: elapsed)
+        let timeout = min(baseTimeout, rulesConfident ? 1.6 : 3.5)
         let t1 = Date()
-        RunLog.shared.log(.info, "model-start", "端侧模型开始（超时 \(String(format: "%.1f", timeout)) 秒，已用 \(String(format: "%.1f", elapsed)) 秒，\(prepared.count) 行）")
+        RunLog.shared.log(.info, "model-start", "端侧模型开始（超时 \(String(format: "%.1f", timeout)) 秒，规则高置信=\(rulesConfident)，已用 \(String(format: "%.1f", elapsed)) 秒，\(prepared.count) 行）")
         let stats = ModelRunStats()
         let result = await AppleIntelligenceExtractor.extract(lines: prepared, vocabulary: vocab, timeout: timeout,
-                                                              prepared: plan?.prepared, stats: stats, screen: screen)
+                                                              prepared: plan?.prepared, stats: stats, screen: screen,
+                                                              expectedCount: validRuleCount, allowRetry: !rulesConfident)
         let modelMs = Int(Date().timeIntervalSince(t1) * 1000)
         switch result {
         case .success(let txns): RunLog.shared.log(.info, "model-end", "模型完成，用时 \(modelMs) ms，\(txns.count) 笔")

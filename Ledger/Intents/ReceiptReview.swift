@@ -66,6 +66,8 @@ struct ReviewItem: Identifiable {
     var accountID: UUID?
     /// 信用卡还款（kind == .transfer）：被还款的信用卡；accountID 为付款账户
     var toAccountID: UUID? = nil
+    /// 转账 / 提现 / 还款手续费
+    var fee: Double = 0
     var date: Date
     var dateRecognized: Bool
     /// 时间来源（截图文字 / 截图拍摄时间 / 状态栏 / 现在）：不是识别到的时在时间后面小字注明，方便修改

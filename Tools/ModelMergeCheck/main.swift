@@ -574,5 +574,34 @@ do {
           "3.9 规则退款 isRefund（inc=\(r?.isIncome ?? false) refund=\(r?.isRefund ?? false) cat=\(r?.categoryName ?? "nil") amt=\(r?.amount ?? -1)）")
 }
 
+// 4.3 (37)：模型把「商品说明」当成商户时，自动用规则识别的收付款方，商品说明与优惠保留在备注
+do {
+    let lines = ["账单详情", "示例咖啡", "-22.00", "交易成功", "商品说明", "生椰拿铁大杯", "订单金额", "28.00",
+                 "花呗红包", "-6.00", "付款方式", "花呗", "创建时间", "2026-10-17 15:10:22"]
+    let rules = ReceiptParser.parseAll(lines: lines, now: now, calendar: cal)
+    let o = ModelMerge.merge(model: [ModelTransaction(amount: 22, kind: "expense", merchant: "生椰拿铁大杯", categoryName: "餐饮", accountHint: "支付宝")],
+                             rules: rules, ctx: ctx(lines))
+    let r = o.receipts.first
+    check(r?.merchant == "示例咖啡" && r?.itemNote == "生椰拿铁大杯" && r?.discountNote == "生椰拿铁大杯 · 花呗红包 6.00",
+          "4.3 模型把商品说明当商户 → 用规则收款方「示例咖啡」，商品+优惠进备注（merchant=\(r?.merchant ?? "nil") note=\(r?.discountNote ?? "nil")）")
+
+    // 4.3 (40)：模型只抄了商品说明的一部分（如「生椰拿铁」）当成商户，也自动回退规则收付款方
+    let o2 = ModelMerge.merge(model: [ModelTransaction(amount: 22, kind: "expense", merchant: "生椰拿铁", categoryName: "餐饮", accountHint: "支付宝")],
+                              rules: rules, ctx: ctx(lines))
+    let r2 = o2.receipts.first
+    check(r2?.merchant == "示例咖啡" && r2?.itemNote == "生椰拿铁大杯" && r2?.discountNote == "生椰拿铁大杯 · 花呗红包 6.00",
+          "4.3(40) 模型抄商品子串当商户 → 用规则收款方「示例咖啡」（merchant=\(r2?.merchant ?? "nil")）")
+
+    // 4.3 (41)：单笔极速提示词 buildFastSingle 显著少于完整 build，且 AISingleReceipt 不填 dateText 时自动复用规则/原文时间
+    let fastP = ModelPromptBuilder.buildFastSingle(lines: aliEN.map { OCRLine($0) }, instructions: ins, level: .normal)
+    let fullP = ModelPromptBuilder.build(lines: aliEN.map { OCRLine($0) }, instructions: ins, level: .normal)
+    check(fastP.estimatedTokens < fullP.estimatedTokens && fastP.keptLines <= 16,
+          "4.3(41) 单笔极速提示词 tokens 显著降低（fast=\(fastP.estimatedTokens) < full=\(fullP.estimatedTokens)）")
+    let o3 = ModelMerge.merge(model: [ModelTransaction(amount: 22, kind: "expense", merchant: "示例咖啡", categoryName: "餐饮", accountHint: "支付宝", dateText: "")],
+                              rules: [], ctx: ctx(lines))
+    check(fmt(o3.receipts.first?.date) == "2026-10-17 15:10",
+          "4.3(41) AISingleReceipt 省略 dateText 时自动从原文提取交易时间（\(fmt(o3.receipts.first?.date))）")
+}
+
 print(failures == 0 ? "ALL PASSED" : "\(failures) FAILED")
 exit(failures == 0 ? 0 : 1)

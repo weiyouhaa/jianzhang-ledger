@@ -240,13 +240,14 @@ enum IntentRecorder {
     /// 保存一笔信用卡还款（付款账户 → 信用卡的转账，不计入收支统计，除非开启「信用卡还款计入支出」）
     @MainActor
     @discardableResult
-    static func saveRepayment(amount: Double, fromID: UUID, toID: UUID, note: String, date: Date, source: String) throws -> LedgerRecord {
+    static func saveRepayment(amount: Double, fromID: UUID, toID: UUID, fee: Double = 0, note: String, date: Date, source: String) throws -> LedgerRecord {
         let context = DataStore.shared.mainContext
         let from = DataStore.account(id: fromID, in: context)
         let record = LedgerRecord(amount: (amount * 100).rounded() / 100, kind: .transfer, category: nil,
                                   note: note, merchant: "", account: from?.name ?? "", date: date, source: source)
         record.accountRef = from
         record.toAccount = DataStore.account(id: toID, in: context)
+        record.fee = max(0, (fee * 100).rounded() / 100)
         context.insert(record)
         do {
             try ChangeLogger.with(.shortcut) { try context.save() }

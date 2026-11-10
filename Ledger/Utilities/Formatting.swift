@@ -82,6 +82,8 @@ enum DateText {
     static let shortDate = make("M月d日")
     static let time = make("HH:mm")
     static let full = make("yyyy-MM-dd HH:mm")
+    /// 设计稿收银台时间行：2026年11月6日 16:51
+    static let fullCN = make("yyyy年M月d日 HH:mm")
     static let monthDayTime = make("M月d日 HH:mm")
 
     static func dayHeaderText(_ date: Date) -> String {

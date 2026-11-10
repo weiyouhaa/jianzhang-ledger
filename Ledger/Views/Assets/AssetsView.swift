@@ -41,7 +41,44 @@ struct AssetsView: View {
         var id: String { type.rawValue }
     }
 
-    private var activeAccounts: [LedgerAccount] { accounts.filter { !$0.isArchived } }
+    /// 与「排序与归档」完全同一个顺序（共用 sortedForDisplay）
+    private var activeAccounts: [LedgerAccount] { accounts.sortedForDisplay().filter { !$0.isArchived } }
+
+    /// 按设置里的顺序，把「相邻且同类」的账户合成一张凭条。
+    /// 不跨位置归并：显示顺序与「排序与归档」逐行一致。
+    struct AccountRun: Identifiable {
+        enum Kind { case type(AccountType), social }
+        let id: String
+        let kind: Kind
+        let accounts: [LedgerAccount]
+        var isLiability: Bool {
+            if case .type(let t) = kind { return t.isLiability }
+            return false
+        }
+    }
+
+    private func accountRuns(_ list: [LedgerAccount]) -> [AccountRun] {
+        var runs: [AccountRun] = []
+        var currentKey: String?
+        var currentKind: AccountRun.Kind = .social
+        var bucket: [LedgerAccount] = []
+        func flush() {
+            guard let key = currentKey, !bucket.isEmpty else { return }
+            runs.append(AccountRun(id: "\(key)-\(runs.count)", kind: currentKind, accounts: bucket))
+        }
+        for a in list {
+            let key = a.type.isSocialSecurity ? "social" : a.type.rawValue
+            if key != currentKey {
+                flush()
+                currentKey = key
+                currentKind = a.type.isSocialSecurity ? .social : .type(a.type)
+                bucket = []
+            }
+            bucket.append(a)
+        }
+        flush()
+        return runs
+    }
 
     var body: some View {
         let _ = records.count   // 记录变化时刷新余额
@@ -52,70 +89,40 @@ struct AssetsView: View {
         let totalLiabilities = -included.filter { $0.type.isLiability }.reduce(0) { $0 + (balances[$1.id] ?? 0) }
         let assetGroups = groups(active, liability: false)
         let liabilityGroups = groups(active, liability: true)
-        let social = active.filter { $0.type.isSocialSecurity }.sorted {
-            let a = AccountType.socialTypes.firstIndex(of: $0.type) ?? 0, b = AccountType.socialTypes.firstIndex(of: $1.type) ?? 0
-            return a == b ? $0.sortOrder < $1.sortOrder : a < b
-        }
+        // 严格按「排序与归档」里拖动的顺序（sortOrder）排列，不再按账户类型的固定先后打乱
+        let social = active.filter { $0.type.isSocialSecurity }
         // 可支配资产：不含公积金与社保类账户
         let socialIncluded = included.filter { $0.type.isSocialSecurity }.reduce(0) { $0 + (balances[$1.id] ?? 0) }
 
         NavigationStack {
           ScrollViewReader { proxy in
-            ThemedList {
-                Section {
-                    NetWorthCard(netWorth: totalAssets - totalLiabilities, assets: totalAssets,
-                                 liabilities: totalLiabilities,
-                                 disposable: social.isEmpty ? nil : totalAssets - socialIncluded,
-                                 hidden: $hideAmounts)
-                        .listRowInsets(EdgeInsets())
-                        .listRowBackground(Color.clear)
-                }
-
-                if active.isEmpty {
-                    Section {
-                        ThemedEmptyState("还没有账户", systemImage: "wallet.pass",
-                                         description: Text("添加储蓄卡、支付宝、微信、信用卡等账户，记账时选择账户即可自动计算余额和净资产。")) {
-                            Button("添加账户") { editorTarget = .new }
-                                .buttonStyle(.borderedProminent)
-                        }
-                        .listRowBackground(Color.clear)
-                    }
+            Group {
+                if theme.isReceipt {
+                    receiptScrollBody(
+                        active: active,
+                        balances: balances,
+                        totalAssets: totalAssets,
+                        totalLiabilities: totalLiabilities,
+                        socialIncluded: socialIncluded,
+                        assetGroups: assetGroups,
+                        liabilityGroups: liabilityGroups,
+                        social: social,
+                        included: included
+                    )
                 } else {
-                    ForEach(assetGroups) { group in
-                        accountSection(group, balances: balances)
-                    }
-                    if !social.isEmpty {
-                        socialSection(social, balances: balances)
-                            .id("social")
-                    }
-                    ForEach(liabilityGroups) { group in
-                        accountSection(group, balances: balances)
-                    }
-
-                    let trend = netWorthTrend(included)
-                    if trend.count > 1 {
-                        Section {
-                            NetWorthChart(points: trend, hidden: hideAmounts)
-                                .frame(height: 170)
-                                .padding(.vertical, 6)
-                        } header: { ThemedSectionHeader { Text("净资产趋势") } }
-                    }
-                }
-
-                let archivedCount = accounts.count - active.count
-                if archivedCount > 0 {
-                    Section {
-                        NavigationLink {
-                            AccountManagerView()
-                        } label: {
-                            Label("已归档账户（\(archivedCount)）", systemImage: "archivebox")
-                                .foregroundStyle(.secondary)
-                        }
-                    }
+                    defaultListBody(
+                        active: active,
+                        balances: balances,
+                        totalAssets: totalAssets,
+                        totalLiabilities: totalLiabilities,
+                        socialIncluded: socialIncluded,
+                        assetGroups: assetGroups,
+                        liabilityGroups: liabilityGroups,
+                        social: social,
+                        included: included
+                    )
                 }
             }
-            .listStyle(.insetGrouped)
-            .themedScreenBackground()
             .task {
                 // 截图模式：滚动到「公积金与社保」
                 if ScreenshotDemo.screen == "assetssocial" {
@@ -126,7 +133,6 @@ struct AssetsView: View {
           }
             .themedRootTitle("资产")
             .toolbar {
-                // 4.0 小票：去掉左上角重复大眼睛，仅保留净资产旁内联开关（设计稿）
                 if !theme.isReceipt {
                     ToolbarItem(placement: .topBarLeading) {
                         Button {
@@ -136,21 +142,11 @@ struct AssetsView: View {
                         }
                         .accessibilityLabel(hideAmounts ? "显示金额" : "隐藏金额")
                     }
-                }
-                ToolbarItem(placement: .topBarTrailing) {
-                    Menu {
-                        Button { editorTarget = .new } label: { Label("新建账户", systemImage: "plus") }
-                        Button { showTransfer = true } label: { Label("转账 / 还款", systemImage: "arrow.left.arrow.right") }
-                            .disabled(active.count < 2)
-                        NavigationLink {
-                            AccountManagerView()
-                        } label: {
-                            Label("排序与归档", systemImage: "arrow.up.arrow.down")
+                    ToolbarItem(placement: .topBarTrailing) {
+                        addAccountMenu(activeCount: active.count) {
+                            Image(systemName: "plus.circle.fill")
                         }
-                    } label: {
-                        Image(systemName: "plus.circle.fill")
                     }
-                    .accessibilityIdentifier("assets-add-menu")
                 }
             }
             .sheet(item: $editorTarget) { target in
@@ -202,6 +198,329 @@ struct AssetsView: View {
 
     // MARK: - 子视图
 
+    private func addAccountMenu<LabelView: View>(activeCount: Int, @ViewBuilder label: () -> LabelView) -> some View {
+        Menu {
+            Button { editorTarget = .new } label: { Label("新建账户", systemImage: "plus") }
+            Button { showTransfer = true } label: { Label("转账 / 还款", systemImage: "arrow.left.arrow.right") }
+                .disabled(activeCount < 2)
+            NavigationLink {
+                AccountManagerView()
+            } label: {
+                Label("排序与归档", systemImage: "arrow.up.arrow.down")
+            }
+        } label: {
+            label()
+        }
+        .accessibilityIdentifier("assets-add-menu")
+    }
+
+    /// 小票皮肤专属：独立 ScrollView 渲染，告别 iOS 27 List(.insetGrouped) 26pt 圆角裁切与液态玻璃顶栏
+    private func receiptScrollBody(
+        active: [LedgerAccount],
+        balances: [UUID: Double],
+        totalAssets: Double,
+        totalLiabilities: Double,
+        socialIncluded: Double,
+        assetGroups: [TypeGroup],
+        liabilityGroups: [TypeGroup],
+        social: [LedgerAccount],
+        included: [LedgerAccount]
+    ) -> some View {
+        ScrollView {
+            VStack(spacing: 14) {
+                HStack(alignment: .center, spacing: 8) {
+                    VermilionStamp(text: "BALANCE FOLIO · 资产盘点")
+                    Spacer()
+                    if active.count >= 2 {
+                        Button {
+                            showTransfer = true
+                        } label: {
+                            HStack(spacing: 4) {
+                                Image(systemName: "arrow.left.arrow.right")
+                                    .font(.system(size: 11, weight: .semibold))
+                                Text("转账")
+                                    .font(theme.serifLabelFont)
+                            }
+                            .foregroundStyle(theme.ink)
+                            .padding(.horizontal, 9)
+                            .padding(.vertical, 6)
+                            .background(
+                                RoundedRectangle(cornerRadius: 4)
+                                    .fill(LinearGradient(colors: [theme.cardFill, theme.paper], startPoint: .top, endPoint: .bottom))
+                            )
+                            .overlay(RoundedRectangle(cornerRadius: 4).strokeBorder(theme.rule, lineWidth: 1))
+                            .shadow(color: .black.opacity(0.06), radius: 1.5, y: 1)
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityIdentifier("assets-quick-transfer")
+                    }
+                    addAccountMenu(activeCount: active.count) {
+                        HStack(spacing: 4) {
+                            Image(systemName: "plus")
+                                .font(.system(size: 11, weight: .bold))
+                            Text("账户与转账")
+                                .font(theme.serifLabelFont)
+                        }
+                        .foregroundStyle(theme.ink)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 6)
+                        .background(
+                            RoundedRectangle(cornerRadius: 4)
+                                .fill(LinearGradient(colors: [theme.cardFill, theme.paper], startPoint: .top, endPoint: .bottom))
+                        )
+                        .overlay(RoundedRectangle(cornerRadius: 4).strokeBorder(theme.rule, lineWidth: 1))
+                        .shadow(color: .black.opacity(0.06), radius: 1.5, y: 1)
+                    }
+                    .buttonStyle(.plain)
+                }
+                .padding(.horizontal, 2)
+
+                NetWorthCard(
+                    netWorth: totalAssets - totalLiabilities,
+                    assets: totalAssets,
+                    liabilities: totalLiabilities,
+                    disposable: social.isEmpty ? nil : totalAssets - socialIncluded,
+                    hidden: $hideAmounts
+                )
+
+                if active.isEmpty {
+                    ThemedEmptyState(
+                        "还没有账户",
+                        systemImage: "wallet.pass",
+                        description: Text("添加储蓄卡、支付宝、微信、信用卡等账户，记账时选择账户即可自动计算余额和净资产。")
+                    ) {
+                        Button("添加账户") { editorTarget = .new }
+                            .buttonStyle(.borderedProminent)
+                    }
+                    .padding(16)
+                    .receiptSurface(theme, hero: true)
+                } else {
+                    // 各类账户凭条：顺序与「排序与归档」逐行一致
+                    let runs = accountRuns(active)
+                    let firstSocialID = runs.first { if case .social = $0.kind { return true }; return false }?.id
+                    ForEach(runs) { run in
+                        let subtotal = run.accounts.reduce(0) { $0 + (balances[$1.id] ?? 0) }
+                        switch run.kind {
+                        case .type(let type) where type.isLiability:
+                            receiptAccountSheet(
+                                title: "负债 · \(type.title)",
+                                badge: "CREDIT VOUCHER",
+                                total: "欠 " + Money.masked(max(0, -subtotal), hidden: hideAmounts),
+                                totalColor: theme.accent,
+                                accounts: run.accounts,
+                                balances: balances,
+                                footnote: nil
+                            )
+                        case .type(let type):
+                            receiptAccountSheet(
+                                title: type.title,
+                                badge: "LIQUID ASSET",
+                                total: Money.masked(subtotal, hidden: hideAmounts),
+                                totalColor: theme.ink,
+                                accounts: run.accounts,
+                                balances: balances,
+                                footnote: nil
+                            )
+                        case .social:
+                            receiptAccountSheet(
+                                title: "公积金与社保",
+                                badge: "RESERVE FUND",
+                                total: Money.masked(subtotal, hidden: hideAmounts),
+                                totalColor: theme.ink,
+                                accounts: run.accounts,
+                                balances: balances,
+                                footnote: run.accounts.contains(where: { !$0.includeInNetWorth })
+                                    ? "标 ⊖ 的账户退休前不能领取，不计入净资产。"
+                                    : nil
+                            )
+                            .id(run.id == firstSocialID ? "social" : run.id)
+                        }
+                    }
+
+                    let trend = netWorthTrend(included)
+                    if trend.count > 1 {
+                        VStack(alignment: .leading, spacing: 10) {
+                            HStack {
+                                Text("净资产趋势 · TREND")
+                                    .font(theme.cardTitleFont)
+                                    .foregroundStyle(theme.ink)
+                                Spacer()
+                                ReceiptLabelText(text: "12 MONTHS", color: theme.faint)
+                            }
+                            ThemedDashedRule()
+                            NetWorthChart(points: trend, hidden: hideAmounts)
+                                .frame(height: 165)
+                                .padding(.vertical, 4)
+                        }
+                        .padding(ReceiptStyle.Space.m)
+                        .receiptSurface(theme, hero: true)
+                    }
+                }
+
+                let archivedCount = accounts.count - active.count
+                if archivedCount > 0 {
+                    NavigationLink {
+                        AccountManagerView()
+                    } label: {
+                        HStack {
+                            Label("已归档账户（\(archivedCount)）", systemImage: "archivebox")
+                                .font(theme.serifLabelFont)
+                                .foregroundStyle(theme.faint)
+                            Spacer()
+                            Image(systemName: "chevron.right")
+                                .font(.system(size: 11, weight: .semibold))
+                                .foregroundStyle(theme.faint)
+                        }
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 11)
+                        .background(RoundedRectangle(cornerRadius: 4).fill(theme.cardFill))
+                        .overlay(RoundedRectangle(cornerRadius: 4).strokeBorder(theme.rule, lineWidth: 1))
+                    }
+                    .buttonStyle(.plain)
+                }
+
+                Color.clear.frame(height: 28)
+            }
+            .padding(.horizontal, ReceiptStyle.pageHorizontalMargin)
+            .padding(.top, 6)
+            .padding(.bottom, 16)
+        }
+        .themedScreenBackground()
+    }
+
+    private func receiptAccountSheet(
+        title: String,
+        badge: String,
+        total: String,
+        totalColor: Color,
+        accounts: [LedgerAccount],
+        balances: [UUID: Double],
+        footnote: String?
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                Text(title)
+                    .font(theme.cardTitleFont)
+                    .foregroundStyle(theme.ink)
+                Text("\(accounts.count) 户")
+                    .font(theme.labelFont)
+                    .foregroundStyle(theme.faint)
+                    .padding(.horizontal, 5)
+                    .padding(.vertical, 1)
+                    .background(RoundedRectangle(cornerRadius: 2.5).fill(theme.rule.opacity(0.32)))
+                Text(badge)
+                    .font(theme.labelFont)
+                    .foregroundStyle(theme.faint)
+                Spacer(minLength: 8)
+                Text(total)
+                    .font(theme.metaFont)
+                    .monospacedDigit()
+                    .foregroundStyle(totalColor)
+            }
+            .padding(.horizontal, 14)
+            .padding(.top, 12)
+            .padding(.bottom, 10)
+
+            ThemedDashedRule()
+                .padding(.horizontal, 14)
+
+            ForEach(Array(accounts.enumerated()), id: \.element.id) { idx, a in
+                if idx > 0 {
+                    Rectangle()
+                        .fill(theme.rule.opacity(0.65))
+                        .frame(height: 0.8)
+                        .padding(.horizontal, 14)
+                }
+                accountRow(a, balances: balances)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 9)
+            }
+
+            if let footnote {
+                ThemedDashedRule()
+                    .padding(.horizontal, 14)
+                Text(footnote)
+                    .font(theme.serifLabelFont)
+                    .foregroundStyle(theme.faint)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 8)
+            } else {
+                Color.clear.frame(height: 4)
+            }
+        }
+        .receiptSurface(theme, hero: true)
+    }
+
+    private func defaultListBody(
+        active: [LedgerAccount],
+        balances: [UUID: Double],
+        totalAssets: Double,
+        totalLiabilities: Double,
+        socialIncluded: Double,
+        assetGroups: [TypeGroup],
+        liabilityGroups: [TypeGroup],
+        social: [LedgerAccount],
+        included: [LedgerAccount]
+    ) -> some View {
+        ThemedList {
+            Section {
+                NetWorthCard(netWorth: totalAssets - totalLiabilities, assets: totalAssets,
+                             liabilities: totalLiabilities,
+                             disposable: social.isEmpty ? nil : totalAssets - socialIncluded,
+                             hidden: $hideAmounts)
+                    .listRowInsets(EdgeInsets())
+                    .listRowBackground(Color.clear)
+            }
+
+            if active.isEmpty {
+                Section {
+                    ThemedEmptyState("还没有账户", systemImage: "wallet.pass",
+                                     description: Text("添加储蓄卡、支付宝、微信、信用卡等账户，记账时选择账户即可自动计算余额和净资产。")) {
+                        Button("添加账户") { editorTarget = .new }
+                            .buttonStyle(.borderedProminent)
+                    }
+                    .listRowBackground(Color.clear)
+                }
+            } else {
+                // 与「排序与归档」逐行一致：相邻同类账户合成一节
+                let runs = accountRuns(active)
+                let firstSocialID = runs.first { if case .social = $0.kind { return true }; return false }?.id
+                ForEach(runs) { run in
+                    switch run.kind {
+                    case .type(let type):
+                        accountSection(TypeGroup(type: type, accounts: run.accounts), balances: balances)
+                    case .social:
+                        socialSection(run.accounts, balances: balances)
+                            .id(run.id == firstSocialID ? "social" : run.id)
+                    }
+                }
+
+                let trend = netWorthTrend(included)
+                if trend.count > 1 {
+                    Section {
+                        NetWorthChart(points: trend, hidden: hideAmounts)
+                            .frame(height: 170)
+                            .padding(.vertical, 6)
+                    } header: { ThemedSectionHeader { Text("净资产趋势") } }
+                }
+            }
+
+            let archivedCount = accounts.count - active.count
+            if archivedCount > 0 {
+                Section {
+                    NavigationLink {
+                        AccountManagerView()
+                    } label: {
+                        Label("已归档账户（\(archivedCount)）", systemImage: "archivebox")
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
+        }
+        .listStyle(.insetGrouped)
+        .themedScreenBackground()
+    }
+
     private func accountSection(_ group: TypeGroup, balances: [UUID: Double]) -> some View {
         let total = group.accounts.reduce(0) { $0 + (balances[$1.id] ?? 0) }
         return Section {
@@ -243,6 +562,35 @@ struct AssetsView: View {
         } }
     }
 
+    /// 连续纸卷上的分类带：小号字距标签 + 该组小计（替代分节标题，保留分类信息）
+    private func receiptGroupRow(_ title: String, total: String) -> some View {
+        HStack(alignment: .firstTextBaseline) {
+            Text(title)
+                .font(theme.serifLabelFont)
+                .foregroundStyle(theme.faint)
+            Spacer(minLength: 8)
+            Text(total)
+                .font(theme.metaFont)
+                .monospacedDigit()
+                .foregroundStyle(theme.faint)
+        }
+        .padding(.top, 10)
+        .padding(.bottom, 2)
+        .listRowInsets(EdgeInsets(top: 4, leading: 20, bottom: -6, trailing: 20))
+        .listRowSeparator(.hidden)
+        .accessibilityElement(children: .combine)
+        .accessibilityAddTraits(.isHeader)
+    }
+
+    /// 分类带下的说明（如「标 ⊖ 的账户不计入净资产」）
+    private func receiptNoteRow(_ text: String) -> some View {
+        Text(text)
+            .font(theme.serifLabelFont)
+            .foregroundStyle(theme.faint)
+            .padding(.vertical, 2)
+            .listRowSeparator(.hidden)
+    }
+
     /// 账户行：点按进入详情，左滑编辑，长按快捷菜单
     private func accountRow(_ a: LedgerAccount, balances: [UUID: Double]) -> some View {
         let balance = balances[a.id] ?? 0
@@ -252,6 +600,8 @@ struct AssetsView: View {
             AccountRow(account: a, balance: balance, hidden: hideAmounts)
         }
         .accessibilityIdentifier("account-" + a.name)
+        // 设计稿：连续纸卷上的行分隔线从纸面左缘起画，不留图标的缩进
+        .alignmentGuide(.listRowSeparatorLeading) { _ in theme.isReceipt ? 0 : 16 }
         .swipeActions {
             Button { editorTarget = .edit(a) } label: { Label("编辑", systemImage: "pencil") }
                 .tint(.blue)
@@ -299,12 +649,16 @@ struct AssetsView: View {
     }
 
     private func groups(_ list: [LedgerAccount], liability: Bool) -> [TypeGroup] {
-        let types = (liability ? AccountType.liabilityTypes : AccountType.assetTypes).filter { !$0.isSocialSecurity }
-        return types.compactMap { t in
-            let items = list.filter { $0.type == t }
-            return items.isEmpty ? nil : TypeGroup(type: t, accounts: items)
+        // list 已按 sortOrder 排好：类型分组按其第一个账户出现的先后排列，组内保持拖动顺序
+        var order: [AccountType] = []
+        var buckets: [AccountType: [LedgerAccount]] = [:]
+        for a in list where a.type.isLiability == liability && !a.type.isSocialSecurity {
+            if buckets[a.type] == nil { order.append(a.type) }
+            buckets[a.type, default: []].append(a)
         }
+        return order.map { TypeGroup(type: $0, accounts: buckets[$0] ?? []) }
     }
+
 
     /// 最近 12 个月每月月末的净资产
     private func netWorthTrend(_ list: [LedgerAccount]) -> [NetWorthPoint] {
@@ -312,14 +666,22 @@ struct AssetsView: View {
         let cal = DateText.calendar
         let thisMonth = cal.startOfMonth(for: Date())
         var points: [NetWorthPoint] = []
+        // 性能：每个账户的流水只展开一次（原先 12 个月 × 每账户都重新展开并去重）
+        let flows: [(initial: Double, items: [(date: Date, effect: Double)])] = list.map { a in
+            (a.initialBalance, a.allEntries.map { (date: $0.date, effect: $0.effect(on: a)) })
+        }
         for back in stride(from: 11, through: 0, by: -1) {
             guard let monthStart = cal.date(byAdding: .month, value: -back, to: thisMonth) else { continue }
             let end: Date = back == 0 ? Date() : (cal.date(byAdding: .month, value: 1, to: monthStart) ?? monthStart).addingTimeInterval(-1)
-            let value = list.reduce(0) { $0 + $1.balance(asOf: end) }
+            let value = flows.reduce(0.0) { sum, flow in
+                var total = flow.initial
+                for item in flow.items where item.date <= end { total += item.effect }
+                return sum + (total * 100).rounded() / 100
+            }
             points.append(NetWorthPoint(date: monthStart, value: value))
         }
         // 去掉开头没有任何变化的月份（记账开始之前）
-        if let firstRecord = list.flatMap({ $0.allEntries }).map(\.date).min() {
+        if let firstRecord = flows.flatMap({ $0.items }).map(\.date).min() {
             let start = cal.startOfMonth(for: firstRecord)
             let trimmed = points.filter { $0.date >= start }
             return trimmed.count >= 2 ? trimmed : Array(points.suffix(2))
@@ -360,36 +722,58 @@ struct NetWorthCard: View {
     /// 3.5 (26) 小票皮肤净资产卡：与首页汇总卡同一套 hero 版式（标签 / 大数字 / 两列 / 点引线 / 细条）
     private var receiptBody: some View {
         VStack(alignment: .leading, spacing: ReceiptStyle.Space.m) {
+            // 设计稿票头：BALANCE SHEET / VALUATION · CNY + 虚线
+            VStack(spacing: ReceiptStyle.Space.xs) {
+                HStack {
+                    ReceiptLabelText(text: "BALANCE SHEET", color: theme.faint)
+                    Spacer()
+                    ReceiptLabelText(text: "VALUATION · CNY", color: theme.faint)
+                }
+                ThemedDashedRule()
+            }
             HStack(alignment: .center, spacing: ReceiptStyle.Space.xs) {
                 ReceiptLabelText(text: "净资产", color: theme.faint)
                 Button {
-                    withAnimation { hidden.toggle() }
+                    ReceiptHaptics.selection()
+                    withAnimation(.snappy(duration: 0.24)) { hidden.toggle() }
                 } label: {
                     Image(systemName: hidden ? "eye.slash" : "eye")
                         .font(.system(size: 13, weight: .medium))
                         .foregroundStyle(theme.faint)
+                        .symbolEffect(.bounce, value: hidden)
                         .frame(width: 28, height: 28)
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel(hidden ? "显示金额" : "隐藏金额")
                 Spacer()
-                Image(systemName: "wallet.pass")
-                    .font(.system(size: 14, weight: .regular))
-                    .foregroundStyle(theme.faint)
+                if assets > 0 {
+                    VermilionStamp(text: String(format: "负债率 %.1f%%", liabilities / max(assets, 0.01) * 100))
+                }
             }
             Text(Money.masked(netWorth, hidden: hidden))
-                .font(theme.heroAmountFont)
+                .font(theme.isReceipt ? theme.amountFont(30) : theme.heroAmountFont)
                 .monospacedDigit()
                 .foregroundStyle(theme.ink)
                 .lineLimit(1)
                 .minimumScaleFactor(0.5)
-                .contentTransition(.numericText())
+                .contentTransition(.numericText(value: netWorth))
+                .animation(.snappy(duration: 0.26), value: netWorth)
+                .animation(.snappy(duration: 0.22), value: hidden)
             ThemedDashedRule()
-            HStack(alignment: .top) {
-                StatBlock(title: "总资产", value: Money.masked(assets, hidden: hidden))
+            HStack(alignment: .center) {
+                StatBlock(title: "总资产 · ASSETS", value: Money.masked(assets, hidden: hidden))
+                    .contentTransition(.numericText(value: assets))
+                    .animation(.snappy(duration: 0.26), value: assets)
                 Spacer()
-                StatBlock(title: "总负债", value: Money.masked(liabilities, hidden: hidden), alignment: .trailing)
+                Rectangle()
+                    .fill(theme.rule)
+                    .frame(width: 1, height: 32)
+                Spacer()
+                StatBlock(title: "总负债 · DEBT", value: Money.masked(liabilities, hidden: hidden),
+                          alignment: .trailing, valueColor: theme.accent)
+                    .contentTransition(.numericText(value: liabilities))
+                    .animation(.snappy(duration: 0.26), value: liabilities)
             }
             if let disposable {
                 HStack(alignment: .firstTextBaseline, spacing: ReceiptStyle.Space.xs) {
@@ -403,23 +787,10 @@ struct NetWorthCard: View {
                 .accessibilityElement(children: .combine)
                 .accessibilityHint("不含公积金与社保")
             }
-            if assets > 0 && !hidden {
-                let ratio = min(max(liabilities / assets, 0), 1)
-                VStack(alignment: .leading, spacing: ReceiptStyle.Space.xs) {
-                    HStack(alignment: .firstTextBaseline) {
-                        ReceiptLabelText(text: "负债率", color: theme.faint)
-                        Spacer()
-                        Text(String(format: "%.1f%%", liabilities / assets * 100))
-                            .font(theme.metaFont).monospacedDigit()
-                            .foregroundStyle(theme.ink)
-                    }
-                    ReceiptBar(ratio: ratio, fill: theme.accent, track: theme.rule.opacity(0.6))
-                }
-            }
         }
         .padding(.horizontal, ReceiptStyle.Space.l - 4)
         .padding(.vertical, ReceiptStyle.Space.m)
-        .receiptSurface(theme, hero: true)
+        .receiptSurface(theme, hero: true, slot: true)
         .padding(.vertical, 4)
     }
 
@@ -546,33 +917,53 @@ struct AccountRow: View {
     let balance: Double
     let hidden: Bool
 
+    @Environment(\.appTheme) private var theme
+
     var body: some View {
-        HStack(spacing: 12) {
-            CategoryIcon(icon: account.iconName, color: account.color, size: 38)
+        HStack(spacing: theme.isReceipt ? ReceiptStyle.Space.s : 12) {
+            CategoryIcon(
+                icon: account.iconName,
+                color: account.color,
+                size: theme.isReceipt ? 32 : 38,
+                name: account.name,
+                kindRaw: account.type.isLiability ? "expense" : "asset"
+            )
             VStack(alignment: .leading, spacing: 3) {
                 HStack(spacing: 4) {
-                    Text(account.name).lineLimit(1)
+                    Text(account.name)
+                        .font(theme.isReceipt ? theme.serifTitleFont : .ui(.body))
+                        .foregroundStyle(theme.isReceipt ? theme.ink : .primary)
+                        .lineLimit(1)
                     if !account.includeInNetWorth {
-                        Image(systemName: "minus.circle").font(.ui(.caption2)).foregroundStyle(.secondary)
+                        Image(systemName: "minus.circle")
+                            .font(.ui(.caption2))
+                            .foregroundStyle(theme.isReceipt ? theme.faint : .secondary)
                     }
                 }
                 Text(subtitle)
-                    .font(.ui(.caption))
-                    .foregroundStyle(.secondary)
+                    .font(theme.isReceipt ? theme.serifLabelFont : .ui(.caption))
+                    .foregroundStyle(theme.isReceipt ? theme.faint : .secondary)
                     .lineLimit(1)
             }
             Spacer(minLength: 8)
-            VStack(alignment: .trailing, spacing: 3) {
+            VStack(alignment: .trailing, spacing: 4) {
                 Text(balanceText)
-                    .font(.ui(.body, design: .rounded).weight(.semibold))
+                    .font(theme.isReceipt ? theme.amountFont(ReceiptStyle.Size.rowTitle) : .ui(.body, design: .rounded).weight(.semibold))
+                    .monospacedDigit()
                     .foregroundStyle(balanceColor)
                 if account.type.hasCreditLimit, account.creditLimit > 0, !hidden {
                     CreditUsageBar(used: max(0, -balance), limit: account.creditLimit)
-                        .frame(width: 70, height: 4)
+                        .frame(width: 72, height: 4)
                 }
+            }
+            if theme.isReceipt {
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(theme.faint.opacity(0.75))
             }
         }
         .padding(.vertical, 2)
+        .contentShape(Rectangle())
     }
 
     private var balanceText: String {
@@ -583,6 +974,10 @@ struct AccountRow: View {
     }
 
     private var balanceColor: Color {
+        if theme.isReceipt {
+            if account.type.isLiability { return balance < 0 ? theme.accent : theme.income }
+            return balance < 0 ? theme.accent : theme.ink
+        }
         if account.type.isLiability { return balance < 0 ? .red : Color.themeIncome }
         return balance < 0 ? .red : .primary
     }
@@ -590,9 +985,10 @@ struct AccountRow: View {
     private var subtitle: String {
         if account.type.hasCreditLimit, account.creditLimit > 0 {
             let used = max(0, -balance)
-            var s = hidden ? "额度 ****" : "可用 " + Money.format(max(0, account.creditLimit - used))
+            let pct = Int((min(max(used / account.creditLimit, 0), 9.99) * 100).rounded())
+            var s = hidden ? "额度 ****" : "已用 \(pct)% · 可用 " + Money.format(max(0, account.creditLimit - used))
             if let days = account.daysUntilRepayment() {
-                s += days == 0 ? " · 今天还款" : " · \(days) 天后还款"
+                s += days == 0 ? " · 今天还款" : " · \(days)天后还款"
             }
             return s
         }
@@ -657,5 +1053,18 @@ struct AccountPreviewCard: View {
         .frame(width: 300, alignment: .leading)
         .background(LinearGradient(colors: [account.color, account.color.opacity(0.7)],
                                    startPoint: .topLeading, endPoint: .bottomTrailing))
+    }
+}
+
+
+extension Array where Element == LedgerAccount {
+    /// 账户的统一显示顺序：资产页与「排序与归档」共用，保证两处逐行一致。
+    /// sortOrder 相同（旧数据 / 刚新建）时按创建时间、名称兜底，顺序稳定不跳。
+    func sortedForDisplay() -> [LedgerAccount] {
+        sorted {
+            if $0.sortOrder != $1.sortOrder { return $0.sortOrder < $1.sortOrder }
+            if $0.createdAt != $1.createdAt { return $0.createdAt < $1.createdAt }
+            return $0.name < $1.name
+        }
     }
 }

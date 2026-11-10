@@ -12,7 +12,7 @@ struct SettingsView: View {
     @AppStorage(SettingsKey.monthlyBudget) private var budget: Double = 0
     @AppStorage(SettingsKey.currencySymbol) private var currencySymbol = "¥"
     @AppStorage(SettingsKey.appearance, store: .standard) private var appearance = 0
-    @AppStorage(SettingsKey.skin, store: .standard) private var skinRaw = AppSkin.default.rawValue
+    @AppStorage(SettingsKey.skin, store: .standard) private var skinRaw = AppSkin.defaultSkinRaw
     @AppStorage(SettingsKey.receiptPaper, store: .standard) private var receiptPaperRaw = ReceiptPaper.cotton.rawValue
     @AppStorage(SettingsKey.receiptFab, store: .standard) private var receiptFabRaw = ReceiptFabStyle.seal.rawValue
     @AppStorage(SettingsKey.defaultAccount) private var defaultAccount = ""
@@ -47,26 +47,12 @@ struct SettingsView: View {
 
     var body: some View {
         NavigationStack {
-            ThemedForm {
+            Group {
                 if theme.isReceipt {
-                    appearanceSection
-                }
-                securitySection
-                if !session.isDecoy {
-                    bookkeepingSection
-                    smartSection
-                    backupSection
-                    shortcutSection
+                    receiptScrollBody
                 } else {
-                    decoyDataSection
+                    defaultFormBody
                 }
-                if !theme.isReceipt {
-                    appearanceSection
-                }
-                if !session.isDecoy {
-                    dataSection
-                }
-                aboutSection
             }
             .themedScreenBackground()
             .themedRootTitle("设置")
@@ -166,6 +152,652 @@ struct SettingsView: View {
     }
 
     // MARK: - Sections
+
+    private var defaultFormBody: some View {
+        ThemedForm {
+            securitySection
+            if !session.isDecoy {
+                bookkeepingSection
+                smartSection
+                backupSection
+                shortcutSection
+            } else {
+                decoyDataSection
+            }
+            appearanceSection
+            if !session.isDecoy {
+                dataSection
+            }
+            aboutSection
+        }
+    }
+
+    /// 小票皮肤专属：独立 ScrollView + 直角纸张卡片，消除 iOS 27 Form 26pt 大圆角与出纸口裁切
+    private var receiptScrollBody: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 14) {
+                HStack {
+                    VermilionStamp(text: "PREFERENCES · 账本设置")
+                    Spacer()
+                    ReceiptLabelText(text: "LOCAL ONLY", color: theme.faint)
+                }
+                .padding(.horizontal, 2)
+
+                if !session.isDecoy {
+                    receiptCard(
+                        title: "iCloud 与备份",
+                        footer: "可导出备份到 iCloud 云盘并随时恢复；iCloud 自动同步需要付费开发者账号签名。"
+                    ) {
+                        NavigationLink {
+                            BackupSettingsView()
+                        } label: {
+                            receiptRowLabel(
+                                "iCloud 同步与备份",
+                                icon: DataStore.syncStatus.isCloud ? "icloud.fill" : "externaldrive.badge.icloud",
+                                detail: DataStore.syncStatus.title,
+                                showChevron: true
+                            )
+                        }
+                        .buttonStyle(.plain)
+
+                        if backupNeedsPassword {
+                            receiptRule
+                            Label("自动备份已暂停：需要设置备份密码", systemImage: "exclamationmark.triangle.fill")
+                                .font(theme.serifLabelFont)
+                                .foregroundStyle(theme.caution)
+                                .padding(.vertical, 10)
+                        }
+
+                        receiptRule
+                        let backupDetail: String = {
+                            guard lastBackupAt > 0 else { return "从未备份" }
+                            let d = Date(timeIntervalSince1970: lastBackupAt)
+                            let days = max(0, Calendar.current.dateComponents([.day], from: d, to: Date()).day ?? 0)
+                            let tag = days == 0 ? "今日已备份 · " : "\(days)天前 · "
+                            return tag + DateText.full.string(from: d)
+                        }()
+                        receiptRowLabel(
+                            "上次备份",
+                            icon: "clock",
+                            detail: backupDetail,
+                            showChevron: false
+                        )
+                    }
+
+                    receiptCard(
+                        title: "快捷指令",
+                        footer: "在「快捷指令」App 中搜索「简账」即可找到「识图记账」「记一笔」「本月收支」。"
+                    ) {
+                        NavigationLink {
+                            ShortcutGuideView()
+                        } label: {
+                            receiptRowLabel("识图记账设置教程", icon: "text.viewfinder", detail: "", showChevron: true)
+                        }
+                        .buttonStyle(.plain)
+
+                        receiptRule
+                        ShortcutsLink()
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 10)
+                    }
+                }
+
+                let paperNote = skinRaw == AppSkin.receipt.rawValue
+                    ? " 当前纸张：" + (ReceiptPaper(rawValue: receiptPaperRaw) ?? .cotton).detail + "。"
+                    : ""
+                receiptCard(
+                    title: "外观",
+                    footer: AppSkin.stored(skinRaw).detail + paperNote + " 皮肤与纸张为设备级设置，真实账本与防窥账本外观一致。"
+                ) {
+                    HStack(spacing: 10) {
+                        Label("明暗与纸张", systemImage: "circle.lefthalf.filled")
+                            .font(theme.serifTitleFont)
+                            .foregroundStyle(theme.ink)
+                        Spacer(minLength: 8)
+                        HStack(spacing: 6) {
+                            paperChip("棉白", paper: .cotton)
+                            paperChip("暖黄", paper: .vintage)
+                            paperChip("炭黑", paper: nil)
+                        }
+                    }
+                    .padding(.vertical, 10)
+
+                    receiptRule
+
+                    Menu {
+                        ForEach(AppSkin.allCases) { skin in
+                            Button {
+                                ReceiptHaptics.selection()
+                                withAnimation(.snappy(duration: 0.28)) {
+                                    skinRaw = skin.rawValue
+                                }
+                            } label: {
+                                if skinRaw == skin.rawValue { Label(skin.label, systemImage: "checkmark") }
+                                else { Text(skin.label) }
+                            }
+                        }
+                    } label: {
+                        HStack(spacing: 10) {
+                            Label("皮肤", systemImage: "paintpalette.fill")
+                                .font(theme.serifTitleFont)
+                                .foregroundStyle(theme.ink)
+                            Spacer(minLength: 8)
+                            VermilionStamp(text: "✓ \(AppSkin.stored(skinRaw).label)")
+                        }
+                        .padding(.vertical, 10)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityIdentifier("settings-skin")
+
+                    if skinRaw == AppSkin.receipt.rawValue {
+                        receiptRule
+                        HStack(spacing: 10) {
+                            Label("悬浮记账", systemImage: "plus.viewfinder")
+                                .font(theme.serifTitleFont)
+                                .foregroundStyle(theme.ink)
+                            Spacer(minLength: 8)
+                            HStack(spacing: 6) {
+                                fabChip("印章 A", style: .seal)
+                                fabChip("胶囊 B", style: .capsule)
+                                fabChip("拉环 C", style: .pulltab)
+                            }
+                        }
+                        .padding(.vertical, 10)
+                        .accessibilityIdentifier("settings-receipt-fab")
+                    }
+                }
+
+                // 实时小票预览（独立展示在纸面外，保留完整机械出纸口与三层纸张投影）
+                SkinLivePreview(skin: AppSkin.stored(skinRaw))
+                    .padding(.vertical, 4)
+                    .animation(.easeInOut(duration: 0.2), value: skinRaw)
+                    .animation(.easeInOut(duration: 0.2), value: receiptPaperRaw)
+
+                receiptSecurityCard
+
+                if !session.isDecoy {
+                    receiptBookkeepingCard
+                    receiptSmartCard
+                    receiptDataCard
+                } else {
+                    receiptCard(title: "数据", footer: "所有记账仅保存在这台设备上。") {
+                        receiptRowLabel("账本保存在本机", icon: "internaldrive.fill", detail: "仅本机", showChevron: false)
+                    }
+                }
+
+                receiptCard(title: "关于", footer: nil) {
+                    HStack {
+                        Text("版本")
+                            .font(theme.serifTitleFont)
+                            .foregroundStyle(theme.ink)
+                        Spacer()
+                        Text(appVersion)
+                            .font(theme.metaFont)
+                            .foregroundStyle(theme.faint)
+                    }
+                    .padding(.vertical, 10)
+                    .accessibilityElement(children: .combine)
+                    .accessibilityIdentifier("about-version-row")
+
+                    receiptRule
+                    Label("数据本地存储 · 识别在本机完成 · 无网络请求", systemImage: "checkmark.shield.fill")
+                        .font(theme.serifLabelFont)
+                        .foregroundStyle(theme.faint)
+                        .padding(.vertical, 10)
+                }
+
+                Color.clear.frame(height: 28)
+            }
+            .padding(.horizontal, ReceiptStyle.pageHorizontalMargin)
+            .padding(.top, 6)
+            .padding(.bottom, 16)
+        }
+    }
+
+    private var receiptSecurityCard: some View {
+        receiptCard(
+            title: "安全与隐私",
+            footer: session.isDecoy
+                ? "密码以加盐哈希保存在本机钥匙串。"
+                : "密码以加盐哈希保存在本机钥匙串。面容 ID / 触控 ID 始终进入真实账本；只有输入防窥密码才会进入防窥账本。"
+        ) {
+            Toggle(isOn: $passcodeToggle) {
+                Label("密码锁", systemImage: "lock.fill")
+                    .font(theme.serifTitleFont)
+                    .foregroundStyle(theme.ink)
+            }
+            .tint(theme.accent)
+            .padding(.vertical, 8)
+
+            if lock.passcodeEnabled {
+                receiptRule
+                Button {
+                    if session.isDecoy {
+                        decoyMessage = "暂时无法修改密码，请稍后再试。"
+                    } else {
+                        passcodeFlow = .change
+                    }
+                } label: {
+                    receiptRowLabel("修改密码", icon: "key.fill", detail: "", showChevron: true)
+                }
+                .buttonStyle(.plain)
+
+                if lock.canUseBiometrics && !session.isDecoy {
+                    receiptRule
+                    Toggle(isOn: $biometricToggle) {
+                        Label("允许\(lock.biometryName)", systemImage: lock.biometryIcon)
+                            .font(theme.serifTitleFont)
+                            .foregroundStyle(theme.ink)
+                    }
+                    .tint(theme.accent)
+                    .padding(.vertical, 8)
+
+                    if lock.biometricsEnabled {
+                        receiptRule
+                        Menu {
+                            Button("密码") { lock.unlockMethod = .passcode }
+                            Button("自动\(lock.biometryName)") { lock.unlockMethod = .autoBiometric }
+                        } label: {
+                            receiptRowLabel(
+                                "解锁方式",
+                                icon: "lock.open.fill",
+                                detail: lock.unlockMethod == .autoBiometric ? "自动\(lock.biometryName)" : "密码",
+                                showChevron: true
+                            )
+                        }
+                        .buttonStyle(.plain)
+
+                        if lock.unlockMethod == .passcode {
+                            receiptRule
+                            Toggle(isOn: $lock.showBiometricButton) {
+                                Label("锁屏显示\(lock.biometryName)按钮", systemImage: "hand.tap")
+                                    .font(theme.serifTitleFont)
+                                    .foregroundStyle(theme.ink)
+                            }
+                            .tint(theme.accent)
+                            .padding(.vertical, 8)
+                        }
+                    }
+                }
+
+                receiptRule
+                Menu {
+                    ForEach(AppLockManager.graceOptions, id: \.self) { seconds in
+                        Button(AppLockManager.graceTitle(seconds)) { lock.gracePeriod = seconds }
+                    }
+                } label: {
+                    receiptRowLabel(
+                        "离开后多久需要解锁",
+                        icon: "timer",
+                        detail: AppLockManager.graceTitle(lock.gracePeriod),
+                        showChevron: true
+                    )
+                }
+                .buttonStyle(.plain)
+
+                receiptRule
+                Button {
+                    lock.lockNow()
+                } label: {
+                    receiptRowLabel("立即锁定", icon: "lock.rotation", detail: "", showChevron: false)
+                }
+                .buttonStyle(.plain)
+            }
+
+            receiptRule
+            Toggle(isOn: $hideInAppSwitcher) {
+                Label("多任务界面隐藏内容", systemImage: "eye.slash.fill")
+                    .font(theme.serifTitleFont)
+                    .foregroundStyle(theme.ink)
+            }
+            .tint(theme.accent)
+            .padding(.vertical, 8)
+
+            if lock.passcodeEnabled && !session.isDecoy {
+                receiptRule
+                Toggle(isOn: Binding(
+                    get: { decoyEnabled },
+                    set: { on in
+                        if on {
+                            showDecoySetup = true
+                        } else {
+                            DecoyPasscodeStore.remove()
+                            decoyEnabled = false
+                        }
+                    }
+                )) {
+                    Label("防窥模式", systemImage: "eye.trianglebadge.exclamationmark")
+                        .font(theme.serifTitleFont)
+                        .foregroundStyle(theme.ink)
+                }
+                .tint(theme.accent)
+                .padding(.vertical, 8)
+
+                if decoyEnabled {
+                    receiptRule
+                    Button { showDecoyEditor = true } label: {
+                        receiptRowLabel("编辑防窥数据", icon: "pencil.and.outline", detail: "", showChevron: true)
+                    }
+                    .buttonStyle(.plain)
+
+                    receiptRule
+                    Button(role: .destructive) { showDecoyResetConfirm = true } label: {
+                        HStack {
+                            Label("重置为预设数据", systemImage: "arrow.counterclockwise")
+                                .font(theme.serifTitleFont)
+                                .foregroundStyle(theme.accent)
+                            Spacer()
+                        }
+                        .padding(.vertical, 10)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+        }
+    }
+
+    private var receiptBookkeepingCard: some View {
+        receiptCard(
+            title: "记账",
+            footer: "默认关闭：刷卡消费已记为支出，还款只是把钱从银行卡转到信用卡，再计入会重复。"
+        ) {
+            NavigationLink {
+                CategoryManagerView()
+            } label: {
+                receiptRowLabel("分类管理", icon: "square.grid.2x2.fill", detail: "", showChevron: true)
+            }
+            .buttonStyle(.plain)
+
+            receiptRule
+            NavigationLink {
+                BudgetView()
+            } label: {
+                receiptRowLabel("预算", icon: "target", detail: budget > 0 ? "每月 \(Money.format(budget))" : "未设置", showChevron: true)
+            }
+            .buttonStyle(.plain)
+
+            receiptRule
+            Menu {
+                Button("不设置") { defaultAccount = "" }
+                ForEach(accounts.filter { !$0.isArchived }) { a in
+                    Button(a.name) { defaultAccount = a.name }
+                }
+            } label: {
+                receiptRowLabel("默认账户", icon: "creditcard.fill", detail: defaultAccount.isEmpty ? "不设置" : defaultAccount, showChevron: true)
+            }
+            .buttonStyle(.plain)
+
+            receiptRule
+            Menu {
+                Button("人民币 ¥") { currencySymbol = "¥" }
+                Button("美元 $") { currencySymbol = "$" }
+                Button("欧元 €") { currencySymbol = "€" }
+                Button("港币 HK$") { currencySymbol = "HK$" }
+                Button("日元 JP¥") { currencySymbol = "JP¥" }
+            } label: {
+                receiptRowLabel("货币符号", icon: "dollarsign.circle.fill", detail: currencySymbol, showChevron: true)
+            }
+            .buttonStyle(.plain)
+
+            receiptRule
+            Toggle(isOn: $repaymentAsExpense) {
+                Label("信用卡还款计入支出", systemImage: LedgerRecord.repaymentIcon)
+                    .font(theme.serifTitleFont)
+                    .foregroundStyle(theme.ink)
+            }
+            .tint(theme.accent)
+            .padding(.vertical, 8)
+            .accessibilityIdentifier("toggle-repayment-expense")
+        }
+    }
+
+    private var receiptSmartCard: some View {
+        receiptCard(
+            title: "智能记账",
+            footer: "识图记账：文字识别始终在本机用 Vision；不可用或出错时自动改用规则。全程不联网。"
+        ) {
+            NavigationLink {
+                RulesView()
+            } label: {
+                receiptRowLabel("记账规则", icon: "wand.and.stars", detail: rules.isEmpty ? "" : "\(rules.count) 条", showChevron: true)
+            }
+            .buttonStyle(.plain)
+
+            receiptRule
+            Menu {
+                Button("自动（优先 Apple 智能）") { ocrEngine = OCREngineSetting.auto }
+                Button("仅规则") { ocrEngine = OCREngineSetting.rulesOnly }
+            } label: {
+                HStack {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Label("识别引擎", systemImage: "text.viewfinder")
+                            .font(theme.serifTitleFont)
+                            .foregroundStyle(theme.ink)
+                        Text(ocrEngine == OCREngineSetting.rulesOnly ? "仅用本地规则 · \(aiStatus.title)" : aiStatus.title)
+                            .font(theme.serifLabelFont)
+                            .foregroundStyle(aiStatus.isAvailable && ocrEngine != OCREngineSetting.rulesOnly ? theme.income : theme.faint)
+                            .accessibilityIdentifier("ai-status")
+                    }
+                    Spacer()
+                    Text(ocrEngine == OCREngineSetting.rulesOnly ? "仅规则" : "自动")
+                        .font(theme.serifLabelFont)
+                        .foregroundStyle(theme.faint)
+                    Image(systemName: "chevron.up.chevron.down")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(theme.faint)
+                }
+                .padding(.vertical, 10)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityIdentifier("ocr-engine-picker")
+            .onAppear { aiStatus = AppleIntelligenceStatus.current }
+
+            if ocrEngine != OCREngineSetting.rulesOnly {
+                receiptRule
+                Toggle(isOn: $aiInShortcuts) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Label("快捷指令中使用 Apple 智能", systemImage: "square.2.layers.3d")
+                            .font(theme.serifTitleFont)
+                            .foregroundStyle(theme.ink)
+                        Text("默认关闭：开启后最多等 \(Int(OCREngineSetting.shortcutTimeout)) 秒，出错自动改用规则。")
+                            .font(theme.serifLabelFont)
+                            .foregroundStyle(theme.faint)
+                    }
+                }
+                .tint(theme.accent)
+                .padding(.vertical, 8)
+                .accessibilityIdentifier("toggle-ai-shortcuts")
+            }
+
+            receiptRule
+            NavigationLink {
+                OCRDiagnosticsView()
+            } label: {
+                receiptRowLabel("识别诊断", icon: "stethoscope", detail: "", showChevron: true)
+            }
+            .buttonStyle(.plain)
+            .accessibilityIdentifier("settings-ocr-diagnostics")
+
+            if !session.isDecoy {
+                receiptRule
+                NavigationLink {
+                    RunLogView()
+                } label: {
+                    receiptRowLabel("运行日志", icon: "list.bullet.rectangle", detail: "", showChevron: true)
+                }
+                .buttonStyle(.plain)
+                .accessibilityIdentifier("settings-run-log")
+            }
+
+            receiptRule
+            Button {
+                BillImportCenter.shared.openPicker()
+            } label: {
+                receiptRowLabel("导入支付宝 / 微信账单", icon: "square.and.arrow.down.on.square", detail: "", showChevron: true)
+            }
+            .buttonStyle(.plain)
+
+            receiptRule
+            NavigationLink {
+                ImportBatchesView()
+            } label: {
+                receiptRowLabel("导入记录", icon: "clock.arrow.circlepath", detail: batches.isEmpty ? "" : "\(batches.count) 次", showChevron: true)
+            }
+            .buttonStyle(.plain)
+
+            receiptRule
+            NavigationLink {
+                RecurringListView()
+            } label: {
+                receiptRowLabel("周期账单", icon: "arrow.triangle.2.circlepath", detail: recurringRules.isEmpty ? "" : "\(recurringRules.count) 项", showChevron: true)
+            }
+            .buttonStyle(.plain)
+        }
+    }
+
+    private var receiptDataCard: some View {
+        receiptCard(
+            title: "数据",
+            footer: "共 \(records.count) 笔记录。所有数据仅保存在本机，不会上传到任何服务器。"
+        ) {
+            HStack(spacing: 0) {
+                ledgerOverviewStat("总记录", "\(records.count) 笔")
+                    .contentTransition(.numericText())
+                Rectangle().fill(theme.rule).frame(width: 1, height: 26)
+                ledgerOverviewStat("活跃账户", "\(accounts.filter { !$0.isArchived }.count) 个")
+                    .contentTransition(.numericText())
+                Rectangle().fill(theme.rule).frame(width: 1, height: 26)
+                ledgerOverviewStat("记忆规则", "\(rules.count) 条")
+                    .contentTransition(.numericText())
+                Rectangle().fill(theme.rule).frame(width: 1, height: 26)
+                ledgerOverviewStat("周期账单", "\(recurringRules.filter { !$0.isPaused }.count) 项")
+                    .contentTransition(.numericText())
+            }
+            .padding(.vertical, 10)
+            .accessibilityIdentifier("settings-ledger-overview")
+
+            receiptRule
+            NavigationLink {
+                ChangeLogView()
+            } label: {
+                receiptRowLabel("变动日志", icon: "clock.badge.checkmark", detail: "", showChevron: true)
+            }
+            .buttonStyle(.plain)
+            .accessibilityIdentifier("settings-changelog")
+
+            receiptRule
+            NavigationLink {
+                DedupeView()
+            } label: {
+                receiptRowLabel("一键去重", icon: "square.on.square.dashed", detail: "", showChevron: true)
+            }
+            .buttonStyle(.plain)
+            .disabled(records.isEmpty)
+            .accessibilityIdentifier("settings-dedupe")
+
+            receiptRule
+            Button {
+                showCSVWarning = true
+            } label: {
+                receiptRowLabel("导出 CSV", icon: "square.and.arrow.up", detail: "", showChevron: false)
+            }
+            .buttonStyle(.plain)
+            .disabled(records.isEmpty)
+            .alert("导出明文 CSV？", isPresented: $showCSVWarning) {
+                Button("继续导出") { exportCSV() }
+                Button("取消", role: .cancel) {}
+            } message: {
+                Text("CSV 文件没有加密，任何拿到文件的人都能看到全部 \(records.count) 笔记录、金额和备注。")
+            }
+            .sheet(item: $csvShare) { item in
+                ActivityView(items: [item.url])
+                    .presentationDetents([.medium, .large])
+                    .ignoresSafeArea()
+            }
+
+            receiptRule
+            Button(role: .destructive) {
+                showDeleteAll = true
+            } label: {
+                HStack {
+                    Label("删除全部记录", systemImage: "trash")
+                        .font(theme.serifTitleFont)
+                        .foregroundStyle(theme.accent)
+                    Spacer()
+                }
+                .padding(.vertical, 10)
+            }
+            .buttonStyle(.plain)
+            .disabled(records.isEmpty)
+            .confirmationDialog("删除全部记录？", isPresented: $showDeleteAll, titleVisibility: .visible) {
+                Button("删除全部 \(records.count) 笔记录", role: .destructive) { deleteAll() }
+                Button("取消", role: .cancel) {}
+            } message: {
+                Text("此操作不可恢复，建议先导出 CSV 或 JSON 备份。分类和账户会保留。")
+            }
+        }
+    }
+
+    private func ledgerOverviewStat(_ label: String, _ value: String) -> some View {
+        VStack(spacing: 2) {
+            Text(value)
+                .font(theme.metaFont.weight(.semibold))
+                .monospacedDigit()
+                .foregroundStyle(theme.ink)
+            Text(label)
+                .font(theme.labelFont)
+                .foregroundStyle(theme.faint)
+        }
+        .frame(maxWidth: .infinity)
+    }
+
+    private func receiptCard<Content: View>(title: String, footer: String?, @ViewBuilder content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            ReceiptLabelText(text: title, color: theme.faint)
+                .padding(.horizontal, 4)
+            VStack(alignment: .leading, spacing: 0) {
+                content()
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 2)
+            .receiptSurface(theme, hero: false)
+            if let footer {
+                Text(footer)
+                    .font(theme.serifLabelFont)
+                    .foregroundStyle(theme.faint)
+                    .padding(.horizontal, 4)
+            }
+        }
+    }
+
+    private func receiptRowLabel(_ title: String, icon: String, detail: String, showChevron: Bool) -> some View {
+        HStack(spacing: 10) {
+            Label(title, systemImage: icon)
+                .font(theme.serifTitleFont)
+                .foregroundStyle(theme.ink)
+            Spacer(minLength: 8)
+            if !detail.isEmpty {
+                Text(detail)
+                    .font(theme.serifLabelFont)
+                    .foregroundStyle(theme.faint)
+            }
+            if showChevron {
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(theme.faint)
+            }
+        }
+        .padding(.vertical, 11)
+        .contentShape(Rectangle())
+    }
+
+    private var receiptRule: some View {
+        Rectangle()
+            .fill(theme.rule.opacity(0.65))
+            .frame(height: 0.8)
+    }
 
     private var securitySection: some View {
         Section {
@@ -443,38 +1075,74 @@ struct SettingsView: View {
 
     private var appearanceSection: some View {
         Section {
-            Picker(selection: $appearance) {
-                Text("跟随系统").tag(0)
-                Text("浅色").tag(1)
-                Text("深色").tag(2)
-            } label: {
-                Label("明暗", systemImage: "circle.lefthalf.filled")
-            }
-            Picker(selection: $skinRaw) {
-                ForEach(AppSkin.allCases) { skin in
-                    Text(skin.label).tag(skin.rawValue)
+            if theme.isReceipt {
+                // 设计稿：明暗与纸张合成一行三枚纸质芯片（棉白 / 暖黄 / 炭黑）
+                HStack(spacing: 10) {
+                    Label("明暗与纸张", systemImage: "circle.lefthalf.filled")
+                    Spacer(minLength: 8)
+                    HStack(spacing: 6) {
+                        paperChip("棉白", paper: .cotton)
+                        paperChip("暖黄", paper: .vintage)
+                        paperChip("炭黑", paper: nil)
+                    }
                 }
-            } label: {
-                Label("皮肤", systemImage: "paintpalette.fill")
+                // 设计稿：皮肤当前值是一枚朱砂印章，点开仍可切回默认皮肤
+                Menu {
+                    ForEach(AppSkin.allCases) { skin in
+                        Button {
+                            skinRaw = skin.rawValue
+                        } label: {
+                            if skinRaw == skin.rawValue { Label(skin.label, systemImage: "checkmark") }
+                            else { Text(skin.label) }
+                        }
+                    }
+                } label: {
+                    HStack(spacing: 10) {
+                        Label("皮肤", systemImage: "paintpalette.fill")
+                        Spacer(minLength: 8)
+                        VermilionStamp(text: "✓ \(AppSkin.stored(skinRaw).label)")
+                    }
+                }
+                .accessibilityIdentifier("settings-skin")
+            } else {
+                Picker(selection: $appearance) {
+                    Text("跟随系统").tag(0)
+                    Text("浅色").tag(1)
+                    Text("深色").tag(2)
+                } label: {
+                    Label("明暗", systemImage: "circle.lefthalf.filled")
+                }
+                Picker(selection: $skinRaw) {
+                    ForEach(AppSkin.allCases) { skin in
+                        Text(skin.label).tag(skin.rawValue)
+                    }
+                } label: {
+                    Label("皮肤", systemImage: "paintpalette.fill")
+                }
+                .accessibilityIdentifier("settings-skin")
             }
-            .accessibilityIdentifier("settings-skin")
             if skinRaw == AppSkin.receipt.rawValue {
-                Picker(selection: $receiptPaperRaw) {
-                    ForEach(ReceiptPaper.allCases) { p in
-                        Text(p.label).tag(p.rawValue)
+                if theme.isReceipt {
+                    HStack(spacing: 10) {
+                        Label("悬浮记账", systemImage: "plus.viewfinder")
+                        Spacer(minLength: 8)
+                        HStack(spacing: 6) {
+                            fabChip("印章 A", style: .seal)
+                            fabChip("胶囊 B", style: .capsule)
+                            fabChip("拉环 C", style: .pulltab)
+                        }
                     }
-                } label: {
-                    Label("小票纸张", systemImage: "doc.plaintext")
-                }
-                .accessibilityIdentifier("settings-receipt-paper")
-                Picker(selection: $receiptFabRaw) {
-                    ForEach(ReceiptFabStyle.allCases) { f in
-                        Text(f.label).tag(f.rawValue)
+                    .accessibilityIdentifier("settings-receipt-fab")
+                } else {
+                    Picker(selection: $receiptFabRaw) {
+                        ForEach(ReceiptFabStyle.allCases) { f in
+                            Text(f.label).tag(f.rawValue)
+                        }
+                    } label: {
+                        Label("悬浮记账", systemImage: "plus.viewfinder")
                     }
-                } label: {
-                    Label("悬浮记账", systemImage: "plus.viewfinder")
+                    .accessibilityIdentifier("settings-receipt-fab")
                 }
-                .accessibilityIdentifier("settings-receipt-fab")
             }
             SkinLivePreview(skin: AppSkin.stored(skinRaw))
                 .listRowInsets(EdgeInsets(top: 10, leading: 16, bottom: 10, trailing: 16))
@@ -489,6 +1157,67 @@ struct SettingsView: View {
                 : ""
             Text(AppSkin.stored(skinRaw).detail + paperNote + " 皮肤与纸张为设备级设置，真实账本与防窥账本外观一致。")
         } }
+    }
+
+    /// 设计稿纸质芯片：棉白 / 暖黄（浅色纸张）与炭黑（深色），选中项纸面高亮 + 朱砂字
+    private func paperChip(_ title: String, paper: ReceiptPaper?) -> some View {
+        let selected: Bool = {
+            if let paper { return appearance != 2 && (ReceiptPaper(rawValue: receiptPaperRaw) ?? .cotton) == paper }
+            return appearance == 2
+        }()
+        return Button {
+            withAnimation(.easeInOut(duration: 0.2)) {
+                if let paper {
+                    appearance = 1
+                    receiptPaperRaw = paper.rawValue
+                } else {
+                    appearance = 2
+                }
+            }
+        } label: {
+            Text(title)
+                .font(theme.isReceipt ? theme.serifLabelFont : .ui(.caption))
+                .foregroundStyle(selected ? theme.accent : theme.faint)
+                .padding(.horizontal, 9)
+                .padding(.vertical, 4)
+                .background(
+                    RoundedRectangle(cornerRadius: 3)
+                        .fill(selected ? theme.rule.opacity(0.18) : theme.cardFill)
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 3)
+                        .strokeBorder(selected ? theme.accent.opacity(0.45) : theme.rule, lineWidth: 1)
+                )
+        }
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(selected ? [.isSelected] : [])
+        .accessibilityIdentifier("settings-paper-\(title)")
+    }
+
+    private func fabChip(_ title: String, style: ReceiptFabStyle) -> some View {
+        let selected = (ReceiptFabStyle(rawValue: receiptFabRaw) ?? .seal) == style
+        return Button {
+            withAnimation(.easeInOut(duration: 0.2)) {
+                receiptFabRaw = style.rawValue
+            }
+        } label: {
+            Text(title)
+                .font(theme.serifLabelFont)
+                .foregroundStyle(selected ? theme.accent : theme.faint)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+                .background(
+                    RoundedRectangle(cornerRadius: 3)
+                        .fill(selected ? theme.rule.opacity(0.18) : theme.cardFill)
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 3)
+                        .strokeBorder(selected ? theme.accent.opacity(0.45) : theme.rule, lineWidth: 1)
+                )
+        }
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(selected ? [.isSelected] : [])
+        .accessibilityIdentifier("settings-fab-\(style.rawValue)")
     }
 
     private var dataSection: some View {
@@ -600,6 +1329,7 @@ struct SettingsView: View {
             let ok = await lock.evaluateBiometrics(reason: "开启\(lock.biometryName)解锁简账")
             if ok {
                 lock.biometricsEnabled = true
+                lock.showBiometricButton = true
             } else {
                 biometricToggle = false
                 biometricError = "\(lock.biometryName)验证未通过。"

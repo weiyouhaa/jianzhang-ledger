@@ -12,6 +12,7 @@ struct StatsView: View {
     @Environment(\.appTheme) private var theme
     /// 「信用卡还款计入支出」：开启后还款作为「信用卡还款」分类计入支出
     @AppStorage(RepaymentSetting.key) private var repaymentAsExpense = false
+    @AppStorage(SettingsKey.hideAmounts) private var hideAmounts = false
 
     @State private var period: Period = .month
     @State private var anchor: Date = Date()
@@ -76,22 +77,46 @@ struct StatsView: View {
 
         NavigationStack {
             ScrollView {
-                VStack(spacing: 16) {
-                    Picker("周期", selection: $period) {
-                        ForEach(Period.allCases) { p in Text(p.rawValue).tag(p) }
+                VStack(spacing: theme.isReceipt ? 14 : 16) {
+                    if theme.isReceipt {
+                        HStack {
+                            ReceiptLabelText(text: "AUDIT FOLIO · 统计审计", color: theme.faint)
+                            Spacer()
+                            ReceiptLabelText(text: "RMB · CNY", color: theme.faint)
+                        }
+                        .padding(.horizontal, 2)
+                        ReceiptSegmentedControl(
+                            selection: $period,
+                            options: Period.allCases.map { ($0, $0.rawValue) }
+                        )
+                    } else {
+                        Picker("周期", selection: $period) {
+                            ForEach(Period.allCases) { p in Text(p.rawValue).tag(p) }
+                        }
+                        .pickerStyle(.segmented)
                     }
-                    .pickerStyle(.segmented)
 
                     periodNavigator
 
                     overviewCard(expense: expense, income: income, count: periodRecords.count)
 
-                    Picker("类型", selection: $kind) {
-                        ForEach(RecordKind.categoryKinds) { k in Text(k.title).tag(k) }
+                    if theme.isReceipt {
+                        ReceiptSegmentedControl(
+                            selection: $kind,
+                            options: RecordKind.categoryKinds.map { ($0, $0.title + "构成") }
+                        )
+                    } else {
+                        Picker("类型", selection: $kind) {
+                            ForEach(RecordKind.categoryKinds) { k in Text(k.title).tag(k) }
+                        }
+                        .pickerStyle(.segmented)
                     }
-                    .pickerStyle(.segmented)
 
-                    // 4.2 设计稿：印章环紧接审计单，预算单在后（小票皮肤）
+                    // 设计稿顺序：审计单 → 预算单 → 印章环（BREAKDOWN）；默认皮肤保持原顺序
+                    if theme.isReceipt {
+                        budgetCardView(expense: expense)
+                    }
+
                     if kindRecords.isEmpty {
                         card {
                             ThemedEmptyState("暂无\(kind.title)数据", systemImage: "chart.pie",
@@ -105,18 +130,8 @@ struct StatsView: View {
                         }
                     }
 
-                    if period == .month {
-                        let status = BudgetService.status(records: allRecords, categories: categories, month: anchor, prefs: prefs)
-                        if status.total != nil || !status.categories.isEmpty {
-                            card { BudgetStatsCard(status: status) }
-                        }
-                    } else if yearlyBudget > 0 {
-                        card {
-                            VStack(alignment: .leading, spacing: 10) {
-                                Label("年度预算", systemImage: "target").font(cardTitleFont)
-                                BudgetProgressView(spent: expense, budget: yearlyBudget, title: "\(periodTitle)预算")
-                            }
-                        }
+                    if !theme.isReceipt {
+                        budgetCardView(expense: expense)
                     }
 
                     if !kindRecords.isEmpty && theme.isReceipt {
@@ -127,8 +142,12 @@ struct StatsView: View {
                     if period == .year && !periodRecords.isEmpty {
                         compareCard(records: periodRecords)
                     }
+                    if theme.isReceipt {
+                        Color.clear.frame(height: 28)
+                    }
                 }
-                .padding()
+                .padding(.horizontal, theme.isReceipt ? ReceiptStyle.pageHorizontalMargin : 16)
+                .padding(.vertical, 12)
             }
             .background(Color.themeBackdrop)
             .themedScreenBackground()
@@ -143,7 +162,42 @@ struct StatsView: View {
 
     /// 3.5 (26) 小票皮肤：支出用暗红强调色，不用系统橙；卡片标题用打字机粗体
     private var expenseTint: Color { theme.isReceipt ? theme.accent : .orange }
-    private var cardTitleFont: Font { theme.isReceipt ? theme.rowAmountFont : .ui(.headline) }
+    private var cardTitleFont: Font { theme.isReceipt ? theme.cardTitleFont : .ui(.headline) }
+
+    /// 预算单（月度：分类预算执行；年度：年度预算细条）
+    @ViewBuilder
+    private func budgetCardView(expense: Double) -> some View {
+        if period == .month {
+            let status = BudgetService.status(records: allRecords, categories: categories, month: anchor, prefs: prefs)
+            // 小票皮肤始终露出预算单（设计稿「◎ 预算」）；没设过也能从这里进去设
+            if theme.isReceipt || status.total != nil || !status.categories.isEmpty {
+                card { BudgetStatsCard(status: status) }
+            }
+        } else if yearlyBudget > 0 || theme.isReceipt {
+            card {
+                VStack(alignment: .leading, spacing: 10) {
+                    if theme.isReceipt {
+                        Text("◎ 预算").font(cardTitleFont).foregroundStyle(theme.ink)
+                    } else {
+                        Label("年度预算", systemImage: "target").font(cardTitleFont)
+                    }
+                    if yearlyBudget > 0 {
+                        BudgetProgressView(spent: expense, budget: yearlyBudget, title: "\(periodTitle)预算")
+                    } else {
+                        Text("还没有\(periodTitle)预算。到设置里填写年度总额后，这里会显示已用进度。")
+                            .font(theme.metaFont)
+                            .foregroundStyle(theme.faint)
+                        NavigationLink {
+                            BudgetView()
+                        } label: {
+                            Text("设置预算")
+                                .font(theme.metaFont)
+                        }
+                    }
+                }
+            }
+        }
+    }
 
     @ViewBuilder
     private var periodNavigator: some View {
@@ -157,11 +211,27 @@ struct StatsView: View {
                 }
                 .accessibilityLabel("上一段")
                 Spacer()
-                Text(periodTitle)
-                    .font(theme.sectionTitleFont)
-                    .foregroundStyle(theme.ink)
-                    .padding(.bottom, 3)
-                    .overlay(alignment: .bottom) { Rectangle().fill(theme.accent).frame(height: 1.5) }
+                HStack(spacing: 8) {
+                    Text(periodTitle)
+                        .font(theme.sectionTitleFont)
+                        .foregroundStyle(theme.ink)
+                        .padding(.bottom, 3)
+                        .overlay(alignment: .bottom) { Rectangle().fill(theme.accent).frame(height: 1.5) }
+                    if canGoNext {
+                        Button {
+                            withAnimation(.snappy) { anchor = Date() }
+                        } label: {
+                            Text(period == .month ? "回本月" : "回今年")
+                                .font(theme.labelFont)
+                                .foregroundStyle(theme.accent)
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 2)
+                                .background(RoundedRectangle(cornerRadius: 3).fill(theme.accent.opacity(0.10)))
+                                .overlay(RoundedRectangle(cornerRadius: 3).strokeBorder(theme.accent.opacity(0.45), lineWidth: 1))
+                        }
+                        .accessibilityIdentifier("stats-reset-current")
+                    }
+                }
                 Spacer()
                 Button { shift(1) } label: {
                     Image(systemName: "chevron.right")
@@ -184,7 +254,17 @@ struct StatsView: View {
         HStack {
             Button { shift(-1) } label: { Image(systemName: "chevron.left.circle.fill").font(.ui(.title2)) }
             Spacer()
-            Text(periodTitle).font(.ui(.title3).weight(.semibold))
+            HStack(spacing: 8) {
+                Text(periodTitle).font(.ui(.title3).weight(.semibold))
+                if canGoNext {
+                    Button(period == .month ? "回本月" : "回今年") {
+                        withAnimation(.snappy) { anchor = Date() }
+                    }
+                    .font(.caption.weight(.semibold))
+                    .buttonStyle(.bordered)
+                    .controlSize(.mini)
+                }
+            }
             Spacer()
             Button { shift(1) } label: { Image(systemName: "chevron.right.circle.fill").font(.ui(.title2)) }
                 .disabled(!canGoNext)
@@ -194,7 +274,7 @@ struct StatsView: View {
 
     private func overviewCard(expense: Double, income: Double, count: Int) -> some View {
         let days = max(1, daysElapsed())
-        return card {
+        return card(slot: true) {
             VStack(spacing: 14) {
                 if theme.isReceipt {
                     HStack {
@@ -202,19 +282,47 @@ struct StatsView: View {
                         Spacer()
                         ReceiptLabelText(text: periodTitle, color: theme.faint)
                     }
+                    ThemedDashedRule()
                 }
-                HStack {
-                    StatBlock(title: "支出", value: Money.format(expense))
+                HStack(alignment: .center) {
+                    StatBlock(title: "支出", value: Money.masked(expense, hidden: hideAmounts))
+                        .contentTransition(.numericText(value: expense))
+                        .animation(.snappy(duration: 0.26), value: expense)
                     Spacer()
-                    StatBlock(title: "收入", value: Money.format(income), alignment: .center)
+                    if theme.isReceipt {
+                        Rectangle().fill(theme.rule).frame(width: 1, height: 32)
+                        Spacer()
+                    }
+                    StatBlock(title: "收入", value: Money.masked(income, hidden: hideAmounts), alignment: .center,
+                              valueColor: theme.isReceipt ? theme.income : nil)
+                        .contentTransition(.numericText(value: income))
+                        .animation(.snappy(duration: 0.26), value: income)
                     Spacer()
-                    StatBlock(title: "结余", value: Money.format(income - expense), alignment: .trailing)
+                    if theme.isReceipt {
+                        Rectangle().fill(theme.rule).frame(width: 1, height: 32)
+                        Spacer()
+                    }
+                    StatBlock(title: "结余", value: Money.masked(income - expense, hidden: hideAmounts), alignment: .trailing)
+                        .contentTransition(.numericText(value: income - expense))
+                        .animation(.snappy(duration: 0.26), value: income - expense)
                 }
-                Divider()
-                HStack {
-                    StatBlock(title: "日均支出", value: Money.format(expense / Double(days)))
+                if theme.isReceipt {
+                    ThemedDashedRule()
+                } else {
+                    Divider()
+                }
+                HStack(alignment: .center) {
+                    StatBlock(title: "日均支出", value: Money.masked(expense / Double(days), hidden: hideAmounts))
+                        .contentTransition(.numericText(value: expense / Double(days)))
+                        .animation(.snappy(duration: 0.26), value: expense)
                     Spacer()
+                    if theme.isReceipt {
+                        Rectangle().fill(theme.rule).frame(width: 1, height: 30)
+                        Spacer()
+                    }
                     StatBlock(title: "记账笔数", value: "\(count) 笔", alignment: .trailing)
+                        .contentTransition(.numericText(value: Double(count)))
+                        .animation(.snappy(duration: 0.26), value: count)
                 }
             }
         }
@@ -232,7 +340,8 @@ struct StatsView: View {
                             .font(theme.labelFont)
                             .foregroundStyle(theme.faint)
                     }
-                    StampRingChart(slices: Array(totals.prefix(5)).map {
+                    ThemedDashedRule()
+                    StampRingChart(slices: totals.map {
                         StampRingChart.Slice(id: $0.id, label: $0.name, amount: $0.total, color: $0.color)
                     })
                 }
@@ -406,8 +515,17 @@ struct StatsView: View {
     private func rankingCard(totals: [CategoryTotal], total: Double, records: [LedgerRecord]) -> some View {
         card {
             VStack(alignment: .leading, spacing: 14) {
-                Text("分类排行").font(cardTitleFont)
-                ForEach(totals) { item in
+                HStack {
+                    Text(theme.isReceipt ? "分类排行 · RANKING" : "分类排行").font(cardTitleFont)
+                    Spacer()
+                    if theme.isReceipt {
+                        ReceiptLabelText(text: "TOP \(totals.count)", color: theme.faint)
+                    }
+                }
+                if theme.isReceipt {
+                    ThemedDashedRule()
+                }
+                ForEach(Array(totals.enumerated()), id: \.element.id) { rankIdx, item in
                     NavigationLink {
                         CategoryRecordsView(
                             title: "\(item.name) · \(periodTitle)",
@@ -415,25 +533,52 @@ struct StatsView: View {
                         )
                     } label: {
                         HStack(spacing: 12) {
-                            CategoryIcon(icon: item.icon, color: item.color, size: 34)
+                            CategoryIcon(icon: item.icon, color: item.color, size: 32, name: item.name, kindRaw: kind.rawValue)
                             VStack(alignment: .leading, spacing: 5) {
-                                HStack {
-                                    Text(item.name).font(.ui(.subheadline))
-                                    Text(percent(item.total, of: total)).font(.ui(.caption)).foregroundStyle(.secondary)
+                                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                                    Text("#\(rankIdx + 1)")
+                                        .font(theme.isReceipt ? theme.labelFont : .ui(.caption2).monospacedDigit())
+                                        .foregroundStyle(rankIdx < 3 ? theme.accent : theme.faint)
+                                    Text(item.name)
+                                        .font(theme.isReceipt ? theme.serifTitleFont : .ui(.subheadline))
+                                        .foregroundStyle(theme.isReceipt ? theme.ink : .primary)
+                                    Text(percent(item.total, of: total))
+                                        .font(theme.isReceipt ? theme.metaFont : .ui(.caption))
+                                        .foregroundStyle(theme.isReceipt ? theme.faint : .secondary)
                                     Spacer()
-                                    Text(Money.format(item.total)).font(.ui(.subheadline, design: .rounded).weight(.semibold))
+                                    Text(Money.format(item.total))
+                                        .font(theme.isReceipt ? theme.amountFont(ReceiptStyle.Size.rowTitle) : .ui(.subheadline, design: .rounded).weight(.semibold))
+                                        .foregroundStyle(theme.isReceipt ? theme.ink : .primary)
                                 }
-                                GeometryReader { geo in
-                                    ZStack(alignment: .leading) {
-                                        Capsule().fill(Color.secondary.opacity(0.12))
-                                        Capsule().fill(item.color)
-                                            .frame(width: geo.size.width * (total > 0 ? item.total / total : 0))
+                                if theme.isReceipt {
+                                    ReceiptBar(
+                                        ratio: total > 0 ? item.total / total : 0,
+                                        fill: theme.accent,
+                                        track: theme.rule.opacity(0.55)
+                                    )
+                                    .frame(height: 3.5)
+                                } else {
+                                    GeometryReader { geo in
+                                        ZStack(alignment: .leading) {
+                                            Capsule().fill(Color.secondary.opacity(0.12))
+                                            Capsule().fill(item.color)
+                                                .frame(width: geo.size.width * (total > 0 ? item.total / total : 0))
+                                        }
+                                    }
+                                    .frame(height: 6)
+                                }
+                                HStack(spacing: 6) {
+                                    Text("\(item.count) 笔")
+                                    if item.count > 1 {
+                                        Text("· 笔均 \(Money.format(item.total / Double(item.count)))")
                                     }
                                 }
-                                .frame(height: 6)
-                                Text("\(item.count) 笔").font(.ui(.caption2)).foregroundStyle(.secondary)
+                                .font(theme.isReceipt ? theme.labelFont : .ui(.caption2))
+                                .foregroundStyle(theme.isReceipt ? theme.faint : .secondary)
                             }
-                            Image(systemName: "chevron.right").font(.ui(.caption)).foregroundStyle(.tertiary)
+                            Image(systemName: "chevron.right")
+                                .font(.system(size: 11, weight: .semibold))
+                                .foregroundStyle(theme.isReceipt ? theme.faint : .secondary)
                         }
                         .contentShape(Rectangle())
                     }
@@ -536,13 +681,13 @@ struct StatsView: View {
     }
 
     @ViewBuilder
-    private func card<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
+    private func card<Content: View>(slot: Bool = false, @ViewBuilder _ content: () -> Content) -> some View {
         if theme.isReceipt {
-            // 3.5 (26) 小票皮肤：统一纸卡（无虚线外框），与首页 / 资产卡片同一样式
             content()
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(ReceiptStyle.Space.m)
-                .receiptSurface(theme)
+                .padding(.bottom, 4)
+                .receiptSurface(theme, hero: true, slot: slot)
         } else {
             content()
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -792,36 +937,134 @@ enum CategoryRecordsSort: String, CaseIterable, Identifiable {
 struct CategoryRecordsView: View {
     let title: String
     let records: [LedgerRecord]
+    @Environment(\.modelContext) private var context
+    @Environment(\.appTheme) private var theme
     @AppStorage("stats.categoryRecordsSort") private var sortRaw = CategoryRecordsSort.dateDesc.rawValue
     @State private var editing: LedgerRecord?
+    @State private var stubRecord: LedgerRecord?
+    @State private var prefillTarget: RecordPrefill?
+    @State private var pendingDeleteAfterStub: LedgerRecord?
+    @State private var pendingDelete: LedgerRecord?
+    @State private var deletedIDs: Set<UUID> = []
 
     private var sort: CategoryRecordsSort {
         CategoryRecordsSort(rawValue: sortRaw) ?? .dateDesc
     }
 
+    private var activeRecords: [LedgerRecord] {
+        records.filter { !deletedIDs.contains($0.id) && $0.modelContext != nil }
+    }
+
     private var sortedRecords: [LedgerRecord] {
+        let base = activeRecords
         switch sort {
         case .dateDesc:
-            return records.sorted { $0.date != $1.date ? $0.date > $1.date : $0.amount > $1.amount }
+            return base.sorted { $0.date != $1.date ? $0.date > $1.date : $0.amount > $1.amount }
         case .dateAsc:
-            return records.sorted { $0.date != $1.date ? $0.date < $1.date : $0.amount > $1.amount }
+            return base.sorted { $0.date != $1.date ? $0.date < $1.date : $0.amount > $1.amount }
         case .amountDesc:
-            return records.sorted { $0.amount != $1.amount ? $0.amount > $1.amount : $0.date > $1.date }
+            return base.sorted { $0.amount != $1.amount ? $0.amount > $1.amount : $0.date > $1.date }
         case .amountAsc:
-            return records.sorted { $0.amount != $1.amount ? $0.amount < $1.amount : $0.date > $1.date }
+            return base.sorted { $0.amount != $1.amount ? $0.amount < $1.amount : $0.date > $1.date }
         }
     }
 
     var body: some View {
+        let list = sortedRecords
+        let sum = list.reduce(0) { $0 + $1.amount }
+        let avg = list.isEmpty ? 0 : sum / Double(list.count)
+        let maxAmt = list.map(\.amount).max() ?? 0
         ThemedList {
+            if !list.isEmpty {
+                Section {
+                    HStack {
+                        StatBlock(title: "合计金额", value: Money.format(sum))
+                        Spacer()
+                        StatBlock(title: "笔均金额", value: Money.format(avg), alignment: .center)
+                        Spacer()
+                        StatBlock(title: "单笔最高", value: Money.format(maxAmt), alignment: .trailing)
+                    }
+                    .padding(.vertical, 4)
+                }
+            }
             Section {
-                ForEach(sortedRecords) { r in
-                    RecordRow(record: r, showDate: true)
-                        .onTapGesture { editing = r }
+                ForEach(list) { r in
+                    Button {
+                        if theme.isReceipt {
+                            stubRecord = r
+                        } else {
+                            editing = r
+                        }
+                    } label: {
+                        RecordRow(record: r, showDate: true)
+                    }
+                    .buttonStyle(.borderless)
+                    .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                        Button(role: .destructive) {
+                            pendingDelete = r
+                        } label: {
+                            Label("删除", systemImage: "trash")
+                        }
+                        Button {
+                            editing = r
+                        } label: {
+                            Label("编辑", systemImage: "pencil")
+                        }
+                        .tint(.blue)
+                    }
+                    .contextMenu {
+                        Button {
+                            editing = r
+                        } label: {
+                            Label("编辑记录", systemImage: "pencil")
+                        }
+                        Button {
+                            prefillTarget = RecordPrefill.duplicate(from: r, date: Date())
+                        } label: {
+                            Label("再来一笔", systemImage: "plus.square.on.square")
+                        }
+                        if r.kind == .expense && !r.isCreditRepayment {
+                            Button {
+                                let refundCatID = DataStore.category(named: "退款", kind: .income, in: context)?.id
+                                prefillTarget = RecordPrefill.refund(from: r, refundCategoryID: refundCatID, date: Date())
+                            } label: {
+                                Label("记录退款", systemImage: "arrow.uturn.backward.circle")
+                            }
+                        }
+                        Button(role: .destructive) {
+                            pendingDelete = r
+                        } label: {
+                            Label("删除记录", systemImage: "trash")
+                        }
+                    }
                 }
             } header: { ThemedSectionHeader {
-                Text("共 \(records.count) 笔 · \(Money.format(records.reduce(0) { $0 + $1.amount }))")
+                HStack {
+                    Text("共 \(list.count) 笔 · \(Money.format(list.reduce(0) { $0 + $1.amount }))")
+                        .textCase(nil)
+                    Spacer(minLength: 4)
+                    Menu {
+                        ForEach(CategoryRecordsSort.allCases) { option in
+                            Button {
+                                sortRaw = option.rawValue
+                            } label: {
+                                if option == sort {
+                                    Label(option.title, systemImage: "checkmark")
+                                } else {
+                                    Text(option.title)
+                                }
+                            }
+                        }
+                    } label: {
+                        HStack(spacing: 3) {
+                            Image(systemName: "arrow.up.arrow.down")
+                            Text(sort.title)
+                        }
+                        .font(.caption)
+                        .foregroundStyle(.tint)
+                    }
                     .textCase(nil)
+                }
             } }
         }
         .navigationTitle(title)
@@ -848,6 +1091,28 @@ struct CategoryRecordsView: View {
         }
         .sheet(item: $editing) { r in
             RecordEditorView(record: r)
+        }
+        .sheet(item: $prefillTarget) { prefill in
+            RecordEditorView(record: nil, initialDate: prefill.date, initialKind: prefill.kind, prefill: prefill)
+        }
+        .sheet(item: $stubRecord, onDismiss: {
+            if let d = pendingDeleteAfterStub {
+                pendingDeleteAfterStub = nil
+                pendingDelete = d
+            }
+        }) { r in
+            ReceiptStubSheet(record: r, onDelete: { pendingDeleteAfterStub = r })
+        }
+        .alert("确认删除这笔记录？", isPresented: Binding(get: { pendingDelete != nil }, set: { if !$0 { pendingDelete = nil } }), presenting: pendingDelete) { r in
+            Button("删除", role: .destructive) {
+                deletedIDs.insert(r.id)
+                context.delete(r)
+                try? context.save()
+                pendingDelete = nil
+            }
+            Button("取消", role: .cancel) { pendingDelete = nil }
+        } message: { r in
+            Text(r.deleteSummary)
         }
     }
 }

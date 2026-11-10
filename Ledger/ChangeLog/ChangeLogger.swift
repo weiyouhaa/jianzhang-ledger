@@ -569,7 +569,7 @@ struct WatchedSetting {
         .init(key: AppLockManager.Keys.unlockMethod, label: "解锁方式", entity: .security, format: {
             ($0 as? String) == AppLockManager.UnlockMethod.autoBiometric.rawValue ? "自动面容 ID" : "密码"
         }),
-        .init(key: AppLockManager.Keys.biometricButton, label: "锁屏显示面容 ID 按钮", entity: .security, format: WatchedSetting.bool(false)),
+        .init(key: AppLockManager.Keys.biometricButton, label: "锁屏显示面容 ID 按钮", entity: .security, format: WatchedSetting.bool(true)),
         .init(key: AppLockManager.Keys.grace, label: "离开后多久需要解锁", entity: .security,
               format: { AppLockManager.graceTitle((($0 as? Int) ?? (($0 as? NSNumber)?.intValue ?? 0))) }),
         // 备份

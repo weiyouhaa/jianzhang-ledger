@@ -170,7 +170,7 @@ struct RecognizeReceiptIntent: AppIntent {
             let merchant = p.isCardRepayment ? "" : (p.merchant ?? "")
             let modelAccount = p.isCardRepayment || account != nil ? nil
                 : IntentRecorder.resolveAccount(hint: p.accountHint, modelName: p.accountName, role: .single, label: "账户")
-            let resolved = IntentRecorder.resolve(kind: k, merchant: merchant, note: note ?? "",
+            let resolved = IntentRecorder.resolve(kind: k, merchant: merchant, note: note ?? p.discountNote ?? "",
                                                   categoryID: category?.id, categoryName: p.categoryName,
                                                   accountID: account?.id ?? modelAccount?.id,
                                                   accountHint: p.accountHint)
@@ -191,8 +191,9 @@ struct RecognizeReceiptIntent: AppIntent {
                 item.categoryID = nil
                 item.toAccountID = card?.id
                 item.accountID = payer?.id
+                item.fee = p.fee ?? 0
                 item.merchant = ""
-                item.note = note ?? ""
+                item.note = note ?? p.discountNote ?? ""
                 item.payerTail = p.accountHint?.cardTail
                 item.cardTail = p.repaymentCard?.cardTail
                 RunLog.shared.log(.info, "repayment", "第 \(index + 1) 笔：信用卡还款，付款账户\(payer == nil ? "未定" : "已定")，信用卡\(card == nil ? "未定（需选择）" : "已定")")
@@ -208,8 +209,9 @@ struct RecognizeReceiptIntent: AppIntent {
                 item.categoryID = nil
                 item.accountID = fromID
                 item.toAccountID = to?.id == fromID ? nil : to?.id
+                item.fee = p.fee ?? 0
                 item.merchant = ""
-                item.note = note ?? p.transferNote ?? ""
+                item.note = note ?? [p.transferNote, p.discountNote].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · ")
                 item.accountTail = nil
                 item.payerTail = p.transferFrom?.cardTail
                 item.cardTail = p.transferTo?.cardTail
@@ -347,7 +349,7 @@ struct RecognizeReceiptIntent: AppIntent {
     // MARK: - 审核循环
 
     private enum Action: String {
-        case saveAll, edit, delete, add, toggleDuplicates, nextPage, cancel
+        case saveAll, quickCategory, quickAccount, edit, delete, add, toggleDuplicates, nextPage, cancel
     }
 
     private struct Option {
@@ -403,13 +405,26 @@ struct RecognizeReceiptIntent: AppIntent {
                                       subtitle: "共 \(items.count) 笔，每页 \(ReceiptStackView.pageSize) 笔", icon: "doc.on.doc"))
             }
             if !items.isEmpty {
-                options.append(Option(key: Action.edit.rawValue, title: single ? "✏️ 修改" : "✏️ 修改第几笔…",
+                if single, let firstRow = rows.first {
+                    if items[0].kind != .transfer {
+                        options.append(Option(key: Action.quickCategory.rawValue,
+                                              title: "🏷 分类（\(firstRow.categoryName)）",
+                                              subtitle: "一键切换分类", icon: firstRow.icon))
+                    }
+                    options.append(Option(key: Action.quickAccount.rawValue,
+                                          title: "💳 账户（\(firstRow.accountName)）",
+                                          subtitle: items[0].kind == .transfer ? "选择转出与转入账户" : "一键切换付款/入账账户",
+                                          icon: "creditcard"))
+                }
+                options.append(Option(key: Action.edit.rawValue, title: single ? "✏️ 更多修改…" : "✏️ 修改第几笔…",
                                       subtitle: "金额、类型、分类、商户、账户、时间", icon: "pencil"))
                 options.append(Option(key: Action.delete.rawValue, title: single ? "🗑 删除这笔" : "🗑 删除第几笔…",
                                       icon: "trash", destructive: true))
             }
-            options.append(Option(key: Action.add.rawValue, title: "➕ 添加一笔（打开 App）",
-                                  subtitle: "先保存当前列表，再打开新建页", icon: "plus.circle"))
+            if !single {
+                options.append(Option(key: Action.add.rawValue, title: "➕ 添加一笔（打开 App）",
+                                      subtitle: "先保存当前列表，再打开新建页", icon: "plus.circle"))
+            }
             let dups = items.filter(\.isDuplicate)
             if !dups.isEmpty {
                 let allSaving = dups.allSatisfy(\.saveDuplicate)
@@ -459,6 +474,42 @@ struct RecognizeReceiptIntent: AppIntent {
             case .delete:
                 guard let index = try await pickItem(items, verb: "删除", page: page, steps: &steps, context: context) else { continue }
                 items.remove(at: index)
+            case .quickCategory:
+                guard !items.isEmpty else { continue }
+                let row = ReviewFormatter.row(items[0], index: 1, in: context)
+                let cats = DataStore.categories(kind: items[0].kind == .transfer ? .expense : items[0].kind, in: context)
+                var entries: [Option] = []
+                if items[0].kind != .income {
+                    entries.append(Option(key: "repay", title: "💳 信用卡还款", subtitle: "付款账户 → 信用卡，不计入支出", icon: LedgerRecord.repaymentIcon))
+                }
+                entries += cats.map { Option(key: $0.id.uuidString, title: $0.name, icon: $0.icon) }
+                if let pickedKey = try await pickPaged(entries, dialog: "选择分类（当前 \(row.categoryName)）",
+                                                       view: ReviewSnippetView(title: "第 1 笔", rows: [row]), steps: &steps) {
+                    if pickedKey == "repay" {
+                        _ = try await chooseTransferAccounts(&items[0], repayment: true, number: 1, steps: &steps, context: context)
+                    } else if let id = UUID(uuidString: pickedKey), let c = DataStore.category(id: id, in: context) {
+                        if items[0].kind == .transfer { items[0].toAccountID = nil }
+                        items[0].isSelfTransfer = false
+                        items[0].categoryID = c.id
+                        items[0].kind = c.kind
+                        items[0].categoryEdited = true
+                    }
+                }
+            case .quickAccount:
+                guard !items.isEmpty else { continue }
+                let row = ReviewFormatter.row(items[0], index: 1, in: context)
+                if items[0].kind == .transfer {
+                    let isRepay = !items[0].isSelfTransfer && (items[0].toAccountID.flatMap { DataStore.account(id: $0, in: context) }?.type.isLiability ?? true)
+                    _ = try await chooseTransferAccounts(&items[0], repayment: isRepay, number: 1, steps: &steps, context: context)
+                } else {
+                    let list = DataStore.accounts(in: context).map { AccountEntity($0) }
+                    if !list.isEmpty {
+                        reviewAccount = nil
+                        let a = try await $reviewAccount.requestDisambiguation(among: list, dialog: IntentDialog("选择账户（当前 \(row.accountName)）"))
+                        items[0].accountID = a.id
+                        items[0].accountEdited = true
+                    }
+                }
             case .edit:
                 guard let index = try await pickItem(items, verb: "修改", page: page, steps: &steps, context: context) else { continue }
                 do {
@@ -741,7 +792,7 @@ struct RecognizeReceiptIntent: AppIntent {
                     RunLog.shared.log(.warn, "save-skip", "还款 / 转账缺少账户，跳过")
                     continue
                 }
-                saved.append(try IntentRecorder.saveRepayment(amount: item.amount, fromID: from, toID: to, note: item.note,
+                saved.append(try IntentRecorder.saveRepayment(amount: item.amount, fromID: from, toID: to, fee: item.fee, note: item.note,
                                                               date: item.date, source: item.isManual ? "shortcut" : "ocr"))
                 // 记住尾号 → 账户（用户确认保存即视为正确）
                 CardTailMemory.learn(tail: item.payerTail, accountID: from)

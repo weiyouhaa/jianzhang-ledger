@@ -32,7 +32,7 @@ struct DaySummaryRow: View {
             ? AnyLayout(VStackLayout(alignment: .leading, spacing: 8))
             : AnyLayout(HStackLayout(alignment: .center, spacing: 10))
 
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: theme.isReceipt ? 6 : 10) {
             layout {
                 HStack(spacing: 12) {
                     dayBadge
@@ -40,18 +40,35 @@ struct DaySummaryRow: View {
                         // 3.1 (22) 笔数挪到第一行（小字），第二行只放日期，打字机字体下也不再折行
                         HStack(alignment: .firstTextBaseline, spacing: 6) {
                             Text(relative)
-                                .font(theme.isReceipt ? theme.rowAmountFont : theme.title(.headline, weight: .semibold))
+                                .font(theme.isReceipt ? theme.serifTitleFont : theme.title(.headline, weight: .semibold))
                                 .foregroundStyle(theme.isReceipt ? theme.ink : (isToday ? theme.accent : theme.ink))
-                            Text("\(count) 笔")
-                                .font(theme.isReceipt ? theme.metaFont : theme.body(.caption))
-                                .foregroundStyle(theme.faint)
+                            if theme.isReceipt {
+                                Text("\(count) 笔")
+                                    .font(theme.labelFont)
+                                    .foregroundStyle(theme.faint)
+                                    .padding(.horizontal, 5)
+                                    .padding(.vertical, 1.5)
+                                    .background(RoundedRectangle(cornerRadius: 2.5).fill(theme.rule.opacity(0.32)))
+                            } else {
+                                Text("\(count) 笔")
+                                    .font(theme.body(.caption))
+                                    .foregroundStyle(theme.faint)
+                            }
                         }
                         .lineLimit(large ? nil : 1)
-                        Text(dateLabel)
-                            .font(theme.isReceipt ? theme.metaFont : theme.body(.subheadline))
-                            .foregroundStyle(theme.faint)
-                            .lineLimit(large ? nil : 1)
-                            .minimumScaleFactor(0.8)
+                        HStack(spacing: 6) {
+                            Text(dateLabel)
+                                .font(theme.isReceipt ? theme.metaFont : theme.body(.subheadline))
+                                .foregroundStyle(theme.faint)
+                                .lineLimit(large ? nil : 1)
+                                .minimumScaleFactor(0.8)
+                            if collapsed && !chips.isEmpty && !large {
+                                Text("· " + chips.prefix(3).map(\.id).joined(separator: "/"))
+                                    .font(theme.isReceipt ? theme.labelFont : .ui(.caption2))
+                                    .foregroundStyle(theme.faint.opacity(0.85))
+                                    .lineLimit(1)
+                            }
+                        }
                     }
                     // 大字号时换行，不截断日期
                     .fixedSize(horizontal: false, vertical: true)
@@ -62,14 +79,17 @@ struct DaySummaryRow: View {
                 }
                 if !large { Spacer(minLength: 4) }
                 HStack(spacing: 10) {
-                    if !chips.isEmpty && !large { chipStrip }
+                    if !chips.isEmpty && !large && !theme.isReceipt { chipStrip }
                     amounts(alignment: large ? .leading : .trailing)
                     if !large { chevron }
                 }
             }
             if barRatio > 0 && !hideAmounts { bar }
+            if theme.isReceipt {
+                ReceiptRule(color: theme.rule)
+            }
         }
-        .padding(.vertical, 6)
+        .padding(.vertical, theme.isReceipt ? 4 : 6)
         .padding(.horizontal, theme.isReceipt ? 4 : 0)
         .frame(minHeight: 44)
         .contentShape(Rectangle())
@@ -83,20 +103,37 @@ struct DaySummaryRow: View {
     @ViewBuilder
     private var dayBadge: some View {
         if theme.isReceipt {
-            // 3.5 (26) 小票皮肤：不再用实心色块，改成打字机大号日期数字；今天用暗红 + 下划线（同参考图当前月份）
-            Text(DaySummary.dayNumber(day, calendar: calendar))
-                .font(ReceiptTypeface.scaled(ReceiptTypeface.monoBold, 24, relativeTo: .title2))
-                .monospacedDigit()
-                .foregroundStyle(isToday ? theme.accent : theme.ink)
-                .padding(.bottom, 2)
-                .overlay(alignment: .bottom) {
-                    if isToday { Rectangle().fill(theme.accent).frame(height: 1.5) }
-                }
-                .frame(minWidth: 36, minHeight: 40)
+            // 设计稿：方印日期 + 英文月份；今天朱砂底，其余次级纸色
+            VStack(spacing: 0) {
+                Text(DaySummary.dayNumber(day, calendar: calendar))
+                    .font(ReceiptTypeface.scaled(ReceiptTypeface.monoBold, 15, relativeTo: .body))
+                    .monospacedDigit()
+                    .foregroundStyle(isToday ? theme.accent : theme.ink)
+                Text(Self.monthAbbrev.string(from: day).uppercased())
+                    .font(ReceiptTypeface.scaled(ReceiptTypeface.mono, 8, relativeTo: .caption2))
+                    .tracking(1.2)
+                    .foregroundStyle(isToday ? theme.accent : theme.faint)
+            }
+            .frame(width: 36, height: 36)
+            .background(
+                RoundedRectangle(cornerRadius: 3)
+                    .fill(isToday ? theme.accent.opacity(0.10) : theme.rule.opacity(0.35))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 3)
+                    .strokeBorder(isToday ? theme.accent.opacity(0.42) : theme.rule, lineWidth: 1)
+            )
         } else {
             defaultDayBadge
         }
     }
+
+    private static let monthAbbrev: DateFormatter = {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.dateFormat = "MMM"
+        return f
+    }()
 
     private var defaultDayBadge: some View {
         Text(DaySummary.dayNumber(day, calendar: calendar))

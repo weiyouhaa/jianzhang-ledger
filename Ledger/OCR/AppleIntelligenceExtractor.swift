@@ -84,7 +84,26 @@ enum AppleIntelligenceStatus: Equatable {
 }
 
 #if canImport(FoundationModels)
-// 结构尽量短：字段名短、说明短、非必填字段可省略（少占上下文、少生成 token）
+// 单笔极速结构（覆盖 90%+ 日常消费/收款/退款/互转截图）：仅 5 个非可选标量字段、无外层数组包装、无日期/尾号/银行冗余字段，解码仅需 ~18 tokens
+@available(iOS 26.0, *)
+@Generable
+struct AISingleReceipt {
+    var amount: Double
+    @Guide(.anyOf(["expense", "income", "refund", "transfer"]))
+    var kind: String
+    var merchant: String
+    var category: String
+    var account: String
+}
+
+@available(iOS 26.0, *)
+@Generable
+struct AIMultiReceipt {
+    @Guide(.maximumCount(6))
+    var items: [AISingleReceipt]
+}
+
+// 还款专用完整结构（含付款卡、被还款卡、尾号与银行）
 @available(iOS 26.0, *)
 @Generable(description: "一笔交易")
 struct AIReceiptTransaction {
@@ -121,17 +140,19 @@ struct AIReceiptExtraction {
 }
 #endif
 
-/// 识图开始时（与 OCR 并行）创建并预加载的会话；只依赖词表与级别，不含截图内容
+/// 识图开始时（或打开记账页时提前）创建并预加载的会话；只依赖词表与级别，不含截图内容
 final class PreparedModelSession: @unchecked Sendable {
     let level: PromptLevel
     let instructions: String
     let createdAt = Date()
+    let wasPrewarmed: Bool
     fileprivate let session: AnyObject?
 
-    fileprivate init(level: PromptLevel, instructions: String, session: AnyObject?) {
+    fileprivate init(level: PromptLevel, instructions: String, session: AnyObject?, wasPrewarmed: Bool = false) {
         self.level = level
         self.instructions = instructions
         self.session = session
+        self.wasPrewarmed = wasPrewarmed
     }
 }
 
@@ -172,11 +193,12 @@ enum AppleIntelligenceExtractor {
     nonisolated(unsafe) private static var inFlightSince = Date.distantPast
     nonisolated(unsafe) private static var lastPrewarm: Date?
     nonisolated(unsafe) private static var warmSession: AnyObject?
+    nonisolated(unsafe) private static var cachedPrepared: PreparedModelSession?
 
     private static func begin() -> Bool {
         stateLock.lock(); defer { stateLock.unlock() }
-        // 超时后模型任务仍未结束：60 秒内不叠加新请求；超过 60 秒视为卡死，允许重新请求
-        if inFlight && Date().timeIntervalSince(inFlightSince) < 60 { return false }
+        // 超时后模型任务仍未结束：15 秒内不叠加新请求；超过 15 秒允许重新请求
+        if inFlight && Date().timeIntervalSince(inFlightSince) < 15 { return false }
         inFlight = true
         inFlightSince = Date()
         return true
@@ -197,74 +219,124 @@ enum AppleIntelligenceExtractor {
                                         accounts: vocabulary.accounts, level: level)
     }
 
-    /// 预加载模型（App 回到前台 / 打开记一笔时调用），减少首次识别的冷启动时间
-    static func prewarm() {
+    /// 预加载模型（App 回到前台 / 打开记一笔时调用）：直接按用户词表异步预热并缓存会话，选图期间完成 KV 预计算，避免阻塞主线程或与 Vision OCR 争抢 ANE
+    static func prewarm(vocabulary: OCRVocabulary? = nil) {
         #if canImport(FoundationModels)
         if #available(iOS 26.0, *) {
-            guard OCREngineSetting.preferAppleIntelligence, AppleIntelligenceStatus.current.isAvailable else { return }
-            stateLock.lock()
-            let recent = lastPrewarm.map { Date().timeIntervalSince($0) < 120 } ?? false
-            if !recent { lastPrewarm = Date() }
-            stateLock.unlock()
-            guard !recent else { return }
-            let session = LanguageModelSession(instructions: "你是记账助手，从支付截图的 OCR 文字提取交易。")
-            session.prewarm()
-            // 持有一会儿，避免会话立即释放导致预加载被放弃
-            stateLock.lock(); warmSession = session; stateLock.unlock()
+            guard OCREngineSetting.preferAppleIntelligence else { return }
+            let vocabCopy = vocabulary
+            Task.detached(priority: .utility) {
+                guard AppleIntelligenceStatus.current.isAvailable else { return }
+                let level = PromptLevel.initial(thermalSerious: thermalSerious)
+                if let vocab = vocabCopy {
+                    let ins = instructions(vocabulary: vocab, level: level)
+                    stateLock.lock()
+                    if let c = cachedPrepared, c.instructions == ins, Date().timeIntervalSince(c.createdAt) < 180 {
+                        stateLock.unlock()
+                        return
+                    }
+                    lastPrewarm = Date()
+                    stateLock.unlock()
+                    let session = LanguageModelSession(instructions: ins)
+                    session.prewarm()
+                    let prep = PreparedModelSession(level: level, instructions: ins, session: session, wasPrewarmed: true)
+                    stateLock.lock()
+                    cachedPrepared = prep
+                    warmSession = session
+                    stateLock.unlock()
+                    return
+                }
+                stateLock.lock()
+                let recent = lastPrewarm.map { Date().timeIntervalSince($0) < 120 } ?? false
+                if !recent { lastPrewarm = Date() }
+                stateLock.unlock()
+                guard !recent else { return }
+                let session = LanguageModelSession(instructions: "从支付截图OCR提取交易。")
+                session.prewarm()
+                stateLock.lock(); warmSession = session; stateLock.unlock()
+            }
         }
         #endif
     }
 
-    /// 识图开始时调用（在 OCR 之前）：按词表与温度创建会话并预加载，OCR 期间模型同时加载
-    /// prewarm = false：快捷指令（后台）里只建会话不预加载。后台调用有系统配额（rateLimited 只在后台出现），
-    /// 预加载也会占用模型资源，可能和真正的请求一起被计入，后台里不做
+    /// 识图开始时调用（在 OCR 之前）：优先复用打开页面时已预热好的同词表会话；
+    /// 若尚未预热，仅创建会话而不与 Vision OCR 并发调用 prewarm()，避免争抢神经网络引擎（ANE）拖慢 OCR
     static func prepareSession(vocabulary: OCRVocabulary, prewarm: Bool = true) -> PreparedModelSession {
         let level = PromptLevel.initial(thermalSerious: thermalSerious)
         let ins = instructions(vocabulary: vocabulary, level: level)
         #if canImport(FoundationModels)
         if #available(iOS 26.0, *) {
+            stateLock.lock()
+            if let c = cachedPrepared, c.instructions == ins, Date().timeIntervalSince(c.createdAt) < 240 {
+                cachedPrepared = nil
+                stateLock.unlock()
+                return c
+            }
+            stateLock.unlock()
             let session = LanguageModelSession(instructions: ins)
-            if prewarm { session.prewarm() }
-            return PreparedModelSession(level: level, instructions: ins, session: session)
+            return PreparedModelSession(level: level, instructions: ins, session: session, wasPrewarmed: false)
         }
         #endif
-        return PreparedModelSession(level: level, instructions: ins, session: nil)
+        return PreparedModelSession(level: level, instructions: ins, session: nil, wasPrewarmed: false)
     }
 
     static func extract(lines: [OCRLine], vocabulary: OCRVocabulary, timeout: Double,
                         prepared: PreparedModelSession? = nil, stats: ModelRunStats = ModelRunStats(),
-                        screen: PaymentScreen? = nil) async -> Result<[ModelTransaction], Failure> {
+                        screen: PaymentScreen? = nil, expectedCount: Int = 1,
+                        allowRetry: Bool = true) async -> Result<[ModelTransaction], Failure> {
         #if canImport(FoundationModels)
         if #available(iOS 26.0, *) {
             // 上一次（超时后）仍在后台运行：不再叠加请求，直接用规则
             guard begin() else { return .failure(Failure(reason: "上一次识别仍在进行", kind: .concurrentRequests)) }
-            let seconds = max(1, timeout)
+            let seconds = max(0.8, timeout)
             let deadline = Date().addingTimeInterval(seconds)
-            let source = lines.map(\.text).joined(separator: "\n")
+            let texts = lines.map(\.text)
+            let source = texts.joined(separator: "\n")
+            let scr = screen ?? PaymentScreenDetector.detect(texts)
+            let isRepay = ModelPromptBuilder.looksLikeRepayment(texts)
+            let isMulti = scr.layout == .bankPush || scr.layout == .payAssistant || scr.layout == .chatTransfer || expectedCount > 1
+            let useFastSingle = !isRepay && !isMulti
             let firstLevel = prepared?.level ?? PromptLevel.initial(thermalSerious: thermalSerious)
             return await HardTimeout.run(seconds: seconds, onTimeout: { () -> Result<[ModelTransaction], Failure> in
                 stats.add(error: .timeout)
                 let n = stats.attempts
-                return .failure(Failure(reason: "超时（\(Int(seconds)) 秒\(n > 1 ? "，第 \(n) 次" : "")）", kind: .timeout))
+                return .failure(Failure(reason: "超时（\(String(format: "%.1f", seconds)) 秒\(n > 1 ? "，第 \(n) 次" : "")）", kind: .timeout))
             }, operation: { () async -> Result<[ModelTransaction], Failure> in
-                defer { end() }
+                defer {
+                    end()
+                    // 识别结束后异步补充预热下一个会话，保证连续识图也秒出
+                    let vocabCopy = vocabulary
+                    Task.detached(priority: .utility) {
+                        try? await Task.sleep(nanoseconds: 350_000_000)
+                        AppleIntelligenceExtractor.prewarm(vocabulary: vocabCopy)
+                    }
+                }
                 var level = firstLevel
                 var attempt = 1
                 while true {
                     let ins = (attempt == 1 && prepared?.level == level) ? prepared!.instructions : instructions(vocabulary: vocabulary, level: level)
-                    let built = ModelPromptBuilder.build(lines: lines, instructions: ins, level: level, screen: screen)
+                    let built = useFastSingle
+                        ? ModelPromptBuilder.buildFastSingle(lines: lines, instructions: ins, level: level, screen: scr)
+                        : ModelPromptBuilder.build(lines: lines, instructions: ins, level: level, screen: scr)
                     stats.set(prompt: built.summary)
-                    stats.add(attempt: "第 \(attempt) 次 \(level.title) 约 \(built.estimatedTokens) tokens")
+                    stats.add(attempt: "第 \(attempt) 次 \(level.title)\(useFastSingle ? "·单笔极速" : "") 约 \(built.estimatedTokens) tokens")
                     RunLog.shared.log(.info, "model-prompt", "第 \(attempt) 次：" + built.summary)
                     let reuse = attempt == 1 && prepared?.level == level ? prepared?.session as? LanguageModelSession : nil
                     if attempt == 1 {
                         RunLog.shared.log(.info, "model-session", reuse != nil
-                            ? "使用预加载会话（已预加载 \(Int(Date().timeIntervalSince(prepared!.createdAt) * 1000)) ms）" : "新建会话")
+                            ? "复用会话（\(prepared?.wasPrewarmed == true ? "已提前预热" : "已就绪") \(Int(Date().timeIntervalSince(prepared!.createdAt) * 1000)) ms）" : "新建会话")
                     }
                     let t = Date()
                     do {
                         let session = reuse ?? LanguageModelSession(instructions: built.instructions)
-                        let result = try await run(session: session, prompt: built.prompt, level: level)
+                        let result: [ModelTransaction]
+                        if useFastSingle {
+                            result = try await runSingle(session: session, prompt: built.prompt)
+                        } else if !isRepay {
+                            result = try await runMulti(session: session, prompt: built.prompt, level: level)
+                        } else {
+                            result = try await runRepay(session: session, prompt: built.prompt, level: level)
+                        }
                         RunLog.shared.log(.info, "model-attempt", "第 \(attempt) 次成功，用时 \(Int(Date().timeIntervalSince(t) * 1000)) ms，\(result.count) 笔")
                         return .success(result)
                     } catch {
@@ -273,6 +345,9 @@ enum AppleIntelligenceExtractor {
                         let remaining = deadline.timeIntervalSinceNow
                         RunLog.shared.log(.warn, "model-error", "第 \(attempt) 次失败，用时 \(Int(Date().timeIntervalSince(t) * 1000)) ms："
                             + "\(info.kind.rawValue)（\(info.kind.title)）· \(info.detail) · 剩余 \(String(format: "%.1f", max(0, remaining))) 秒")
+                        guard allowRetry else {
+                            return .failure(Failure(reason: "出错：\(info.kind.title)", kind: info.kind))
+                        }
                         // 后台限流（rateLimited）：等 1.5 秒用同级提示词、新会话再试一次（剩余时间够才试）
                         if attempt == 1, info.kind == .rateLimited, remaining >= ModelBudget.rateLimitRetryDelay + ModelBudget.minRetrySeconds,
                            !Task.isCancelled {
@@ -301,11 +376,46 @@ enum AppleIntelligenceExtractor {
 
     #if canImport(FoundationModels)
     @available(iOS 26.0, *)
-    private static func run(session: LanguageModelSession, prompt: String, level: PromptLevel) async throws -> [ModelTransaction] {
+    private static func toModelTransaction(_ item: AISingleReceipt) -> ModelTransaction {
+        let rawKind = item.kind.lowercased()
+        let isRefund = rawKind == "refund"
+        let kind = isRefund ? "income" : rawKind
+        let acct = item.account.trimmingCharacters(in: .whitespacesAndNewlines)
+        return ModelTransaction(amount: item.amount, kind: kind,
+                                merchant: item.merchant.trimmingCharacters(in: .whitespacesAndNewlines),
+                                note: "",
+                                categoryName: item.category.trimmingCharacters(in: .whitespacesAndNewlines),
+                                accountHint: acct.isEmpty ? "未知" : acct,
+                                dateText: "", isRefund: isRefund,
+                                fromAccountHint: "", toAccountHint: "",
+                                fromCardTail: "", toCardTail: "",
+                                bankNames: [], reason: "")
+    }
+
+    @available(iOS 26.0, *)
+    private static func runSingle(session: LanguageModelSession, prompt: String) async throws -> [ModelTransaction] {
+        try Task.checkCancellation()
+        let response = try await session.respond(to: prompt, generating: AISingleReceipt.self,
+                                                 options: GenerationOptions(sampling: .greedy,
+                                                                            maximumResponseTokens: 120))
+        return [toModelTransaction(response.content)]
+    }
+
+    @available(iOS 26.0, *)
+    private static func runMulti(session: LanguageModelSession, prompt: String, level: PromptLevel) async throws -> [ModelTransaction] {
+        try Task.checkCancellation()
+        let response = try await session.respond(to: prompt, generating: AIMultiReceipt.self,
+                                                 options: GenerationOptions(sampling: .greedy,
+                                                                            maximumResponseTokens: min(level.maxResponseTokens, 260)))
+        return response.content.items.prefix(8).map(toModelTransaction)
+    }
+
+    @available(iOS 26.0, *)
+    private static func runRepay(session: LanguageModelSession, prompt: String, level: PromptLevel) async throws -> [ModelTransaction] {
         try Task.checkCancellation()
         let response = try await session.respond(to: prompt, generating: AIReceiptExtraction.self,
                                                  options: GenerationOptions(sampling: .greedy,
-                                                                            maximumResponseTokens: level.maxResponseTokens))
+                                                                            maximumResponseTokens: min(level.maxResponseTokens, 240)))
         return response.content.transactions.prefix(12).map {
             let kind = $0.kind.lowercased() == "repay" ? "cardRepayment" : $0.kind
             return ModelTransaction(amount: $0.amount, kind: kind, merchant: $0.merchant ?? "", note: "",

@@ -143,6 +143,24 @@ enum DataStore {
         return includeArchived ? all : all.filter { !$0.isArchived }
     }
 
+    /// 构造与预热完全一致的 OCR 词表（包含账户详情尾号说明），确保 App 内与启动预热 100% 命中同一 PreparedModelSession
+    static func ocrVocabulary(categories: [LedgerCategory], accounts: [LedgerAccount], isDecoy: Bool = false) -> OCRVocabulary {
+        let active = accounts.filter { !$0.isArchived }
+        let learned = isDecoy ? [:] : CardTailMemory.all()
+        return OCRVocabulary(
+            expenseCategories: categories.filter { $0.kind == .expense }.map(\.name),
+            incomeCategories: categories.filter { $0.kind == .income }.map(\.name),
+            accounts: active.map(\.name),
+            accountDetails: active.map { a in
+                var parts = [a.type.title]
+                if let bank = CardTailMemory.bankName(of: a) { parts.append(bank) }
+                let tails = CardTailMemory.tails(of: a, learned: learned)
+                if !tails.isEmpty { parts.append("尾号" + tails.sorted().joined(separator: "/")) }
+                return "\(a.name)〔\(parts.joined(separator: "·"))〕"
+            }
+        )
+    }
+
     static func account(idString: String, in context: ModelContext) -> LedgerAccount? {
         guard let id = UUID(uuidString: idString) else { return nil }
         return account(id: id, in: context)

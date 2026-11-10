@@ -333,8 +333,9 @@ struct AccountManagerView: View {
     @State private var editorTarget: AccountEditorTarget?
 
     var body: some View {
-        let active = accounts.filter { !$0.isArchived }
-        let archived = accounts.filter { $0.isArchived }
+        let ordered = accounts.sortedForDisplay()
+        let active = ordered.filter { !$0.isArchived }
+        let archived = ordered.filter { $0.isArchived }
         ThemedList {
             Section {
                 ForEach(active) { a in
@@ -361,6 +362,7 @@ struct AccountManagerView: View {
             }
         }
         .navigationTitle("排序与归档")
+        .onAppear { normalizeSortOrder() }
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) { EditButton() }
             ToolbarItem(placement: .topBarTrailing) {
@@ -375,6 +377,15 @@ struct AccountManagerView: View {
                 AccountEditorView(account: a, nextSortOrder: a.sortOrder)
             }
         }
+    }
+
+    /// 旧数据里 sortOrder 可能重复或不连续：按当前显示顺序重排成 0…n，资产页与本页始终一致
+    private func normalizeSortOrder() {
+        let active = accounts.sortedForDisplay().filter { !$0.isArchived }
+        let needs = active.enumerated().contains { $0.element.sortOrder != $0.offset }
+        guard needs else { return }
+        for (i, a) in active.enumerated() { a.sortOrder = i }
+        try? context.save()
     }
 
     private func row(_ a: LedgerAccount) -> some View {

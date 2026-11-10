@@ -28,20 +28,45 @@ struct CategoryManagerView: View {
     var body: some View {
         ThemedList {
             Section {
-                Picker("类型", selection: $kind) {
+                Picker("类型", selection: $kind.animation(.snappy(duration: 0.22))) {
                     ForEach(RecordKind.categoryKinds) { k in Text(k.title).tag(k) }
                 }
                 .pickerStyle(.segmented)
+                .onChange(of: kind) { _, _ in ReceiptHaptics.selection() }
             }
             Section {
                 ForEach(categories) { c in
+                    let recordsList = c.records ?? []
+                    let monthSum = recordsList.filter {
+                        DateText.calendar.isDate($0.date, equalTo: Date(), toGranularity: .month)
+                    }.reduce(0.0) { $0 + $1.amount }
                     HStack(spacing: 12) {
                         CategoryIcon(icon: c.icon, color: c.color, size: 34)
-                        Text(c.name)
+                        VStack(alignment: .leading, spacing: 2) {
+                            HStack(spacing: 6) {
+                                Text(c.name)
+                                if c.monthlyBudget > 0 {
+                                    Text("预算 \(Money.compact(c.monthlyBudget))")
+                                        .font(.ui(.caption2))
+                                        .padding(.horizontal, 5)
+                                        .padding(.vertical, 1)
+                                        .background(Capsule().fill(Color.themeAccent.opacity(0.14)))
+                                        .foregroundStyle(Color.themeAccent)
+                                        .contentTransition(.numericText())
+                                }
+                            }
+                            if monthSum > 0 {
+                                Text("本月 \(Money.format(monthSum))")
+                                    .font(.ui(.caption2))
+                                    .foregroundStyle(.secondary)
+                                    .contentTransition(.numericText())
+                            }
+                        }
                         Spacer()
-                        Text("\(c.records?.count ?? 0) 笔")
+                        Text("\(recordsList.count) 笔")
                             .font(.ui(.caption))
                             .foregroundStyle(.secondary)
+                            .contentTransition(.numericText())
                     }
                     .contentShape(Rectangle())
                     .onTapGesture { editing = .edit(c) }

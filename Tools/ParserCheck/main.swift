@@ -894,5 +894,124 @@ do {
            "3.9 中文退款 isRefund（inc=\(r7.isIncome) refund=\(r7.isRefund) cat=\(r7.categoryName ?? "nil")）")
 }
 
+// 4.3 (37)：微信 / 支付宝 / 云闪付 / 信用卡还款 中英文截图 —— 收付款方、项目内容、优惠信息（备注）、支付日期、支付金额
+do {
+    // 1. 微信中文账单详情：商户名 + 商品内容 + 代金券 + 商品总价 + 商户单号干扰 + 简称银行卡
+    let wxCN = ["微信支付", "示例茶饮店", "-18.00", "当前状态", "支付成功", "商品", "杨枝甘露大杯", "商品总价", "¥23.00",
+                "代金券", "-¥5.00", "支付时间", "2026年10月17日 14:22:10", "支付方式", "招行信用卡(1024)",
+                "交易单号", "420000202610170001", "商户单号", "2026101788889999"]
+    let r1 = ReceiptParser.parse(lines: wxCN, now: now, calendar: cal)
+    expect(r1.amount == 18 && r1.merchant == "示例茶饮店" && r1.itemNote == "杨枝甘露大杯"
+           && r1.discountNote == "杨枝甘露大杯 · 代金券 5.00" && fmt(r1.date) == "2026-10-17 14:22"
+           && r1.accountHint?.bankName == "招商银行" && r1.accountHint?.cardTail == "1024" && r1.accountHint?.type == "credit",
+           "4.3 微信中文（商户=\(r1.merchant ?? "nil") 项目=\(r1.itemNote ?? "nil") 备注=\(r1.discountNote ?? "nil") 金额=\(r1.amount ?? -1) 时间=\(fmt(r1.date)) 账户=\(r1.accountHint?.bankName ?? "-"):\(r1.accountHint?.cardTail ?? "-")）")
+
+    // 2. 微信英文账单详情：Merchant Order No. 不误作商户，Product + Voucher 进备注
+    let wxEN = ["WeChat Pay", "Sample Bakery", "-24.50", "Payment Successful", "Product", "Croissant Set",
+                "Voucher", "-$3.50", "Payment Time", "2026-10-17 09:30:00", "Payment Method", "CMB Credit Card(1024)",
+                "Merchant Order No.", "2026101799887766"]
+    let r2 = ReceiptParser.parse(lines: wxEN, now: now, calendar: cal)
+    expect(r2.amount == 24.5 && r2.merchant == "Sample Bakery" && r2.itemNote == "Croissant Set"
+           && r2.discountNote == "Croissant Set · 优惠 3.50" && fmt(r2.date) == "2026-10-17 09:30"
+           && r2.accountHint?.bankName == "招商银行" && r2.accountHint?.cardTail == "1024",
+           "4.3 微信英文（商户=\(r2.merchant ?? "nil") 备注=\(r2.discountNote ?? "nil") 金额=\(r2.amount ?? -1) 时间=\(fmt(r2.date))）")
+
+    // 3. 微信扫码付款 + 付款方留言
+    let wxNote = ["微信支付", "向示例小馆付款", "-36.00", "支付成功", "付款方留言", "周三聚餐AA",
+                  "支付时间", "2026-10-17 19:05:00", "支付方式", "零钱"]
+    let r3 = ReceiptParser.parse(lines: wxNote, now: now, calendar: cal)
+    expect(r3.amount == 36 && r3.merchant == "示例小馆" && r3.itemNote == "周三聚餐AA" && r3.discountNote == "周三聚餐AA",
+           "4.3 微信扫码+留言（商户=\(r3.merchant ?? "nil") 备注=\(r3.discountNote ?? "nil")）")
+
+    // 4. 支付宝中文账单详情：顶部商户保留不被「商品说明」覆盖，商品说明 + 花呗红包进备注
+    let aliCN = ["账单详情", "示例咖啡", "-22.00", "交易成功", "商品说明", "生椰拿铁大杯", "订单金额", "28.00",
+                 "花呗红包", "-3.00", "商家优惠", "-3.00", "付款方式", "花呗", "创建时间", "2026-10-17 15:10:22"]
+    let r4 = ReceiptParser.parse(lines: aliCN, now: now, calendar: cal)
+    expect(r4.amount == 22 && r4.merchant == "示例咖啡" && r4.itemNote == "生椰拿铁大杯"
+           && r4.discountNote == "生椰拿铁大杯 · 花呗红包 3.00" && fmt(r4.date) == "2026-10-17 15:10"
+           && r4.categoryName == "餐饮" && r4.accountHint?.type == "consumerCredit",
+           "4.3 支付宝中文（商户=\(r4.merchant ?? "nil") 备注=\(r4.discountNote ?? "nil") 金额=\(r4.amount ?? -1) 分类=\(r4.categoryName ?? "nil")）")
+
+    // 5. 支付宝英文账单详情：Sample Coffee + Product Description + Order Total 不误作优惠
+    let aliEN = ["Bill Details", "Sample Coffee", "-26.00", "Transaction Successful", "Order Total", "30.00",
+                 "Alipay Discount", "-4.00", "Product Description", "Iced Americano", "Payment Method", "Huabei",
+                 "Payment Time", "Oct 17, 2026 3:15 PM", "Alipay"]
+    let r5 = ReceiptParser.parse(lines: aliEN, now: now, calendar: cal)
+    expect(r5.amount == 26 && r5.merchant == "Sample Coffee" && r5.itemNote == "Iced Americano"
+           && r5.discountNote == "Iced Americano · 优惠 4.00" && fmt(r5.date) == "2026-10-17 15:15",
+           "4.3 支付宝英文（商户=\(r5.merchant ?? "nil") 备注=\(r5.discountNote ?? "nil") 金额=\(r5.amount ?? -1) 时间=\(fmt(r5.date))）")
+
+    // 6. 云闪付详情：收款方 + 商品名称 + 云闪付立减 + 简称银行带括号尾号
+    let upCN = ["云闪付", "-¥52.00", "支付成功", "订单金额", "¥60.00", "优惠信息", "云闪付立减-¥8.00",
+                "收款方", "示例超市(中心店)", "商品名称", "日用百货大礼包", "付款方式", "浦发信用卡(尾号8831)",
+                "交易时间", "2026-10-17 20:08:11"]
+    let r6 = ReceiptParser.parse(lines: upCN, now: now, calendar: cal)
+    expect(r6.amount == 52 && r6.merchant == "示例超市(中心店)" && r6.itemNote == "日用百货大礼包"
+           && r6.discountNote == "日用百货大礼包 · 云闪付立减 8.00" && fmt(r6.date) == "2026-10-17 20:08"
+           && r6.accountHint?.bankName == "浦发银行" && r6.accountHint?.cardTail == "8831",
+           "4.3 云闪付中文（商户=\(r6.merchant ?? "nil") 备注=\(r6.discountNote ?? "nil") 银行=\(r6.accountHint?.bankName ?? "-"):\(r6.accountHint?.cardTail ?? "-")）")
+
+    // 7. 信用卡还款（中文简称银行+括号内尾号+手续费减免 / 英文 Repayment Account + Deducted from）
+    let repCN = ["信用卡还款", "-5,200.00", "还款成功", "还款账户", "招行信用卡(尾号1024)",
+                 "转出账户", "建行储蓄卡(尾号6688)", "手续费减免", "¥2.00", "还款时间", "2026-10-17 10:15:00"]
+    let r7 = ReceiptParser.parse(lines: repCN, now: now, calendar: cal)
+    expect(r7.isCardRepayment && r7.amount == 5200 && r7.repaymentCard?.bankName == "招商银行"
+           && r7.repaymentCard?.cardTail == "1024" && r7.accountHint?.bankName == "建设银行"
+           && r7.accountHint?.cardTail == "6688" && r7.discountNote == "手续费减免 2.00"
+           && fmt(r7.date) == "2026-10-17 10:15",
+           "4.3 信用卡还款中文（repay=\(r7.isCardRepayment) 卡=\(r7.repaymentCard?.bankName ?? "-"):\(r7.repaymentCard?.cardTail ?? "-") 付款=\(r7.accountHint?.bankName ?? "-"):\(r7.accountHint?.cardTail ?? "-") 备注=\(r7.discountNote ?? "nil")）")
+
+    let repEN = ["Repayment Successful", "-1,500.00", "Repayment Account", "SPDB Credit Card(8831)",
+                 "Deducted from", "ICBC Debit Card(2468)", "Transaction Time", "2026-10-17 11:20:00"]
+    let r8 = ReceiptParser.parse(lines: repEN, now: now, calendar: cal)
+    expect(r8.isCardRepayment && r8.amount == 1500 && r8.repaymentCard?.bankName == "浦发银行"
+           && r8.repaymentCard?.cardTail == "8831" && r8.accountHint?.bankName == "工商银行"
+           && r8.accountHint?.cardTail == "2468" && fmt(r8.date) == "2026-10-17 11:20",
+           "4.3 信用卡还款英文（repay=\(r8.isCardRepayment) 卡=\(r8.repaymentCard?.bankName ?? "-"):\(r8.repaymentCard?.cardTail ?? "-") 付款=\(r8.accountHint?.bankName ?? "-"):\(r8.accountHint?.cardTail ?? "-")）")
+}
+
+// 4.3 (40)：截图识别速度与精度优化 —— 币种符号换行合并、银行转账对方户名/账号/用途、店铺优惠/政府补贴、分付/白条、清算机构黑名单、点号日期带秒
+do {
+    // 1. 币种符号与金额被 Vision 拆成两行（「-¥」+「28.50」），且有收单机构/清算机构干扰
+    let splitAmt = ["微信支付", "霸王茶姬(国贸店)", "-¥", "28.50", "支付成功", "商品说明", "伯牙绝弦大杯",
+                    "店铺优惠", "-¥4.00", "支付方式", "分付", "收单机构", "财付通支付科技有限公司",
+                    "清算机构", "由网联清算有限公司提供收款清算服务", "支付时间", "10.17 14:20:30"]
+    let s1 = ReceiptParser.parse(lines: splitAmt, now: now, calendar: cal)
+    expect(s1.amount == 28.5 && s1.merchant == "霸王茶姬(国贸店)" && s1.itemNote == "伯牙绝弦大杯"
+           && s1.discountNote == "伯牙绝弦大杯 · 店铺优惠 4.00" && s1.categoryName == "餐饮"
+           && s1.accountHint?.type == "consumerCredit" && fmt(s1.date) == "2026-10-17 14:20",
+           "4.3(40) 币种换行+店铺优惠+分付+点号日期（商户=\(s1.merchant ?? "nil") 金额=\(s1.amount ?? -1) 备注=\(s1.discountNote ?? "nil") 分类=\(s1.categoryName ?? "nil") 账户=\(s1.accountHint?.type ?? "nil") 时间=\(fmt(s1.date))）")
+
+    // 2. 银行转账回单：对方户名 + 对方账号（不能误匹配「对方」当成商户）+ 用途
+    let bankTransfer = ["转账成功", "-¥1,200.00", "对方账号", "6222 **** 8899", "对方开户行", "招商银行北京分行",
+                        "对方户名", "王小明", "用途", "10月房租分摊", "付款卡", "建行储蓄卡(6688)", "交易时间", "2026-10-17 16:05:12"]
+    let s2 = ReceiptParser.parse(lines: bankTransfer, now: now, calendar: cal)
+    expect(s2.amount == 1200 && s2.merchant == "王小明" && s2.itemNote == "10月房租分摊"
+           && s2.discountNote == "10月房租分摊" && s2.accountHint?.bankName == "建设银行"
+           && s2.accountHint?.cardTail == "6688" && fmt(s2.date) == "2026-10-17 16:05",
+           "4.3(40) 银行转账对方户名+用途（商户=\(s2.merchant ?? "nil") 备注=\(s2.discountNote ?? "nil") 账户=\(s2.accountHint?.bankName ?? "-"):\(s2.accountHint?.cardTail ?? "-")）")
+
+    // 3. 电商 / 平台补贴：政府补贴 + 白条支付
+    let subsidy = ["京东收银台", "京东自营旗舰店", "实付金额", "¥3,199.00", "订单金额", "¥3,999.00",
+                   "政府补贴", "-¥800.00", "订单标题", "无线降噪耳机", "支付方式", "白条", "交易时间", "2026-10-17 21:00:00"]
+    let s3 = ReceiptParser.parse(lines: subsidy, now: now, calendar: cal)
+    expect(s3.amount == 3199 && s3.merchant == "京东自营旗舰店" && s3.itemNote == "无线降噪耳机"
+           && s3.discountNote == "无线降噪耳机 · 政府补贴 800.00" && s3.accountHint?.type == "consumerCredit",
+           "4.3(40) 政府补贴+白条（商户=\(s3.merchant ?? "nil") 金额=\(s3.amount ?? -1) 备注=\(s3.discountNote ?? "nil") 账户=\(s3.accountHint?.type ?? "nil")）")
+
+    // 4. 4.3 (42) 信用卡专属 App（掌上生活 / 买单吧 / 发现精彩）自动识别对应银行与信用卡类型
+    let zssh = ["掌上生活", "星巴克咖啡", "实付金额", "¥32.00", "付款方式", "尾号1024", "交易时间", "2026-10-17 09:15:00"]
+    let s4 = ReceiptParser.parse(lines: zssh, now: now, calendar: cal)
+    expect(s4.amount == 32 && s4.merchant == "星巴克咖啡" && s4.accountHint?.bankName == "招商银行"
+           && s4.accountHint?.type == "credit" && s4.accountHint?.cardTail == "1024",
+           "4.3(42) 掌上生活自动识别招行信用卡（bank=\(s4.accountHint?.bankName ?? "-") type=\(s4.accountHint?.type ?? "-") tail=\(s4.accountHint?.cardTail ?? "-")）")
+
+    // 5. 4.3 (43) 提现 / 还款自动识别服务费 / 手续费（排除手续费减免）
+    let withdrawWithFee = ["零钱提现", "1,000.00", "提现到", "招商银行(1234)", "服务费", "¥1.00", "申请时间", "2026-10-17 15:30:00"]
+    let s5 = ReceiptParser.parse(lines: withdrawWithFee, now: now, calendar: cal)
+    expect(s5.isSelfTransfer && s5.amount == 1000 && s5.fee == 1.0 && s5.transferTo?.bankName == "招商银行",
+           "4.3(43) 零钱提现自动识别服务费（amount=\(s5.amount ?? -1) fee=\(s5.fee ?? -1)）")
+}
+
 print(failures == 0 ? "ALL PASSED" : "\(failures) FAILED")
 exit(failures == 0 ? 0 : 1)

@@ -1,27 +1,25 @@
 import SwiftUI
 
-/// 分类圆形图标
+/// 分类图标：默认皮肤为彩色圆章；小票皮肤为复古汉字方印（[餐] [行] [购] [住] [入] [转]）
 struct CategoryIcon: View {
     let icon: String
     let color: Color
     var size: CGFloat = 38
     var selected: Bool = false
+    var name: String? = nil
+    var kindRaw: String? = nil
     @Environment(\.appTheme) private var theme
 
     var body: some View {
         if theme.isReceipt {
-            // 3.5 (26) 小票皮肤：极淡的墨水色圆底 + 细线条图标（颜色已在 Color.skinTint 里降饱和）
-            ZStack {
-                Circle()
-                    .fill(selected ? color : color.opacity(theme.scheme == .dark ? 0.20 : 0.11))
-                Image(systemName: icon)
-                    .font(.system(size: size * 0.42, weight: .medium))
-                    .foregroundStyle(selected ? theme.paper : color)
-            }
-            .frame(width: size, height: size)
-            .overlay(
-                Circle().strokeBorder(theme.ink.opacity(selected ? 0.55 : 0), lineWidth: 1).padding(-4)
-            )
+            let ch = ReceiptSquareStamp.sealCharacter(name: name, icon: icon, kindRaw: kindRaw)
+            let stampTint: Color? = {
+                if selected { return theme.accent }
+                if kindRaw == "income" { return theme.income }
+                if ch == "住" || ch == "还" { return theme.accent }
+                return nil
+            }()
+            ReceiptSquareStamp(character: ch, tint: stampTint, size: size, highlighted: selected)
         } else {
             ZStack {
                 Circle()
@@ -44,12 +42,31 @@ struct RecordRow: View {
     var showDate: Bool = false
     /// 账户详情：该条记录发生后的余额文案（如「余额 ¥1,234.56」）；首页明细不传
     var runningBalanceText: String? = nil
+    /// 首页连续热敏纸：行顶虚线，代替列表分隔线
+    var showsTopRule: Bool = false
     @Environment(\.appTheme) private var theme
 
     var body: some View {
-        HStack(spacing: theme.isReceipt ? ReceiptStyle.Space.s : 12) {
-            CategoryIcon(icon: record.categoryIcon, color: record.categoryColor, size: theme.isReceipt ? 32 : 38)
-            VStack(alignment: .leading, spacing: theme.isReceipt ? ReceiptStyle.Space.xxs : 3) {
+        VStack(spacing: theme.isReceipt ? 10 : 8) {
+            // 设计稿：同一天里的两笔之间是 1pt 实线（日结单头部才是虚线）
+            if showsTopRule {
+                Rectangle().fill(theme.rule.opacity(0.75)).frame(height: 1)
+                    .accessibilityHidden(true)
+            }
+            row
+        }
+    }
+
+    private var row: some View {
+        HStack(spacing: theme.isReceipt ? 12 : 12) {
+            CategoryIcon(
+                icon: record.categoryIcon,
+                color: record.categoryColor,
+                size: theme.isReceipt ? 34 : 38,
+                name: record.isCreditRepayment ? "还款" : record.categoryName,
+                kindRaw: record.kindRaw
+            )
+            VStack(alignment: .leading, spacing: theme.isReceipt ? 3 : 3) {
                 Text(record.displayTitle)
                     .font(theme.isReceipt ? theme.rowTitleFont : theme.body(.body))
                     .foregroundStyle(theme.ink)
@@ -75,27 +92,45 @@ struct RecordRow: View {
                         Text("·")
                         Text(record.accountName)
                     }
+                    if record.kind != .transfer, !record.merchant.isEmpty, !record.note.isEmpty, record.merchant != record.note {
+                        let extra = record.displayTitle == record.merchant ? record.note : record.merchant
+                        if !extra.isEmpty {
+                            Text("·")
+                            Text(extra)
+                        }
+                    }
                     if record.source == "ocr" {
                         if theme.isReceipt {
-                            Text("[识图]")
-                                .font(theme.labelFont)
-                                .tracking(ReceiptStyle.labelTracking * 0.4)
-                                .foregroundStyle(theme.accent)
-                                .padding(.horizontal, 4).padding(.vertical, 1)
-                                .overlay(RoundedRectangle(cornerRadius: 3).strokeBorder(theme.accent.opacity(0.45), lineWidth: 1))
+                            sourceMicroTag("[识图]", tint: theme.accent)
                         } else {
                             Image(systemName: "text.viewfinder")
                         }
                     } else if record.source == "shortcut" {
-                        Image(systemName: "square.2.layers.3d")
+                        if theme.isReceipt {
+                            sourceMicroTag("[快捷]", tint: theme.faint)
+                        } else {
+                            Image(systemName: "square.2.layers.3d")
+                        }
+                    } else if record.source == "recurring" {
+                        if theme.isReceipt {
+                            sourceMicroTag("[周期]", tint: theme.faint)
+                        } else {
+                            Image(systemName: "arrow.triangle.2.circlepath")
+                        }
+                    } else if record.source == "import" {
+                        if theme.isReceipt {
+                            sourceMicroTag("[导入]", tint: theme.faint)
+                        } else {
+                            Image(systemName: "tray.and.arrow.down")
+                        }
                     }
                 }
-                .font(theme.isReceipt ? theme.metaFont : theme.body(.caption))
+                .font(theme.isReceipt ? theme.serifLabelFont : theme.body(.caption))
                 .foregroundStyle(theme.faint)
                 .lineLimit(1)
             }
             Spacer(minLength: 8)
-            VStack(alignment: .trailing, spacing: theme.isReceipt ? ReceiptStyle.Space.xxs : 3) {
+            VStack(alignment: .trailing, spacing: theme.isReceipt ? 3 : 3) {
                 Text(record.amountText)
                     .font(theme.isReceipt ? theme.rowAmountFont : theme.amount(.body, weight: .semibold))
                     .receiptDigits(theme.isReceipt)
@@ -105,14 +140,14 @@ struct RecordRow: View {
                     .foregroundStyle(theme.faint)
                 if let runningBalanceText {
                     Text(runningBalanceText)
-                        .font(.ui(.caption2))
-                        .foregroundStyle(.tertiary)
+                        .font(theme.isReceipt ? theme.labelFont : .ui(.caption2))
+                        .foregroundStyle(theme.faint.opacity(0.85))
                         .lineLimit(1)
                         .minimumScaleFactor(0.7)
                 }
             }
         }
-        .padding(.vertical, theme.isReceipt ? ReceiptStyle.Space.xxs : 2)
+        .padding(.vertical, theme.isReceipt ? 4 : 2)
         .contentShape(Rectangle())
     }
 
@@ -123,6 +158,16 @@ struct RecordRow: View {
         case .expense: return theme.ink
         case .transfer, .adjustment: return theme.faint
         }
+    }
+
+    private func sourceMicroTag(_ text: String, tint: Color) -> some View {
+        Text(text)
+            .font(theme.labelFont)
+            .foregroundStyle(tint)
+            .padding(.horizontal, 4)
+            .padding(.vertical, 1)
+            .background(RoundedRectangle(cornerRadius: 2).fill(tint.opacity(0.08)))
+            .overlay(RoundedRectangle(cornerRadius: 2).strokeBorder(tint.opacity(0.45), lineWidth: 0.9))
     }
 }
 
@@ -136,47 +181,36 @@ struct BudgetProgressView: View {
 
     var body: some View {
         let ratio = budget > 0 ? spent / budget : 0
+        let pct = Int((min(max(ratio, 0), 9.99) * 100).rounded())
         let over = ratio > 1
         if theme.isReceipt {
-            // 4.1 设计稿：OVERRUN 朱砂印 + [|····] 字符刻度 + 细条
+            // 设计稿：预算标签 + 已用百分比 + OVERRUN 朱砂印/剩余额度 + 2px 细条
             VStack(alignment: .leading, spacing: ReceiptStyle.Space.xs) {
                 HStack(alignment: .firstTextBaseline, spacing: ReceiptStyle.Space.xs) {
-                    ReceiptLabelText(text: title, color: theme.faint)
-                    Text(Money.format(budget))
+                    Text(title)
+                        .font(theme.serifLabelFont)
+                        .foregroundStyle(theme.faint)
+                    Text("\(Money.format(budget))（已用 \(pct)%）")
                         .font(theme.metaFont).monospacedDigit()
                         .foregroundStyle(theme.faint)
                     Spacer(minLength: 4)
                     if over {
-                        Text("OVERRUN · 超支 \(Money.format(spent - budget))")
-                            .font(theme.labelFont)
-                            .foregroundStyle(theme.accent)
-                            .padding(.horizontal, 6).padding(.vertical, 3)
-                            .overlay(RoundedRectangle(cornerRadius: 3).strokeBorder(theme.accent.opacity(0.55), lineWidth: 1.2))
-                            .rotationEffect(.degrees(-2))
+                        VermilionStamp(text: "OVERRUN · 超支 \(Money.format(spent - budget))")
                     } else {
                         Text("剩余 \(Money.format(budget - spent))")
                             .font(theme.metaFont).monospacedDigit()
                             .foregroundStyle(theme.ink)
+                            .contentTransition(.numericText())
                     }
                 }
                 .lineLimit(1)
                 .minimumScaleFactor(0.75)
-                HStack(spacing: 8) {
-                    Text(over ? "超支" : "剩余 \(Money.format(max(0, budget - spent)))")
-                        .font(theme.metaFont)
-                        .foregroundStyle(theme.budgetColor(ratio, threshold: 0.8))
-                    Text(Self.tickBarPublic(ratio: ratio))
-                        .font(theme.metaFont)
-                        .foregroundStyle(theme.budgetColor(ratio, threshold: 0.8))
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.5)
-                }
-                ReceiptBar(ratio: ratio, fill: theme.budgetColor(ratio, threshold: 0.8), track: theme.rule.opacity(0.6))
+                ReceiptBudgetMeter(ratio: ratio, fill: theme.budgetColor(ratio, threshold: 0.8))
             }
         } else {
             VStack(alignment: .leading, spacing: 6) {
                 HStack {
-                    Text("\(title) \(Money.format(budget))")
+                    Text("\(title) \(Money.format(budget)) · 已用 \(pct)%")
                     Spacer()
                     Text(over ? "超支 \(Money.format(spent - budget))" : "剩余 \(Money.format(budget - spent))")
                 }
@@ -215,21 +249,26 @@ struct StatBlock: View {
     let value: String
     var alignment: HorizontalAlignment = .leading
     var light: Bool = false
+    var valueColor: Color? = nil
+    /// 设计稿：首页汇总 16 / 资产盘点 15 / 统计审计 14
+    var valueSize: CGFloat = ReceiptStyle.Size.rowAmount
     @Environment(\.appTheme) private var theme
 
     var body: some View {
         VStack(alignment: alignment, spacing: theme.isReceipt ? ReceiptStyle.Space.xxs : 4) {
             if theme.isReceipt {
-                ReceiptLabelText(text: title, color: theme.faint)
+                Text(title)
+                    .font(theme.serifLabelFont)
+                    .foregroundStyle(theme.faint)
             } else {
                 Text(title)
                     .font(theme.mono(.caption))
                     .foregroundStyle(light ? theme.heroFaint : theme.faint)
             }
             Text(value)
-                .font(theme.isReceipt ? theme.rowAmountFont : theme.amount(.headline))
+                .font(theme.isReceipt ? theme.amountFont(valueSize) : theme.amount(.headline))
                 .receiptDigits(theme.isReceipt)
-                .foregroundStyle(light ? theme.heroInk : theme.ink)
+                .foregroundStyle(valueColor ?? (light ? theme.heroInk : theme.ink))
                 .lineLimit(1)
                 .minimumScaleFactor(0.6)
         }

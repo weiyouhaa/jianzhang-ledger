@@ -107,6 +107,7 @@ enum ModelMerge {
     /// 金额匹配前的规范化：全角 → 半角（ReceiptParser.normalize），再合并「1, 234.50」「12 .50」这类 OCR 空格
     static func normalizeAmounts(_ text: String) -> String {
         var s = ReceiptParser.normalize(text)
+        guard s.contains(" ") else { return s }
         for r in [spacedThousands, spacedDecimal] {
             let sep = r === spacedThousands ? "," : "."
             s = r.stringByReplacingMatches(in: s, range: NSRange(location: 0, length: (s as NSString).length), withTemplate: "$1\(sep)$2")
@@ -177,7 +178,9 @@ enum ModelMerge {
     }
 
     /// 把一条通过校验的模型结果转换成 ParsedReceipt；同金额的规则结果作为补充（日期 / 付款方式线索）
-    static func receipt(from t: ModelTransaction, ctx: Context, ruleMatch: ParsedReceipt?) -> ParsedReceipt {
+    static func receipt(from t: ModelTransaction, ctx: Context, ruleMatch: ParsedReceipt?,
+                        preLocalizedText: String? = nil, preLayout: ScreenLayout? = nil,
+                        prePreparedLines: [String]? = nil) -> ParsedReceipt {
         var r = ParsedReceipt()
         r.engine = .appleIntelligence
         r.amount = isValidAmount(t.amount) ? (t.amount * 100).rounded() / 100 : nil
@@ -186,8 +189,8 @@ enum ModelMerge {
         var kind = t.kind.lowercased()
         if kind == "repay" { kind = "cardrepayment" }
         // 先去掉「Go to Repay」「还款福利」这类按钮 / 菜单，避免误判为还款
-        let localizedText = EnglishBankTerms.localize(ctx.lines.map { EnglishBankTerms.splitGlued(ReceiptParser.stripNoise($0)) }.joined(separator: " "))
-        let layout = ScreenLayouts.detect(ctx.lines)
+        let localizedText = preLocalizedText ?? EnglishBankTerms.localize(ctx.lines.map { EnglishBankTerms.splitGlued(ReceiptParser.stripNoise($0)) }.joined(separator: " "))
+        let layout = preLayout ?? ScreenLayouts.detect(ctx.lines)
         // 原文明确是信用卡还款（还款 + 信用卡 / 银行），模型却判为普通支出：按还款处理（截图证据优先于模型的分类）
         if kind == "expense", !t.isRefund, ruleMatch?.isRefund != true,
            ruleMatch?.isCardRepayment == true || RepaymentDetector.isCardRepayment(text: localizedText) {
@@ -205,6 +208,7 @@ enum ModelMerge {
             r.transferToName = rule.transferToName
             r.transferNote = rule.transferNote
             r.accountHint = rule.transferFrom
+            r.fee = rule.fee
             r.date = rule.date
             if !t.dateText.isEmpty, let d = ReceiptParser.date(lines: [String(t.dateText.prefix(60))], now: ctx.now, calendar: ctx.calendar),
                ReceiptParser.isPlausible(d, reference: ctx.now) { r.date = d }
@@ -232,7 +236,14 @@ enum ModelMerge {
             trace("model-merchant", "模型标题是优惠 / 奖励文字 → 用规则商户")
             merchant = ""
         }
+        // 模型把「商品说明 / 项目内容」（如「拿铁」或其中一部分）当成商户，而规则已识别出真正的收付款方（如「示例咖啡」）→ 用规则收付款方，项目内容留在备注
+        if let item = ruleMatch?.itemNote, let rm = ruleMatch?.merchant, !rm.isEmpty, rm != item, !merchant.isEmpty,
+           (merchant == item || (merchant.count >= 2 && item.contains(merchant) && !rm.contains(merchant))) {
+            trace("model-merchant", "模型把项目内容当商户 → 用规则收付款方")
+            merchant = rm
+        }
         r.merchant = merchant.isEmpty ? ruleMatch?.merchant : merchant
+        r.itemNote = ruleMatch?.itemNote
         r.discountNote = ruleMatch?.discountNote
         if let p = platform, !(r.discountNote ?? "").contains(p) {
             r.discountNote = [p, r.discountNote].compactMap { $0 }.joined(separator: " · ")
@@ -248,14 +259,18 @@ enum ModelMerge {
         if !dateText.isEmpty, let d = ReceiptParser.date(lines: [dateText], now: ctx.now, calendar: ctx.calendar),
            ReceiptParser.isPlausible(d, reference: ctx.now) {
             r.date = d
-        } else {
-            r.date = ruleMatch?.date
+        } else if let rd = ruleMatch?.date {
+            r.date = rd
+        } else if dateText.isEmpty, let d = ReceiptParser.date(lines: prePreparedLines ?? ctx.lines, now: ctx.now, calendar: ctx.calendar),
+                  ReceiptParser.isPlausible(d, reference: ctx.now) {
+            r.date = d
         }
         let account = align(t.accountHint, to: ctx.accounts)
         if r.isCardRepayment {
             // 模型的语义判断优先：付款方 / 被还款卡的账户名、尾号、银行；规则结果只补缺
             r.categoryName = "信用卡还款"
             r.merchant = nil
+            r.fee = ruleMatch?.fee
             let toName = align(t.toAccountHint, to: ctx.accounts) ?? account
             let fromName = align(t.fromAccountHint, to: ctx.accounts)
             r.repaymentCardName = toName
@@ -265,13 +280,13 @@ enum ModelMerge {
             let rulePayer = ruleMatch?.isCardRepayment == true ? ruleMatch?.accountHint : nil
             let banks = t.bankNames.map { EnglishBankTerms.localize($0).trimmingCharacters(in: .whitespaces) }.filter { $0.hasSuffix("银行") }
             var card = AccountHint(type: "credit")
-            card.cardTail = verifiedTail(t.toCardTail, ctx: ctx) ?? ruleCard?.cardTail ?? split.card?.cardTail
+            card.cardTail = verifiedTail(t.toCardTail, ctx: ctx, preparedLines: prePreparedLines) ?? ruleCard?.cardTail ?? split.card?.cardTail
             // 银行以原文证据为准，其次才是模型选的账户名
             card.bankName = ruleCard?.bankName ?? split.card?.bankName ?? bank(in: t.toAccountHint) ?? (banks.count == 1 ? banks[0] : nil)
             if let ty = ruleCard?.type ?? split.card?.type { card.type = ty }
             r.repaymentCard = card
             var payer = rulePayer ?? split.payer ?? AccountHint()
-            if let tail = verifiedTail(t.fromCardTail, ctx: ctx) { payer.cardTail = tail }
+            if let tail = verifiedTail(t.fromCardTail, ctx: ctx, preparedLines: prePreparedLines) { payer.cardTail = tail }
             if payer.bankName == nil, let b = bank(in: t.fromAccountHint) { payer.bankName = b }
             if payer.bankName == nil, banks.count == 1 { payer.bankName = banks[0] }
             if payer.type == nil, payer.bankName != nil { payer.type = "debit" }
@@ -287,7 +302,7 @@ enum ModelMerge {
             } else if let c = align(PlatformCategory.map(t.categoryName) ?? t.categoryName, to: pool) {
                 r.categoryName = c
             } else {
-                r.categoryName = CategoryGuesser.guess(text: r.merchant ?? "", isIncome: r.isIncome)
+                r.categoryName = CategoryGuesser.guess(text: [r.merchant, r.itemNote].compactMap { $0 }.joined(separator: " "), isIncome: r.isIncome)
                     ?? ruleMatch?.categoryName
             }
         }
@@ -309,14 +324,19 @@ enum ModelMerge {
     }
 
     /// 模型给的尾号：必须是 4 位数字，且在原文中单独出现过（前后不是数字、不在订单号 / 交易单号那一行），防止编造或取自订单号
-    static func verifiedTail(_ raw: String, ctx: Context) -> String? {
+    static func verifiedTail(_ raw: String, ctx: Context, preparedLines: [String]? = nil) -> String? {
         guard let tail = AccountResolver.normalizeTail(raw), raw.filter(\.isNumber).count == 4 else { return nil }
-        let lines = ReceiptParser.prepare(ctx.lines.map { OCRLine($0) }).map(\.text)
-        let pattern = "(?<!\\d)\(tail)(?!\\d)"
+        let lines = preparedLines ?? ReceiptParser.prepare(ctx.lines.map { OCRLine($0) }).map(\.text)
         for (i, l) in lines.enumerated() {
             if ReceiptParser.isIDLine(l) { continue }
             if i > 0, ReceiptParser.isIDLabelOnly(lines[i - 1]), ReceiptParser.isIDValue(l) { continue }
-            if l.range(of: pattern, options: .regularExpression) != nil { return tail }
+            var searchRange = l.startIndex..<l.endIndex
+            while let r = l.range(of: tail, options: [.literal], range: searchRange) {
+                let prevIsDigit = r.lowerBound > l.startIndex && l[l.index(before: r.lowerBound)].isASCII && l[l.index(before: r.lowerBound)].isNumber
+                let nextIsDigit = r.upperBound < l.endIndex && l[r.upperBound].isASCII && l[r.upperBound].isNumber
+                if !prevIsDigit && !nextIsDigit { return tail }
+                searchRange = r.upperBound..<l.endIndex
+            }
         }
         return nil
     }
@@ -357,6 +377,9 @@ enum ModelMerge {
         let text = ctx.lines.joined(separator: "\n")
         let textNumbers = numbers(in: text)
         trace("model-validate", "原文数字 \(textNumbers.count) 个")
+        let preLocalizedText = EnglishBankTerms.localize(ctx.lines.map { EnglishBankTerms.splitGlued(ReceiptParser.stripNoise($0)) }.joined(separator: " "))
+        let layout = ScreenLayouts.detect(ctx.lines)
+        let prePreparedLines = ReceiptParser.prepare(ctx.lines.map { OCRLine($0) }).map(\.text)
         var valid: [ParsedReceipt] = []
         var dropped = 0
         var skipped = 0
@@ -410,7 +433,7 @@ enum ModelMerge {
                     trace("model-validate", "第 \(i + 1) 笔：账户间转账，跳过"); skipped += 1; continue
                 }
                 if let j = idx { usedRules.insert(j) }
-                valid.append(receipt(from: t, ctx: ctx, ruleMatch: transferRule))
+                valid.append(receipt(from: t, ctx: ctx, ruleMatch: transferRule, preLocalizedText: preLocalizedText, preLayout: layout, prePreparedLines: prePreparedLines))
                 trace("model-convert", "第 \(i + 1) 笔：自己账户间转账")
                 continue
             }
@@ -420,7 +443,7 @@ enum ModelMerge {
             }
             if let idx { usedRules.insert(idx) }
             trace("rules-apply", "第 \(i + 1) 笔：\(idx == nil ? "无" : "有")同金额规则结果")
-            valid.append(receipt(from: t, ctx: ctx, ruleMatch: idx.map { ruleItems[$0] }))
+            valid.append(receipt(from: t, ctx: ctx, ruleMatch: idx.map { ruleItems[$0] }, preLocalizedText: preLocalizedText, preLayout: layout, prePreparedLines: prePreparedLines))
             trace("model-convert", "第 \(i + 1) 笔：已转换")
         }
         let reasonList = DropReason.allCases.compactMap { r in reasons[r.title].map { "\(r.title) \($0)" } }
@@ -435,7 +458,6 @@ enum ModelMerge {
             return Outcome(receipts: rules, engine: .rules, dropped: dropped, skippedTransfers: skipped, fallbackReason: reason, dropReasons: reasonList)
         }
         // 银行推送 / 支付助手这类多卡片列表：模型漏掉的卡片用规则结果补上
-        let layout = ScreenLayouts.detect(ctx.lines)
         if dropped == 0, layout == .bankPush || layout == .payAssistant || layout == .chatTransfer, ruleItems.count > valid.count {
             let missing = ruleItems.indices.filter { !usedRules.contains($0) }.map { ruleItems[$0] }
             if !missing.isEmpty {

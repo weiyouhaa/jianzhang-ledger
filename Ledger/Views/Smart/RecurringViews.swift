@@ -8,6 +8,21 @@ struct RecurringListView: View {
     @Query(sort: \LedgerCategory.sortOrder) private var categories: [LedgerCategory]
     @Query(sort: \LedgerAccount.sortOrder) private var accounts: [LedgerAccount]
     @State private var pendingDelete: RecurringRule?
+    @State private var prefillTarget: RecordPrefill?
+
+    private func makePrefill(from rule: RecurringRule) -> RecordPrefill {
+        RecordPrefill(
+            amount: rule.amount,
+            kind: rule.kind,
+            categoryID: UUID(uuidString: rule.categoryID),
+            accountID: UUID(uuidString: rule.accountID),
+            toAccountID: UUID(uuidString: rule.toAccountID),
+            note: rule.note.isEmpty ? rule.name : rule.note,
+            merchant: rule.merchant,
+            date: Date(),
+            recurringKey: ""
+        )
+    }
 
     var body: some View {
         let keys = RecurringEngine.existingKeys(in: context)
@@ -22,8 +37,18 @@ struct RecurringListView: View {
             Section {
                 HStack {
                     StatBlock(title: "本月预计支出", value: Money.format(monthExpense))
+                        .contentTransition(.numericText(value: monthExpense))
+                        .animation(.snappy(duration: 0.24), value: monthExpense)
+                    Spacer()
+                    let netRecurring = monthIncome - monthExpense
+                    let netPrefix = netRecurring >= 0 ? "+" : "-"
+                    StatBlock(title: "本月预计净流向", value: netPrefix + Money.format(abs(netRecurring)), alignment: .center)
+                        .contentTransition(.numericText(value: netRecurring))
+                        .animation(.snappy(duration: 0.24), value: netRecurring)
                     Spacer()
                     StatBlock(title: "本月预计收入", value: Money.format(monthIncome), alignment: .trailing)
+                        .contentTransition(.numericText(value: monthIncome))
+                        .animation(.snappy(duration: 0.24), value: monthIncome)
                 }
                 .padding(.vertical, 4)
             } footer: { ThemedSectionFooter {
@@ -44,13 +69,51 @@ struct RecurringListView: View {
                         }
                         .swipeActions(edge: .trailing, allowsFullSwipe: false) {
                             Button(role: .destructive) { pendingDelete = rule } label: { Label("删除", systemImage: "trash") }
+                            Button {
+                                rule.isPaused.toggle()
+                                try? context.save()
+                                Task { await NotificationManager.shared.rescheduleRecurring(in: context) }
+                            } label: {
+                                Label(rule.isPaused ? "恢复" : "暂停", systemImage: rule.isPaused ? "play.fill" : "pause.fill")
+                            }
+                            .tint(.orange)
+                        }
+                        .swipeActions(edge: .leading, allowsFullSwipe: true) {
+                            Button {
+                                prefillTarget = makePrefill(from: rule)
+                            } label: {
+                                Label("记一笔", systemImage: "plus.circle.fill")
+                            }
+                            .tint(Color.themeAccent)
+                        }
+                        .contextMenu {
+                            Button {
+                                prefillTarget = makePrefill(from: rule)
+                            } label: {
+                                Label("立即记一笔", systemImage: "plus.circle")
+                            }
+                            Button {
+                                rule.isPaused.toggle()
+                                try? context.save()
+                                Task { await NotificationManager.shared.rescheduleRecurring(in: context) }
+                            } label: {
+                                Label(rule.isPaused ? "恢复周期账单" : "暂停周期账单", systemImage: rule.isPaused ? "play.circle" : "pause.circle")
+                            }
+                            Button(role: .destructive) {
+                                pendingDelete = rule
+                            } label: {
+                                Label("删除", systemImage: "trash")
+                            }
                         }
                     }
-                } header: { ThemedSectionHeader { Text("全部 \(rules.count) 项") } }
+                } header: { ThemedSectionHeader { Text("全部 \(rules.count) 项（启用 \(active.count) 项）") } }
             }
         }
         .navigationTitle("周期账单")
         .navigationBarTitleDisplayMode(.inline)
+        .sheet(item: $prefillTarget) { p in
+            RecordEditorView(record: nil, initialDate: p.date, initialKind: p.kind, prefill: p)
+        }
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
                 NavigationLink {

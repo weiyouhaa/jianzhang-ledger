@@ -88,7 +88,9 @@ enum ModelPromptBuilder {
         "back", "done", "close", "more", "share", "cancel", "help", "faq", "customer service", "contact us",
         "联系客服", "联系商家", "联系收款方", "对此订单有疑问", "对此账单有疑问", "常见问题", "查看帮助", "申请电子回单",
         "申请转账电子回单", "查看往来转账", "查看往来记录", "查看往来", "发起群收款", "查看更多", "去评价", "去看看", "去使用",
-        "立即领取", "立即查看", "了解更多", "账单服务", "本服务由财付通提供", "本服务由支付宝提供", "查看账单详情", "更多操作",
+        "立即领取", "立即查看", "了解更多", "账单服务", "本服务由财付通提供", "本服务由支付宝提供", "本服务由中国银联提供",
+        "由网联清算有限公司提供收款清算服务", "在此商户的交易", "进入商家小程序", "我要开发票", "开发票", "扫码点餐", "再来一单",
+        "查看账单详情", "更多操作",
     ]
 
     struct Cleaned: Equatable {
@@ -143,28 +145,35 @@ enum ModelPromptBuilder {
         ("BCM", "交通银行"), ("BOC", "中国银行"), ("CIB", "兴业银行"), ("CEB", "光大银行"), ("SPDB", "浦发银行"), ("CITIC", "中信银行"),
         ("PSBC", "邮储银行"), ("GDB", "广发银行"), ("CGB", "广发银行"), ("PAB", "平安银行"),
     ]
+    private static let bankAbbrRegexes: [(NSRegularExpression, String, String)] = bankAbbreviations.map {
+        (try! NSRegularExpression(pattern: "(?<![A-Za-z])\($0.0)(?![A-Za-z])"), $0.0, $0.1)
+    }
+    private static let wordRe = re(#"[A-Za-z]{4,}"#)
+    private static let consumptionRe = re(#"consumption|交易类型\s*[:：]?\s*消费|付款成功"#)
+    private static let repayStrictRe = re(#"还款|还信用卡|repay"#)
+    private static let repayBroadRe = re(#"还款|还信用卡|repay|credit\s*card"#)
 
     static func isEnglishHeavy(_ lines: [String]) -> Bool {
-        let word = re(#"[A-Za-z]{4,}"#)
-        return lines.filter { word.firstMatch(in: $0, range: NSRange(location: 0, length: ($0 as NSString).length)) != nil }.count >= 3
+        lines.filter { wordRe.firstMatch(in: $0, range: NSRange(location: 0, length: ($0 as NSString).length)) != nil }.count >= 3
     }
 
     static func looksLikeRepayment(_ lines: [String]) -> Bool {
         // 「Go to Repay」「还款福利」是按钮 / 菜单；明确是消费（Consumption / 交易类型 消费）时卡号里的 credit card 不算
         let stripped = lines.map { ReceiptParser.stripNoise($0) }
-        let consumption = stripped.contains { $0.range(of: #"(?i)consumption|交易类型\s*[:：]?\s*消费|付款成功"#, options: .regularExpression) != nil }
-        let r = re(consumption ? #"还款|还信用卡|repay"# : #"还款|还信用卡|repay|credit\s*card"#)
+        let consumption = stripped.contains { consumptionRe.firstMatch(in: $0, range: NSRange(location: 0, length: ($0 as NSString).length)) != nil }
+        let r = consumption ? repayStrictRe : repayBroadRe
         return stripped.contains { r.firstMatch(in: $0, range: NSRange(location: 0, length: ($0 as NSString).length)) != nil }
     }
 
     /// 文字中出现的银行英文缩写（整词匹配）
     static func banksMentioned(_ lines: [String]) -> [(String, String)] {
         let text = lines.joined(separator: " ")
+        let ns = text as NSString
+        let full = NSRange(location: 0, length: ns.length)
         var seen = Set<String>()
         var out: [(String, String)] = []
-        for (abbr, name) in bankAbbreviations {
-            let r = try! NSRegularExpression(pattern: "(?<![A-Za-z])\(abbr)(?![A-Za-z])")
-            if r.firstMatch(in: text, range: NSRange(location: 0, length: (text as NSString).length)) != nil, seen.insert(abbr).inserted {
+        for (r, abbr, name) in bankAbbrRegexes {
+            if r.firstMatch(in: text, range: full) != nil, seen.insert(abbr).inserted {
                 out.append((abbr, name))
             }
         }
@@ -179,16 +188,14 @@ enum ModelPromptBuilder {
         let income = incomeCategories.prefix(max(4, level.maxCategories / 2)).map { short($0, 8) }
         let accts = accounts.prefix(level.maxAccounts).map { short($0, 14) }
         var s = """
-        你是记账助手，从支付截图的 OCR 文字提取交易。
-        - amount：实际支付金额（大字 / 带 ± 的金额 / 实付 / Actual Payment / Paid），取正数，不得计算；有订单金额与实付时取实付；忽略余额、额度、优惠立减、积分、广告、单号、卡号；优惠不要记成另一笔。
-        - merchant：商户/收款方/对方名称或商品（优先「商户」「商家」「收款方」「对方」「商品说明」「Merchant」「Payee」后面的文字，或大字金额旁的店名）；绝不能是优惠/活动文字（满减、立减、已优惠、优惠券、红包、抵扣、折扣、返现、积分、会员价、领取、去使用、discount、coupon、cashback、save、off、promo、reward、points），没有就留空；也不能是这类行的一部分（如「碰一下立减」里的「碰一下」）或 Bonus/积分行；双栏详情页里优惠行的名字（左栏红字）只进备注。
-        - kind：付款/消费/支付成功/转给他人=expense；收款/到账=income；退款/退货/退回/撤销/冲正/返还/refund/reversal=income 且 refund=true；信用卡/花呗还款=repay；余额宝/零钱通转入转出、充值、提现、自己账户互转=transfer。
-        - 还款/转账：from=付款账户，to=被还款卡或收款账户，fromTail/toTail=对应卡号末 4 位，banks=截图中的银行；要同银行同卡种，不确定就留空。
-        - 多笔按从上到下各输出一次。★ 表示大字。没有的字段留空。
+        从支付截图OCR提取交易：
+        - amount：取实付正数（★大字/实付），忽略余额、额度、订单原价、优惠、单号。
+        - merchant：收付款方或商户名；绝不能是优惠/活动/积分文字（满减、立减、已优惠、券、红包、返现、Save、off等），没有留空。
+        - kind：消费/付款/支付成功=expense；收款=income；退款/退货/冲正/refund=refund（或income且refund=true）；还信用卡/花呗=repay；充值/提现/余额宝/零钱通互转=transfer。
         """
-        if level == .normal { s += "\n- date 原样抄写交易时间文字（不要抄顶部状态栏的时钟、单号）。" }
-        s += "\n分类（category 只能选）：支出 \(expense.joined(separator: "、"))；收入 \(income.joined(separator: "、"))。还款不填分类。"
-        s += "\n账户（account/from/to 只能选，或留空）：\(accts.isEmpty ? "无" : accts.joined(separator: "、"))"
+        if level == .normal { s += "\n- 还款填from(付款账户)/to(被还款卡)/fromTail/toTail/banks；date抄交易时间。" }
+        s += "\n分类：支出 \(expense.joined(separator: "、"))；收入 \(income.joined(separator: "、"))。"
+        s += "\n账户：\(accts.isEmpty ? "无" : accts.joined(separator: "、"))"
         return s
     }
 
@@ -278,6 +285,32 @@ enum ModelPromptBuilder {
                            keptLines: body.count, noiseLines: cleaned.noise, truncatedLines: truncated,
                            estimatedTokens: estimateTokens(instructions) + schemaTokenEstimate + estimateTokens(prompt),
                            source: scr.tag, glossary: glossary(for: scr, level: level) != nil)
+    }
+
+    /// 单笔普通消费/收款/退款/互转的极速提示词（已由 ReceiptParser.prepare 完成英文转中文，省略冗余对照表，严格控制输入在 ~250 tokens 内）
+    static func buildFastSingle(lines raw: [OCRLine], instructions: String, level: PromptLevel, screen: PaymentScreen? = nil) -> ModelPrompt {
+        let cleaned = clean(raw)
+        let scr = screen ?? PaymentScreenDetector.detect(raw.map(\.text))
+        let maxLines = min(level.maxLines, 16)
+        let maxChars = min(level.maxChars, 380)
+        let lineLimit = min(level.maxLineChars, 56)
+        var body: [String] = []
+        var chars = 0
+        var truncated = 0
+        for l in cleaned.lines {
+            var t = String(l.text.prefix(lineLimit))
+            if l.height >= 0.03 { t = "★" + t }
+            if body.count >= maxLines || chars + t.count + 1 > maxChars { truncated += 1; continue }
+            body.append(t)
+            chars += t.count + 1
+        }
+        let header = (scr.app != .unknown || scr.layout != .none) ? "来源：\(scr.tag)\n" : ""
+        let prompt = header + "OCR：\n" + body.joined(separator: "\n")
+        let fastSchemaTokens = 60
+        return ModelPrompt(level: level, instructions: instructions, prompt: prompt, totalLines: raw.count,
+                           keptLines: body.count, noiseLines: cleaned.noise, truncatedLines: truncated,
+                           estimatedTokens: estimateTokens(instructions) + fastSchemaTokens + estimateTokens(prompt),
+                           source: scr.tag, glossary: false)
     }
 }
 

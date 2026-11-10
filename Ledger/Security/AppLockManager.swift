@@ -18,7 +18,7 @@ final class AppLockManager: ObservableObject {
     @Published var unlockMethod: UnlockMethod {
         didSet { UserDefaults.standard.set(unlockMethod.rawValue, forKey: Keys.unlockMethod) }
     }
-    /// 「密码」方式下，锁屏是否显示一个小的面容 ID 按钮（默认关）
+    /// 「密码」方式下，锁屏是否显示一个小的面容 ID 按钮（默认开）
     @Published var showBiometricButton: Bool {
         didSet { UserDefaults.standard.set(showBiometricButton, forKey: Keys.biometricButton) }
     }
@@ -65,15 +65,22 @@ final class AppLockManager: ObservableObject {
             passcodeEnabled = enabled
             isLocked = enabled
         }
-        biometricsEnabled = UserDefaults.standard.bool(forKey: Keys.biometrics)
+        let enabledBiometrics = UserDefaults.standard.bool(forKey: Keys.biometrics)
+        biometricsEnabled = enabledBiometrics
         gracePeriod = UserDefaults.standard.object(forKey: Keys.grace) as? Int ?? 0
         unlockMethod = UnlockMethod(rawValue: UserDefaults.standard.string(forKey: Keys.unlockMethod) ?? "") ?? .passcode
-        showBiometricButton = UserDefaults.standard.bool(forKey: Keys.biometricButton)
+        if !UserDefaults.standard.bool(forKey: "migration.biometricButtonDefault.v1") {
+            UserDefaults.standard.set(true, forKey: "migration.biometricButtonDefault.v1")
+            if UserDefaults.standard.object(forKey: Keys.biometricButton) == nil || enabledBiometrics {
+                UserDefaults.standard.set(true, forKey: Keys.biometricButton)
+            }
+        }
+        showBiometricButton = (UserDefaults.standard.object(forKey: Keys.biometricButton) as? Bool) ?? true
     }
 
     /// 锁屏上是否显示面容 ID 按钮
     var showsBiometricOnLockScreen: Bool {
-        guard biometricsEnabled, canUseBiometrics else { return false }
+        guard biometricsEnabled else { return false }
         return unlockMethod == .autoBiometric || showBiometricButton
     }
 
@@ -149,19 +156,19 @@ final class AppLockManager: ObservableObject {
 
     var biometryName: String {
         switch biometryType {
-        case .faceID: return "面容 ID"
         case .touchID: return "触控 ID"
         case .opticID: return "Optic ID"
-        default: return "生物识别"
+        case .faceID, .none: return "面容 ID"
+        @unknown default: return "面容 ID"
         }
     }
 
     var biometryIcon: String {
         switch biometryType {
-        case .faceID: return "faceid"
         case .touchID: return "touchid"
         case .opticID: return "opticid"
-        default: return "lock.shield"
+        case .faceID, .none: return "faceid"
+        @unknown default: return "faceid"
         }
     }
 
@@ -170,7 +177,7 @@ final class AppLockManager: ObservableObject {
     }
 
     func tryBiometricUnlock() {
-        guard isLocked, passcodeEnabled, biometricsEnabled, canUseBiometrics, !isAuthenticatingBiometrics else { return }
+        guard isLocked, passcodeEnabled, biometricsEnabled, !isAuthenticatingBiometrics else { return }
         isAuthenticatingBiometrics = true
         Task {
             let ok = await evaluateBiometrics(reason: "解锁简账")

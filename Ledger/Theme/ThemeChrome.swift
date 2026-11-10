@@ -9,9 +9,21 @@ import UIKit
 // 皮肤存在 UserDefaults.standard（设备级），真实 / 防窥共用，不会暴露当前模式。
 
 extension AppSkin {
+    /// 默认启动皮肤：正常安装打开直接进入「小票」皮肤；自动化截图/测试（-UIScreenshotDemo 且未显式指定 -appearance.skin）保持 default 兼容原有表单测试。
+    static var defaultSkinRaw: String {
+        let args = CommandLine.arguments
+        if let idx = args.firstIndex(of: "-appearance.skin"), idx + 1 < args.count {
+            return stored(args[idx + 1]).rawValue
+        }
+        if args.contains("-UIScreenshotDemo") {
+            return AppSkin.default.rawValue
+        }
+        return AppSkin.receipt.rawValue
+    }
+
     /// 当前皮肤（设备级设置）
     static var current: AppSkin {
-        stored(UserDefaults.standard.string(forKey: SettingsKey.skin) ?? AppSkin.default.rawValue)
+        stored(UserDefaults.standard.string(forKey: SettingsKey.skin) ?? defaultSkinRaw)
     }
 }
 
@@ -85,7 +97,7 @@ extension Color {
 
 /// 小票皮肤下：注入主题、强调色、文字颜色（.secondary 等层级色随之变成暖灰）、默认打字机字体
 struct ThemedChrome: ViewModifier {
-    @AppStorage(SettingsKey.skin, store: .standard) private var skinRaw = AppSkin.default.rawValue
+    @AppStorage(SettingsKey.skin, store: .standard) private var skinRaw = AppSkin.defaultSkinRaw
     @Environment(\.colorScheme) private var scheme
 
     func body(content: Content) -> some View {
@@ -96,16 +108,16 @@ struct ThemedChrome: ViewModifier {
                 .tint(theme.accent)
                 .foregroundStyle(theme.ink)
                 .font(.ui(.body))
-        } else {
+            } else {
             content
-        }
+            }
     }
 }
 
 /// 替代 Form：默认皮肤就是原来的 Form；小票皮肤换纸色行、虚线色分隔、暖色页面底
 struct ThemedForm<Content: View>: View {
     private let content: Content
-    @AppStorage(SettingsKey.skin, store: .standard) private var skinRaw = AppSkin.default.rawValue
+    @AppStorage(SettingsKey.skin, store: .standard) private var skinRaw = AppSkin.defaultSkinRaw
     @Environment(\.colorScheme) private var scheme
 
     init(@ViewBuilder content: () -> Content) { self.content = content() }
@@ -124,14 +136,14 @@ struct ThemedForm<Content: View>: View {
             .modifier(ThemedChrome())
         } else {
             Form { content }
-        }
+            }
     }
 }
 
 /// 替代 List：同 ThemedForm
 struct ThemedList<Content: View>: View {
     private let content: Content
-    @AppStorage(SettingsKey.skin, store: .standard) private var skinRaw = AppSkin.default.rawValue
+    @AppStorage(SettingsKey.skin, store: .standard) private var skinRaw = AppSkin.defaultSkinRaw
     @Environment(\.colorScheme) private var scheme
 
     init(@ViewBuilder content: () -> Content) { self.content = content() }
@@ -150,7 +162,7 @@ struct ThemedList<Content: View>: View {
             .modifier(ThemedChrome())
         } else {
             List { content }
-        }
+            }
     }
 }
 
@@ -237,7 +249,12 @@ enum ThemeChrome {
         let tabs = UITabBarAppearance()
         tabs.configureWithOpaqueBackground()
         tabs.backgroundColor = ui(.paper)
-        tabs.shadowColor = .clear
+        // 纸质导航条和页面底分开，接近设计稿悬浮纸栏的投影
+        tabs.shadowColor = UIColor { trait in
+            trait.userInterfaceStyle == .dark
+                ? UIColor(white: 0, alpha: 0.55)
+                : UIColor(red: 0.12, green: 0.09, blue: 0.06, alpha: 0.18)
+        }
         for item in [tabs.stackedLayoutAppearance, tabs.inlineLayoutAppearance, tabs.compactInlineLayoutAppearance] {
             item.normal.iconColor = faint
             item.normal.titleTextAttributes = [.font: mono(10), .foregroundColor: faint]

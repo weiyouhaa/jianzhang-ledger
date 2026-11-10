@@ -62,11 +62,16 @@ struct PasscodePad: View {
         case "bio":
             if let biometricIcon, let onBiometric {
                 Button(action: onBiometric) {
-                    Image(systemName: biometricIcon).font(.ui(.title))
+                    Image(systemName: biometricIcon)
+                        .font(.system(size: 28, weight: .regular))
+                        .foregroundStyle(Color.themeAccent)
                         .frame(width: 76, height: 76)
+                        .contentShape(Circle())
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(PadButtonStyle())
                 .disabled(disabled)
+                .accessibilityLabel("面容 ID 解锁")
+                .accessibilityIdentifier("lock-biometric-button")
             } else {
                 Color.clear.frame(width: 76, height: 76)
             }

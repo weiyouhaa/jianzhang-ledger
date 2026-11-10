@@ -36,13 +36,25 @@ struct ImportPreviewView: View {
     @State private var editingID: Int?
     @State private var errorMessage: String?
     @State private var didLoad = false
+    @State private var searchText = ""
 
     private var chosen: [ImportItem] { items.filter { $0.include && $0.canImport } }
 
+    private func filterItems(_ list: [ImportItem]) -> [ImportItem] {
+        let q = searchText.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !q.isEmpty else { return list }
+        return list.filter {
+            $0.entry.merchant.lowercased().contains(q)
+            || $0.entry.memo.lowercased().contains(q)
+            || $0.entry.method.lowercased().contains(q)
+            || String(format: "%.2f", $0.entry.amount).contains(q)
+        }
+    }
+
     var body: some View {
-        let newItems = items.filter { $0.status == .new }
-        let dupItems = items.filter { if case .likelyDuplicate = $0.status { return true }; return $0.status == .imported }
-        let skipped = items.filter { $0.status.isSkipped }
+        let newItems = filterItems(items.filter { $0.status == .new })
+        let dupItems = filterItems(items.filter { if case .likelyDuplicate = $0.status { return true }; return $0.status == .imported })
+        let skipped = filterItems(items.filter { $0.status.isSkipped })
         NavigationStack {
             ThemedList {
                 Section { summaryCard(new: newItems.count, dup: dupItems.count, skipped: skipped.count) }
@@ -64,11 +76,14 @@ struct ImportPreviewView: View {
             }
             .navigationTitle("导入\(session.result.source.title)账单")
             .navigationBarTitleDisplayMode(.inline)
+            .searchable(text: $searchText, prompt: "搜索待导入商户、商品或金额")
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("取消") { dismiss() } }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("导入 \(chosen.count) 笔", action: commit)
                         .fontWeight(.semibold)
+                        .contentTransition(.numericText())
+                        .animation(.snappy(duration: 0.22), value: chosen.count)
                         .disabled(chosen.isEmpty)
                 }
             }
@@ -141,9 +156,27 @@ struct ImportPreviewView: View {
     }
 
     private func itemSection(_ title: String, _ list: [ImportItem]) -> some View {
-        Section {
+        let importable = list.filter(\.canImport)
+        let allIncluded = !importable.isEmpty && importable.allSatisfy(\.include)
+        return Section {
             ForEach(list) { item in row(item) }
-        } header: { ThemedSectionHeader { Text("\(title)（\(list.count)）") } }
+        } header: { ThemedSectionHeader {
+            HStack {
+                Text("\(title)（\(list.count)）")
+                Spacer()
+                if !importable.isEmpty {
+                    Button(allIncluded ? "取消全选" : "全选本组") {
+                        let ids = Set(importable.map(\.id))
+                        let target = !allIncluded
+                        for i in items.indices where ids.contains(items[i].id) && items[i].canImport {
+                            items[i].include = target
+                        }
+                    }
+                    .font(.caption.weight(.semibold))
+                    .textCase(nil)
+                }
+            }
+        } }
     }
 
     private func row(_ item: ImportItem) -> some View {

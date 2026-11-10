@@ -85,6 +85,20 @@ struct DedupeView: View {
         }
         .navigationTitle("一键去重")
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            if isReal && !groups.isEmpty {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("重置选择") {
+                        ReceiptHaptics.selection()
+                        withAnimation(.snappy(duration: 0.22)) {
+                            keepIDs = Dictionary(uniqueKeysWithValues: groups.map { ($0.id, Set([$0.suggestedKeepID])) })
+                        }
+                    }
+                    .font(.subheadline)
+                    .accessibilityIdentifier("dedupe-reset-selection")
+                }
+            }
+        }
         .bottomActionBar(isPresented: isReal && !groups.isEmpty) {
             HStack(spacing: 12) {
                 Button {
